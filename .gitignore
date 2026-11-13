@@ -1,0 +1,31 @@
+# Build output
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+.vs/
+.idea/
+TestResults/
+*.trx
+coverage*/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
+# Local configuration and secrets — never commit
+.env
+secrets/
+!secrets/.gitkeep
+data/
+backups/
+*.pfx
+*.pem
+*.key
+appsettings.Local.json
+
+# OS
+.DS_Store
+Thumbs.db

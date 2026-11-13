@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>EasyPatch.Tests</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>$(NoWarn);CA1707;CA2000;CA1001;CA1063;CA1816;CA2213;CA1849;CA1835;xUnit1051</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\API\EasyPatch.Api.csproj" />
+    <ProjectReference Include="..\Worker\EasyPatch.Worker.csproj" Aliases="WorkerHost" />
+    <ProjectReference Include="..\..\agent\EasyPatch.Agent.Core\EasyPatch.Agent.Core.csproj" />
+    <ProjectReference Include="..\..\agent\EasyPatch.Communication\EasyPatch.Communication.csproj" />
+  </ItemGroup>
+</Project>

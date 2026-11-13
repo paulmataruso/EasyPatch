@@ -1,0 +1,181 @@
+# EasyPatch Security Model and Threat Model
+
+The EasyPatch server is exposed to the internet and manages software installation on
+customer computers. Security is designed around one principle:
+
+> **A compromised server must not become a remote-code-execution channel into customer networks.**
+
+The agent only performs a fixed set of operations: Windows Update Agent (WUA) scan, download
+and install, plus inventory collection. It installs only updates that WUA offers from the
+endpoint's own configured source (Windows Update, Microsoft Update or the customer's WSUS
+server). Those updates are signed by Microsoft and their signatures are checked by Windows.
+There is no shell, no script execution, no file push and no automatic reboot.
+
+## Assets
+
+| Asset | Where it lives | Protection |
+|---|---|---|
+| Admin credentials | `users.password_hash` | Argon2id (m=19 MiB, t=2, p=1). Login rate limits and account lockout. |
+| MFA secrets | `users.mfa_secret_protected` | ASP.NET Data Protection; the keys are in a separate volume |
+| Admin sessions | Browser cookie and `user_sessions` | Random 256-bit token, only its SHA-256 is stored. `__Host-` cookie that is `Secure`, `HttpOnly` and `SameSite=Strict`. Idle and absolute expiry. Can be revoked. |
+| Agent private keys | Endpoint `C:\ProgramData\EasyPatch\agent.key` | Generated on the device and never transmitted. DPAPI (LocalMachine). Directory ACL allows only SYSTEM and Administrators. |
+| Agent public keys | `agent_credentials` | Not secret. Expire and can be revoked. |
+| Enrollment tokens | `enrollment_tokens.token_hash` | 256-bit random value shown once. Only the SHA-256 is stored. Expiring, use-limited and revocable. |
+| Database | `pgdata` volume | Internal network only, password provided as a Compose secret |
+
+## Admin authentication
+
+* **Passwords.** Minimum length is 12 characters. The password must not contain the username.
+  There are no composition rules, following NIST SP 800-63B.
+* **Rate limits and lockout.** Login is limited to 10 attempts per minute per IP. Five
+  consecutive failures lock the account, starting at 15 minutes and doubling, capped at
+  24 hours.
+* **Multi-factor authentication (MFA).** TOTP (RFC 6238, SHA-1, 6 digits, 30 s step, ±1 step
+  tolerance). A time step can only be used once.
+  * MFA is **required by default** (`RequireMfa` in server settings). Users without MFA can
+    only enroll MFA until they do.
+  * Users get 10 single-use recovery codes, stored hashed.
+* **Sessions.**
+  * Server-side and revocable, either individually or all at once.
+  * Changing your password revokes all your other sessions.
+  * Defaults: 30-minute idle timeout, 12-hour absolute lifetime.
+* **CSRF.** Session cookies use `SameSite=Strict`. In addition, every unsafe method must send
+  an `X-XSRF-TOKEN` header that matches an HMAC of the session ID. That value is delivered in
+  a JavaScript-readable `XSRF-TOKEN` cookie.
+* **Bootstrap and recovery.** No first-run web page exists. The first Super Administrator is
+  created with `docker compose run --rm api create-admin`. Password resets are either
+  administrator-issued one-time links (valid 60 minutes) or the `reset-password` CLI command.
+* **Roles.**
+
+  | Role | Permissions |
+  |---|---|
+  | SuperAdmin | Everything, including users, server settings and the lifecycle table |
+  | Admin | Organizations, sites, endpoints, jobs, policies, enrollment |
+  | ReadOnly | View only |
+
+  The `user_organization_access` table restricts a non-SuperAdmin user to specific
+  organizations. Every admin query goes through one tenant-scope service.
+
+## Agent enrollment
+
+There are two ways to enroll an agent.
+
+1. **Enrollment token** (`msiexec … ENROLLMENTTOKEN=…`). A token is valid for one organization
+   (and optionally one site). It expires (default 24 h, maximum 30 days) and is limited to a
+   number of uses (default 1). Administrators can revoke it. Enrollment is rate-limited to
+   10 requests per minute per IP.
+2. **Deployment code with approval** (the tokenless PowerShell/RMM install).
+   * The deployment code is a non-secret routing identifier. On its own it grants nothing.
+   * The agent enrolls with its public key, which creates a **pending request**. The agent
+     then polls a signed status endpoint. No endpoint or credential exists until an
+     administrator approves the request in the GUI.
+   * The administrator sees the hostname, serial number, manufacturer and model, OS, agent
+     version, source IP and the **key fingerprint**. The agent also writes the fingerprint to
+     its install log and the Application event log, so an RMM script can display it for
+     comparison.
+   * Limits:
+     * Pending requests per code are capped (default 500).
+     * Requests expire after 7 days.
+     * An optional source CIDR allow-list can restrict where requests come from.
+     * The code can be revoked.
+   * A leaked code therefore lets an attacker add entries to the approval queue, and nothing
+     more.
+
+The MSI marks `ENROLLMENTTOKEN` as a hidden property, so it is not written to MSI logs. It
+stores bootstrap values in `HKLM\SOFTWARE\EasyPatch\Agent` with an ACL that allows only
+SYSTEM and Administrators. The agent deletes the token after it enrolls successfully.
+
+## Agent request signing
+
+Every agent request after enrollment carries these headers:
+
+```
+X-EasyPatch-Credential:     c_… (or r_… for a pending enrollment request)
+X-EasyPatch-Timestamp:      Unix seconds
+X-EasyPatch-Nonce:          128-bit random, base64url
+X-EasyPatch-Content-SHA256: lowercase hex SHA-256 of the exact body bytes
+X-EasyPatch-Signature:      base64 ECDSA P-256 / SHA-256 signature (IEEE P1363 format)
+```
+
+The signature covers this canonical string, with lines joined by `\n`:
+
+```
+EASYPATCH-ECDSA-P256-SHA256
+<HTTP METHOD>
+<path and query exactly as sent>
+<timestamp>
+<nonce>
+<content sha256>
+<credential id>
+```
+
+The server enforces the following:
+
+* The timestamp is within ±300 s. A rejection includes the server time so that an agent with
+  a skewed clock can correct its offset.
+* Each nonce is accepted once per credential within the timestamp window (in-memory cache).
+* The body hash matches.
+* The signature verifies against the stored public key.
+* The credential is not expired or revoked, and the endpoint is active.
+
+The authenticated principal carries the endpoint ID and the organization ID. Every agent
+endpoint scopes its reads and writes to that endpoint ID. Jobs are checked against the
+endpoint before they are acknowledged or updated. An agent can never reference another
+endpoint or organization.
+
+**Rotation.** Credentials expire after 365 days by default. Check-in responses ask the agent
+to rotate once a credential is within 30 days of expiry. The agent creates a new key and
+calls `credentials/rotate`, signed with the old key. The old credential stays valid for one
+hour so requests already in flight still succeed. Rotation is idempotent per public key.
+
+**Revocation.** An administrator can revoke an endpoint. All its credentials are revoked
+immediately, the credential cache is evicted, and the agent stops calling and backs off.
+Re-enrolling requires a new token or approval.
+
+**Why signing instead of client certificates.** Mutual TLS behind Caddy would conflict with
+its automatic certificate management. Bearer tokens or HMAC keys would require the server to
+store reusable secrets. Signing gives per-device asymmetric authentication with replay
+protection, and the server holds nothing that would let an attacker impersonate an agent.
+
+## Threat model (STRIDE summary)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| S1 | Attacker impersonates an agent | Per-device ECDSA keys, signed requests, nonce and timestamp checks, revocation |
+| S2 | Attacker impersonates the server to an agent | The agent uses normal Windows TLS validation of the server certificate (the public CA from Caddy's ACME). TLS validation cannot be turned off. |
+| S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory TOTP |
+| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select WUA updates by GUID or category, never arbitrary binaries. |
+| T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |
+| T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |
+| R1 | Admin actions are denied after the fact | `audit_logs` records the user, IP, correlation ID and details of every mutating admin action |
+| I1 | Tenant data leaks between organizations | One tenant-scope service, organization-filtered queries and integration tests for isolation |
+| I2 | Secrets appear in logs | Tokens and keys are never logged. MSI properties are hidden. Structured logs leave out request bodies. |
+| I3 | Database exposure | No published port, internal Docker network, Compose secret for the password |
+| D1 | Check-in floods | Per-credential and per-IP rate limits, request size limits, jitter |
+| D2 | Enrollment queue spam | A deployment code is required, pending requests are capped and expire, per-IP rate limit |
+| E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability, and update sources are controlled by Windows. Agent self-update is **not implemented**. When it is, it must verify Authenticode against a publisher identity pinned in the agent, not a hash supplied by the server. |
+| E2 | A local non-admin user reads agent secrets | ProgramData ACL (SYSTEM and Administrators), DPAPI, registry ACL on bootstrap values |
+| E3 | Cross-site request forgery or XSS in the admin UI | SameSite=Strict, CSRF header check, a strict CSP from Caddy, and React escaping |
+
+## Server hardening checklist
+
+* TLS 1.2 minimum (Caddy default; TLS 1.3 is preferred automatically). HSTS is enabled.
+* Security headers: CSP, `X-Content-Type-Options`, `X-Frame-Options: DENY`,
+  `Referrer-Policy`, `Permissions-Policy`.
+* CORS: none. The SPA is served from the same origin, so no cross-origin access is allowed.
+* Containers run as non-root, with a read-only root filesystem, `no-new-privileges` and
+  pinned images.
+* OpenAPI and Swagger UI are only available to signed-in administrators.
+* Dependency scanning: `scripts/audit-dependencies.sh` runs `dotnet list package --vulnerable`
+  and `npm audit`.
+
+## Known limitations
+
+* The nonce replay cache is in memory, so the documented deployment runs a single API
+  replica. Running several replicas would need a shared nonce store.
+* Consumer Windows 10 ESU enrollment (through a Microsoft account) cannot be detected
+  reliably. Volume-license ESU keys are detected through licensing WMI. Administrators can
+  set ESU status manually.
+* The server cannot verify the Authenticode signatures of agent MSIs it hosts. The generated
+  PowerShell installer verifies the SHA-256 and, optionally, the Authenticode signature on
+  the endpoint.

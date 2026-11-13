@@ -1,0 +1,570 @@
+using EasyPatch.Contracts;
+using EasyPatch.Core.Entities;
+
+namespace EasyPatch.Api.Contracts;
+
+// Administrator API data transfer objects. JSON is camelCase with string enums (see ContractJson).
+
+public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount);
+
+// ---------------------------------------------------------------------------------------------
+// Authentication and account
+// ---------------------------------------------------------------------------------------------
+
+public sealed record LoginRequest(string Username, string Password);
+
+public sealed record LoginResponse(bool MfaRequired, bool MfaSetupRequired, CurrentUserDto User);
+
+public sealed record MfaCodeRequest(string Code);
+
+public sealed record CurrentUserDto(
+    Guid Id,
+    string Username,
+    string Email,
+    UserRole Role,
+    bool MfaEnabled,
+    bool MfaCompleted,
+    bool MfaSetupRequired,
+    bool MustChangePassword,
+    IReadOnlyList<Guid> OrganizationIds,
+    DateTimeOffset? LastLoginAt);
+
+public sealed record MfaSetupResponse(string Secret, string OtpAuthUri, string QrCodeDataUri);
+
+public sealed record RecoveryCodesResponse(IReadOnlyList<string> RecoveryCodes);
+
+public sealed record MfaDisableRequest(string Password, string Code);
+
+public sealed record PasswordConfirmRequest(string Password);
+
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+public sealed record ResetPasswordRequest(string Token, string NewPassword);
+
+public sealed record SessionDto(Guid Id, DateTimeOffset CreatedAt, DateTimeOffset LastSeenAt, DateTimeOffset ExpiresAt, string? IpAddress, string? UserAgent,
+    bool Current);
+
+// ---------------------------------------------------------------------------------------------
+// Users (SuperAdmin)
+// ---------------------------------------------------------------------------------------------
+
+public sealed record UserDto(
+    Guid Id,
+    string Username,
+    string Email,
+    UserRole Role,
+    bool IsActive,
+    bool MfaEnabled,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? LastLoginAt,
+    DateTimeOffset? LockoutUntil,
+    IReadOnlyList<Guid> OrganizationIds);
+
+public sealed record CreateUserRequest(string Username, string Email, UserRole Role, string? Password, IReadOnlyList<Guid>? OrganizationIds);
+
+/// <summary>When no password is supplied, <see cref="ResetLink"/> carries a one-time link the new user opens to set one.</summary>
+public sealed record CreateUserResponse(UserDto User, ResetLinkResponse? ResetLink);
+
+public sealed record UpdateUserRequest(string? Email, UserRole? Role, bool? IsActive);
+
+public sealed record ResetLinkResponse(string Url, DateTimeOffset ExpiresAt);
+
+public sealed record OrganizationAccessRequest(IReadOnlyList<Guid> OrganizationIds);
+
+// ---------------------------------------------------------------------------------------------
+// Organizations, sites, policies
+// ---------------------------------------------------------------------------------------------
+
+public sealed record OrganizationSummaryDto(
+    Guid Id,
+    string Name,
+    string? Description,
+    string TimeZone,
+    bool IsActive,
+    int SiteCount,
+    int EndpointCount,
+    int OnlineCount,
+    int OfflineCount,
+    int CompliantCount,
+    int NonCompliantCount,
+    int MissingRequiredUpdates,
+    int FailedCount,
+    int RebootRequiredCount,
+    double CompliancePercent,
+    DateTimeOffset? LastActivityAt,
+    DateTimeOffset CreatedAt);
+
+public sealed record OrganizationDto(
+    Guid Id,
+    string Name,
+    string? Description,
+    string? ContactName,
+    string? ContactEmail,
+    string? Notes,
+    string TimeZone,
+    bool IsActive,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? ArchivedAt,
+    IReadOnlyList<SiteDto> Sites,
+    OrganizationSummaryDto Summary);
+
+public sealed record OrganizationRequest(string Name, string? Description, string? ContactName, string? ContactEmail, string? Notes, string? TimeZone);
+
+public sealed record SiteDto(
+    Guid Id,
+    Guid OrganizationId,
+    string OrganizationName,
+    string Name,
+    string? Description,
+    string? Address,
+    string TimeZone,
+    bool IsActive,
+    int EndpointCount,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ArchivedAt);
+
+public sealed record SiteRequest(string Name, string? Description, string? Address, string? TimeZone);
+
+/// <summary>A policy layer. Null values inherit from the parent scope. <c>MaintenanceStart</c> is "HH:mm" in the site
+/// (or organization) time zone; days use 0 = Sunday … 6 = Saturday.</summary>
+public sealed record PolicyDto(
+    Guid? Id,
+    PolicyScope Scope,
+    Guid? OrganizationId,
+    Guid? SiteId,
+    int? CheckInIntervalSeconds,
+    int? ScanIntervalMinutes,
+    int? InventoryIntervalMinutes,
+    int? JitterPercent,
+    IReadOnlyList<string>? AllowedCategories,
+    bool? IncludeOptional,
+    IReadOnlyList<string> ExcludedKbs,
+    bool? AcceptEulas,
+    bool? AutoInstallEnabled,
+    IReadOnlyList<int>? MaintenanceDays,
+    string? MaintenanceStart,
+    int? MaintenanceDurationMinutes,
+    int? ScanStaleAfterHours,
+    int? MaxConcurrentInstallsPerSite,
+    DateTimeOffset? UpdatedAt);
+
+public sealed record PolicyRequest(
+    int? CheckInIntervalSeconds,
+    int? ScanIntervalMinutes,
+    int? InventoryIntervalMinutes,
+    int? JitterPercent,
+    IReadOnlyList<string>? AllowedCategories,
+    bool? IncludeOptional,
+    IReadOnlyList<string>? ExcludedKbs,
+    bool? AcceptEulas,
+    bool? AutoInstallEnabled,
+    IReadOnlyList<int>? MaintenanceDays,
+    string? MaintenanceStart,
+    int? MaintenanceDurationMinutes,
+    int? ScanStaleAfterHours,
+    int? MaxConcurrentInstallsPerSite);
+
+public sealed record EffectivePolicyDto(
+    int CheckInIntervalSeconds,
+    int ScanIntervalMinutes,
+    int InventoryIntervalMinutes,
+    int JitterPercent,
+    IReadOnlyList<UpdateCategory> AllowedCategories,
+    bool IncludeOptional,
+    IReadOnlyList<string> ExcludedKbs,
+    bool AcceptEulas,
+    bool AutoInstallEnabled,
+    IReadOnlyList<int>? MaintenanceDays,
+    string? MaintenanceStart,
+    int? MaintenanceDurationMinutes,
+    string TimeZone,
+    int ScanStaleAfterHours,
+    int MaxConcurrentInstallsPerSite,
+    IReadOnlyDictionary<string, PolicyScope> Sources);
+
+// ---------------------------------------------------------------------------------------------
+// Endpoints
+// ---------------------------------------------------------------------------------------------
+
+public sealed record EndpointSummaryDto(
+    Guid Id,
+    string Hostname,
+    Guid OrganizationId,
+    string OrganizationName,
+    Guid? SiteId,
+    string? SiteName,
+    EndpointStatus Status,
+    string? OperatingSystem,
+    string? OsVersion,
+    string? OsBuild,
+    string? Architecture,
+    string? AgentVersion,
+    bool AgentOutdated,
+    bool IsOnline,
+    DateTimeOffset? LastCheckInAt,
+    DateTimeOffset? LastScanAt,
+    ComplianceStatus ComplianceStatus,
+    int MissingRequiredCount,
+    int MissingTotalCount,
+    int FailedCount,
+    bool RebootPending,
+    OsSupportStatus OsSupportStatus,
+    string? CurrentActivity,
+    string? LastSeenIp);
+
+public sealed record CredentialDto(string CredentialId, string KeyFingerprint, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, DateTimeOffset? RevokedAt,
+    string? RevokedReason, DateTimeOffset? LastUsedAt);
+
+public sealed record EndpointDetailDto(
+    EndpointSummaryDto Summary,
+    string? DnsDomain,
+    bool? DomainJoined,
+    string? OsEdition,
+    string? OsProductType,
+    DateTimeOffset? OsInstallDate,
+    string? SerialNumber,
+    string? Manufacturer,
+    string? Model,
+    string? ProcessorName,
+    long? TotalMemoryBytes,
+    long? SystemDriveTotalBytes,
+    long? SystemDriveFreeBytes,
+    bool? IsVirtualMachine,
+    string? TimeZoneId,
+    DateTimeOffset? LastBootAt,
+    DateTimeOffset? AgentInstalledAt,
+    DateTimeOffset EnrolledAt,
+    DateTimeOffset? LastInventoryAt,
+    DateTimeOffset? LastScanAttemptAt,
+    string? LastScanError,
+    IReadOnlyList<string> RebootReasons,
+    DateTimeOffset? RebootPendingSince,
+    string? UpdateSourceType,
+    string? UpdateSourceServer,
+    bool MicrosoftUpdateRegistered,
+    bool WufbPoliciesConfigured,
+    int? DeferQualityUpdatesDays,
+    int? DeferFeatureUpdatesDays,
+    string? TargetReleaseVersion,
+    string? AutomaticUpdatesMode,
+    bool ManagedByMdm,
+    string? WindowsUpdateServiceStartMode,
+    string? WindowsUpdateServiceState,
+    DateOnly? OsEndOfServicing,
+    bool EsuLicenseDetected,
+    EsuOverride EsuOverride,
+    int InstalledCount,
+    int PendingRebootUpdateCount,
+    DateTimeOffset? ComplianceEvaluatedAt,
+    string? Notes,
+    IReadOnlyList<CredentialDto> Credentials,
+    JobSummaryDto? ActiveJob);
+
+public sealed record UpdateEndpointRequest(Guid? SiteId, string? Notes, EsuOverride? EsuOverride);
+
+public sealed record RevokeEndpointRequest(string? Reason);
+
+public sealed record JobOverlayDto(Guid JobId, JobStatus JobStatus, JobItemStatus ItemStatus, int? DownloadPercent);
+
+public sealed record EndpointUpdateDto(
+    Guid UpdateGuid,
+    int RevisionNumber,
+    string Title,
+    string? Description,
+    string? KbNumber,
+    IReadOnlyList<string> KbNumbers,
+    UpdateCategory Category,
+    string? MsClassification,
+    string? MsrcSeverity,
+    DateTimeOffset? ReleaseDate,
+    long? SizeBytes,
+    bool RebootLikely,
+    string? SupportUrl,
+    EndpointUpdateState State,
+    bool IsRequired,
+    bool IsExcluded,
+    DateTimeOffset FirstDetectedAt,
+    DateTimeOffset StateChangedAt,
+    DateTimeOffset? InstalledAt,
+    int FailedAttempts,
+    string? ErrorCode,
+    string? ErrorMessage,
+    JobOverlayDto? ActiveJob);
+
+public sealed record UpdateHistoryDto(long Id, Guid? UpdateGuid, string Title, string? KbNumber, string Operation, int ResultCode, string Result, string? HResult,
+    string? ErrorDescription, DateTimeOffset Date);
+
+public sealed record EndpointEventDto(long Id, Guid EndpointId, string? Hostname, string Type, EventSeverity Severity, string Message, Guid? JobId,
+    DateTimeOffset CreatedAt);
+
+public sealed record InstallUpdatesRequest(InstallMode Mode, IReadOnlyList<Guid>? UpdateGuids, bool Force);
+
+public sealed record ExclusionRequest(Guid UpdateGuid, string? Reason);
+
+public sealed record BulkEndpointsRequest(IReadOnlyList<Guid> EndpointIds, bool Force);
+
+public sealed record BulkItemResult(Guid EndpointId, string? Hostname, bool Success, Guid? JobId, string? ErrorCode, string? Message);
+
+public sealed record BulkResultDto(int Succeeded, int Failed, IReadOnlyList<BulkItemResult> Results);
+
+// ---------------------------------------------------------------------------------------------
+// Fleet update management
+// ---------------------------------------------------------------------------------------------
+
+public sealed record FleetUpdateDto(
+    Guid UpdateGuid,
+    string Title,
+    string? KbNumber,
+    UpdateCategory Category,
+    string? MsrcSeverity,
+    DateTimeOffset? ReleaseDate,
+    long? SizeBytes,
+    int MissingCount,
+    int FailedCount,
+    int InstalledCount,
+    int PendingRebootCount,
+    int ExcludedCount);
+
+public sealed record FleetUpdateDetailDto(FleetUpdateDto Summary, string? Description, string? SupportUrl, IReadOnlyList<string> KbNumbers,
+    IReadOnlyList<string> Products, string? MsClassification, bool RebootLikely, IReadOnlyList<Guid> SupersededUpdateGuids);
+
+public sealed record FleetUpdateEndpointDto(
+    Guid EndpointId,
+    string Hostname,
+    string OrganizationName,
+    string? SiteName,
+    bool IsOnline,
+    EndpointUpdateState State,
+    bool IsRequired,
+    bool IsExcluded,
+    int FailedAttempts,
+    string? ErrorCode,
+    string? ErrorMessage,
+    DateTimeOffset StateChangedAt);
+
+public sealed record FleetInstallRequest(Guid? OrganizationId, Guid? SiteId, IReadOnlyList<Guid>? EndpointIds);
+
+// ---------------------------------------------------------------------------------------------
+// Jobs
+// ---------------------------------------------------------------------------------------------
+
+public sealed record JobSummaryDto(
+    Guid Id,
+    Guid EndpointId,
+    string Hostname,
+    Guid OrganizationId,
+    string OrganizationName,
+    JobType Type,
+    JobStatus Status,
+    JobTrigger Trigger,
+    string RequestedBy,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt,
+    DateTimeOffset ExpiresAt,
+    int? ProgressPercent,
+    string? Phase,
+    string? ProgressMessage,
+    string? ErrorCode,
+    string? ErrorMessage,
+    bool RebootRequired,
+    bool TimedOut,
+    bool CancelRequested,
+    int ItemCount,
+    int SucceededCount,
+    int FailedCount);
+
+public sealed record JobItemDto(
+    Guid UpdateGuid,
+    string Title,
+    string? KbNumber,
+    UpdateCategory Category,
+    JobItemStatus Status,
+    string? SkipReason,
+    int? ResultCode,
+    string? ErrorCode,
+    string? ErrorMessage,
+    bool RebootRequired,
+    int? DownloadPercent,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt);
+
+public sealed record JobDetailDto(
+    JobSummaryDto Summary,
+    InstallMode? InstallMode,
+    DateTimeOffset? NotBefore,
+    DateTimeOffset? DeliveredAt,
+    DateTimeOffset? AcknowledgedAt,
+    DateTimeOffset? LastProgressAt,
+    int DeliveryCount,
+    Guid? RetryOfJobId,
+    DateTimeOffset? CancelRequestedAt,
+    IReadOnlyList<JobItemDto> Items,
+    IReadOnlyList<EndpointEventDto> Events);
+
+// ---------------------------------------------------------------------------------------------
+// Agent management
+// ---------------------------------------------------------------------------------------------
+
+public sealed record EnrollmentTokenDto(
+    Guid Id,
+    Guid OrganizationId,
+    string OrganizationName,
+    Guid? SiteId,
+    string? SiteName,
+    string TokenPrefix,
+    string? Description,
+    int MaxUses,
+    int UseCount,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset? LastUsedAt,
+    DateTimeOffset? RevokedAt,
+    string State);
+
+public sealed record CreateTokensRequest(Guid OrganizationId, Guid? SiteId, string? Description, int ExpiresInHours, int MaxUses, int Count);
+
+public sealed record CreatedTokenDto(EnrollmentTokenDto Token, string PlaintextToken, string MsiExecCommand);
+
+public sealed record DeploymentCodeDto(
+    Guid Id,
+    string Code,
+    string Name,
+    Guid OrganizationId,
+    string OrganizationName,
+    Guid? SiteId,
+    string? SiteName,
+    int MaxPendingRequests,
+    IReadOnlyList<string> AllowedSourceCidrs,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ExpiresAt,
+    DateTimeOffset? RevokedAt,
+    int PendingCount,
+    int ApprovedCount,
+    string State,
+    string OneLiner,
+    string ScriptUrl);
+
+public sealed record CreateDeploymentCodeRequest(Guid OrganizationId, Guid? SiteId, string Name, int? ExpiresInDays, IReadOnlyList<string>? AllowedSourceCidrs,
+    int? MaxPendingRequests);
+
+public sealed record InstallScriptResponse(string Script, string OneLiner, string ScriptUrl, string PackageFileName, string PackageVersion, string Sha256,
+    bool RequireSignature);
+
+public sealed record EnrollmentRequestDto(
+    Guid Id,
+    string RequestId,
+    string Hostname,
+    string KeyFingerprint,
+    string? SerialNumber,
+    string? Manufacturer,
+    string? Model,
+    string? OsCaption,
+    string AgentVersion,
+    string? SourceIp,
+    EnrollmentRequestStatus Status,
+    Guid OrganizationId,
+    string OrganizationName,
+    Guid? SiteId,
+    string? SiteName,
+    string DeploymentCodeName,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset LastSeenAt,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset? DecidedAt,
+    string? RejectReason,
+    Guid? EndpointId,
+    Guid? ExistingEndpointId);
+
+public sealed record ApproveRequest(Guid? OrganizationId, Guid? SiteId);
+
+public sealed record RejectRequest(string? Reason);
+
+public sealed record BulkApproveRequest(IReadOnlyList<Guid> Ids);
+
+public sealed record AgentPackageDto(string FileName, string Version, string Architecture, long SizeBytes, string Sha256, DateTimeOffset ModifiedAt,
+    string DownloadUrl, bool IsLatest);
+
+public sealed record AgentVersionCountDto(string Version, int Count, bool IsLatest);
+
+// ---------------------------------------------------------------------------------------------
+// Dashboard and reports
+// ---------------------------------------------------------------------------------------------
+
+public sealed record DashboardSummaryDto(
+    int Organizations,
+    int Endpoints,
+    int Online,
+    int Offline,
+    int Compliant,
+    int MissingUpdates,
+    int FailedUpdates,
+    int RebootRequired,
+    int ScanStale,
+    int NeverScanned,
+    double CompliancePercent,
+    int MissingRequiredUpdates,
+    int QueuedJobs,
+    int RunningJobs,
+    int FailedJobs24h,
+    int PendingApprovals,
+    int UnsupportedOs,
+    int OutdatedAgents,
+    IReadOnlyList<OrganizationSummaryDto> LeastCompliantOrganizations);
+
+public sealed record ComplianceReportRow(
+    Guid EndpointId,
+    string Hostname,
+    string OrganizationName,
+    string? SiteName,
+    string? OperatingSystem,
+    string? OsBuild,
+    ComplianceStatus ComplianceStatus,
+    int MissingRequiredCount,
+    int MissingTotalCount,
+    int FailedCount,
+    bool RebootPending,
+    bool IsOnline,
+    OsSupportStatus OsSupportStatus,
+    DateTimeOffset? LastScanAt,
+    DateTimeOffset? LastCheckInAt);
+
+public sealed record ComplianceReportDto(
+    int Total,
+    int Compliant,
+    double CompliancePercent,
+    IReadOnlyDictionary<ComplianceStatus, int> ByStatus,
+    IReadOnlyList<ComplianceReportRow> Rows);
+
+public sealed record ComplianceTrendPoint(DateOnly Date, int TotalEndpoints, int Compliant, int MissingUpdates, int FailedUpdates, int RebootRequired, int ScanStale,
+    int NeverScanned, int Offline, int MissingRequiredUpdates, double CompliancePercent);
+
+public sealed record InstallationReportRow(
+    Guid JobId,
+    Guid EndpointId,
+    string Hostname,
+    string OrganizationName,
+    string? SiteName,
+    Guid UpdateGuid,
+    string Title,
+    string? KbNumber,
+    UpdateCategory Category,
+    JobItemStatus Status,
+    string? SkipReason,
+    string? ErrorCode,
+    string? ErrorMessage,
+    bool RebootRequired,
+    string RequestedBy,
+    DateTimeOffset? CompletedAt);
+
+public sealed record AuditLogDto(long Id, Guid? UserId, string? Username, Guid? OrganizationId, Guid? EndpointId, string Action, string? TargetType, string? TargetId,
+    string? Details, string? IpAddress, string? CorrelationId, DateTimeOffset CreatedAt);
+
+public sealed record OsLifecycleDto(Guid Id, string Product, string EditionGroup, int BuildNumber, string VersionLabel, DateOnly EndOfServicing, DateOnly? EsuEndDate,
+    string? Notes);
+
+public sealed record OsLifecycleRequest(string Product, string EditionGroup, int BuildNumber, string VersionLabel, DateOnly EndOfServicing, DateOnly? EsuEndDate,
+    string? Notes);
+
+public sealed record ServerInfoDto(string Version, string PublicUrl, DateTimeOffset ServerTime);
