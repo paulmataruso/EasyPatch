@@ -14,9 +14,15 @@ public static class JobTransitions
     /// <summary>Whether an agent status report may move a job from <paramref name="from"/> to <paramref name="to"/>.</summary>
     public static bool AgentMayTransition(JobStatus from, JobStatus to, bool timedOut)
     {
-        if (to is JobStatus.Queued or JobStatus.Delivered or JobStatus.Acknowledged or JobStatus.Expired)
+        if (to is JobStatus.Queued or JobStatus.Delivered or JobStatus.Acknowledged)
         {
             return false;
+        }
+
+        // The agent reports Expired when a job's deadline (or maintenance window) passed before it could start.
+        if (to is JobStatus.Expired)
+        {
+            return from is JobStatus.Delivered or JobStatus.Acknowledged or JobStatus.Running;
         }
 
         return from switch

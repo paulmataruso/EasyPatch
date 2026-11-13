@@ -208,9 +208,13 @@ public sealed class CheckInService(
             ComplianceService.ReevaluateStatus(endpoint, policy, now);
         }
 
-        if (endpoint.LastCheckInAt is null)
+        if (!endpoint.IsOnline && endpoint.Status == EndpointStatus.Active)
         {
-            endpoint.LastCheckInAt = now; // first contact: write immediately so the endpoint appears online
+            // First contact or back from offline (rare transitions): record it now instead of waiting for the presence
+            // monitor, and write LastCheckInAt with it so the monitor cannot see a stale timestamp and flip it back.
+            endpoint.IsOnline = true;
+            endpoint.LastCheckInAt = now;
+            EndpointEvents.Add(db, endpoint, "Online", "The agent is checking in.", now);
         }
 
         if (db.ChangeTracker.HasChanges())

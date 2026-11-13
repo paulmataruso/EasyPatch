@@ -1,0 +1,110 @@
+name: agent
+
+on:
+  push:
+    branches: [main]
+    tags: ['agent-v*']
+    paths:
+      - 'agent/**'
+      - 'shared/**'
+      - 'scripts/build-agent.*'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '.github/workflows/agent.yml'
+  pull_request:
+    paths:
+      - 'agent/**'
+      - 'shared/**'
+      - 'scripts/build-agent.*'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '.github/workflows/agent.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Agent version (MAJOR.MINOR.BUILD)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+
+jobs:
+  test:
+    name: Build and test (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - name: Build, test and publish
+        run: scripts/build-agent.sh --rid all
+
+  installer:
+    name: MSI (Windows)
+    needs: test
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - name: Determine version
+        id: version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          $version = $env:INPUT_VERSION
+          if (-not $version -and $env:REF_TYPE -eq 'tag' -and $env:REF_NAME -like 'agent-v*') { $version = $env:REF_NAME.Substring(7) }
+          if (-not $version) { $version = "1.0.$($env:RUN_NUMBER % 65535)" }
+          if ($version -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,5}$') { throw "Invalid version '$version'" }
+          "value=$version" >> $env:GITHUB_OUTPUT
+      - name: Build agent and MSI (x64, arm64)
+        shell: pwsh
+        env:
+          # Optional: provide a code-signing certificate through repository secrets.
+          EASYPATCH_SIGN_PFX_BASE64: ${{ secrets.EASYPATCH_SIGN_PFX_BASE64 }}
+          EASYPATCH_SIGN_PFX_PASSWORD: ${{ secrets.EASYPATCH_SIGN_PFX_PASSWORD }}
+          EASYPATCH_SIGN_TIMESTAMP_URL: ${{ vars.EASYPATCH_SIGN_TIMESTAMP_URL }}
+        run: |
+          if ($env:EASYPATCH_SIGN_PFX_BASE64) {
+            $pfx = Join-Path $env:RUNNER_TEMP 'easypatch-signing.pfx'
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:EASYPATCH_SIGN_PFX_BASE64))
+            $env:EASYPATCH_SIGN_PFX_PATH = $pfx
+          }
+          try {
+            ./scripts/build-agent.ps1 -Version '${{ steps.version.outputs.value }}' -Architecture x64,arm64 -SkipTests
+          }
+          finally {
+            if ($env:EASYPATCH_SIGN_PFX_PATH) { Remove-Item $env:EASYPATCH_SIGN_PFX_PATH -Force -ErrorAction SilentlyContinue }
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: easypatch-agent-${{ steps.version.outputs.value }}
+          path: |
+            artifacts/installer/*.msi
+            artifacts/installer/*.sha256
+          if-no-files-found: error
+          retention-days: 30

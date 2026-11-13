@@ -305,10 +305,13 @@ public sealed class JobService(
 
         await db.SaveChangesAsync(ct);
 
-        var busy = active.Any(j => j.Status is not (JobStatus.Cancelled or JobStatus.Failed));
+        // One job at a time. A job parked in WaitingForReboot does not block scans or inventory (the agent runs
+        // those while it waits), but further installs stay queued until the restart has been handled.
+        var busy = active.Any(j => j.Status is JobStatus.Delivered or JobStatus.Acknowledged or JobStatus.Running);
+        var waitingForReboot = active.Any(j => j.Status == JobStatus.WaitingForReboot);
         if (deliver.Count == 0 && !busy)
         {
-            var next = await LeaseNextAsync(endpoint, policy, settings, ct);
+            var next = await LeaseNextAsync(endpoint, policy, settings, allowInstall: !waitingForReboot, ct);
             if (next is not null)
             {
                 deliver.Add(next);
@@ -318,7 +321,7 @@ public sealed class JobService(
         return new LeaseResult(deliver.Select(ToAgentJob).ToList(), cancels.Distinct().ToList());
     }
 
-    private async Task<Job?> LeaseNextAsync(Endpoint endpoint, EffectivePolicy policy, ServerSettings settings, CancellationToken ct)
+    private async Task<Job?> LeaseNextAsync(Endpoint endpoint, EffectivePolicy policy, ServerSettings settings, bool allowInstall, CancellationToken ct)
     {
         for (var attempt = 0; attempt < 5; attempt++)
         {
@@ -327,6 +330,7 @@ public sealed class JobService(
             var candidate = (await db.Jobs.FromSql($"""
                     SELECT *, xmin FROM jobs
                     WHERE endpoint_id = {endpoint.Id} AND status = 'Queued' AND (not_before IS NULL OR not_before <= {now})
+                      AND ({allowInstall} OR type <> 'InstallUpdates')
                     ORDER BY priority DESC, created_at
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -497,9 +501,11 @@ public sealed class JobService(
                 JobStatus.Completed when summary is not null && job.Type == JobType.InstallUpdates => $"{Describe(job.Type)} completed: {summary.Succeeded} installed, {summary.Skipped} skipped.",
                 JobStatus.Completed => $"{Describe(job.Type)} completed.",
                 JobStatus.Cancelled => $"{Describe(job.Type)} cancelled.",
+                JobStatus.Expired => $"{Describe(job.Type)} expired before it could start: {report.ErrorMessage ?? report.ErrorCode ?? "deadline passed"}",
                 _ => $"{Describe(job.Type)} failed: {report.ErrorMessage ?? WindowsUpdateErrors.DescribeCode(report.ErrorCode)}",
             };
-            var severity = report.Status == JobStatus.Failed || summary is { Failed: > 0 } ? EventSeverity.Error : EventSeverity.Info;
+            var severity = report.Status == JobStatus.Failed || summary is { Failed: > 0 } ? EventSeverity.Error
+                : report.Status == JobStatus.Expired ? EventSeverity.Warning : EventSeverity.Info;
             EndpointEvents.Add(db, endpoint, "JobFinished", text, now, severity, job.Id,
                 new { status = report.Status, report.ErrorCode, report.RebootRequired });
         }
