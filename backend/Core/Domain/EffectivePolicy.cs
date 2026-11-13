@@ -1,5 +1,6 @@
 using EasyPatch.Contracts;
 using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Policy;
 using EasyPatch.Contracts.Updates;
 using EasyPatch.Core.Entities;
 
@@ -25,6 +26,14 @@ public sealed record EffectivePolicy
     public MaintenanceWindowSettings? MaintenanceWindow { get; init; }
     public int ScanStaleAfterHours { get; init; }
     public int MaxConcurrentInstallsPerSite { get; init; }
+    public bool TrayIconEnabled { get; init; } = true;
+    public bool InstallNotificationsEnabled { get; init; } = true;
+
+    /// <summary>Enabled recurring restart, or null.</summary>
+    public RestartScheduleSettings? RestartSchedule { get; init; }
+
+    /// <summary>Windows Update settings to enforce (null groups are not managed).</summary>
+    public WindowsUpdatePolicySettings WindowsUpdate { get; init; } = new();
     public IReadOnlyDictionary<string, PolicyScope> Sources { get; init; } = new Dictionary<string, PolicyScope>();
 
     public AgentConfig ToAgentConfig() => new()
@@ -34,6 +43,8 @@ public sealed record EffectivePolicy
         ScanIntervalMinutes = ScanIntervalMinutes,
         InventoryIntervalMinutes = InventoryIntervalMinutes,
         JitterPercent = JitterPercent,
+        UserExperience = new UserExperienceConfig { TrayIcon = TrayIconEnabled, InstallNotifications = InstallNotificationsEnabled },
+        WindowsUpdate = Enum.GetValues<WindowsUpdatePolicyGroup>().Any(WindowsUpdate.IsManaged) ? WindowsUpdate : null,
     };
 
     public InstallFilterOptions ToFilter(IEnumerable<Guid>? excludedUpdateGuids = null) => new()
@@ -66,15 +77,18 @@ public static class PolicyDefaults
         MaintenanceDurationMinutes = 180,
         ScanStaleAfterHours = 48,
         MaxConcurrentInstallsPerSite = 10,
+        TrayIconEnabled = true,
+        InstallNotificationsEnabled = true,
         UpdatedAt = now,
     };
 }
 
 public static class PolicyResolver
 {
-    /// <summary>Resolves global → organization → site. Scalars: most specific non-null wins.
-    /// Excluded KB lists are merged. Maintenance window fields override as a unit.</summary>
-    public static EffectivePolicy Resolve(Policy global, Policy? organization, Policy? site)
+    /// <summary>Resolves global → organization → site → endpoint. Scalars: most specific non-null wins.
+    /// Excluded KB lists are merged. The maintenance window, the restart schedule and each Windows Update group
+    /// override as a unit.</summary>
+    public static EffectivePolicy Resolve(Policy global, Policy? organization, Policy? site, Policy? endpoint = null)
     {
         ArgumentNullException.ThrowIfNull(global);
         var sources = new Dictionary<string, PolicyScope>();
@@ -87,6 +101,11 @@ public static class PolicyResolver
         if (site is not null)
         {
             layers.Add((site, PolicyScope.Site));
+        }
+
+        if (endpoint is not null)
+        {
+            layers.Add((endpoint, PolicyScope.Endpoint));
         }
 
         T Pick<T>(string name, Func<Policy, T?> selector, T fallback)
@@ -132,6 +151,42 @@ public static class PolicyResolver
             }
         }
 
+        RestartScheduleSettings? restart = null;
+        sources[nameof(EffectivePolicy.RestartSchedule)] = PolicyScope.Global;
+        foreach (var (policy, layerScope) in layers)
+        {
+            if (policy.RestartSchedule is { } schedule)
+            {
+                restart = schedule;
+                sources[nameof(EffectivePolicy.RestartSchedule)] = layerScope;
+            }
+        }
+
+        T? Group<T>(string name, Func<PolicyWindowsUpdate, PolicyGroupSetting<T>?> selector)
+            where T : class
+        {
+            T? value = null;
+            sources["WindowsUpdate." + name] = PolicyScope.Global;
+            foreach (var (policy, layerScope) in layers)
+            {
+                if (policy.WindowsUpdate is { } wu && selector(wu) is { } group)
+                {
+                    value = group.Managed ? group.Value : null;
+                    sources["WindowsUpdate." + name] = layerScope;
+                }
+            }
+
+            return value;
+        }
+
+        var windowsUpdate = new WindowsUpdatePolicySettings
+        {
+            AutomaticUpdates = Group(nameof(WindowsUpdatePolicyGroup.AutomaticUpdates), w => w.AutomaticUpdates),
+            FeatureUpdates = Group(nameof(WindowsUpdatePolicyGroup.FeatureUpdates), w => w.FeatureUpdates),
+            QualityUpdates = Group(nameof(WindowsUpdatePolicyGroup.QualityUpdates), w => w.QualityUpdates),
+            RestartBehavior = Group(nameof(WindowsUpdatePolicyGroup.RestartBehavior), w => w.RestartBehavior),
+        };
+
         var excluded = layers
             .SelectMany(l => l.Policy.ExcludedKbs)
             .Select(KbNumber.Normalize)
@@ -153,6 +208,10 @@ public static class PolicyResolver
             MaintenanceWindow = window is { IsConfigured: true } ? window : null,
             ScanStaleAfterHours = Pick(nameof(EffectivePolicy.ScanStaleAfterHours), p => p.ScanStaleAfterHours, 48),
             MaxConcurrentInstallsPerSite = Pick(nameof(EffectivePolicy.MaxConcurrentInstallsPerSite), p => p.MaxConcurrentInstallsPerSite, 10),
+            TrayIconEnabled = Pick(nameof(EffectivePolicy.TrayIconEnabled), p => p.TrayIconEnabled, true),
+            InstallNotificationsEnabled = Pick(nameof(EffectivePolicy.InstallNotificationsEnabled), p => p.InstallNotificationsEnabled, true),
+            RestartSchedule = restart is { Enabled: true } ? restart : null,
+            WindowsUpdate = windowsUpdate,
             Sources = sources,
         };
     }
@@ -196,6 +255,16 @@ public static class PolicyResolver
         if (policy.ExcludedKbs.Any(kb => KbNumber.Normalize(kb) is null))
         {
             errors.Add("ExcludedKbs must contain KB numbers such as KB5044284.");
+        }
+
+        if (policy.RestartSchedule is { } restart)
+        {
+            errors.AddRange(restart.Validate());
+        }
+
+        if (policy.WindowsUpdate is { } windowsUpdate)
+        {
+            errors.AddRange(windowsUpdate.Validate());
         }
 
         return errors;

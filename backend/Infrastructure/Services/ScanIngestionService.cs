@@ -87,7 +87,7 @@ public sealed class ScanIngestionService(
             .ToDictionaryAsync(u => u.UpdateGuid, ct);
         var excludedGuids = (await db.UpdateExclusions.AsNoTracking()
             .Where(x => x.EndpointId == endpointId).Select(x => x.UpdateGuid).ToListAsync(ct)).ToHashSet();
-        var policy = await policies.ResolveAsync(endpoint.OrganizationId, endpoint.SiteId, ct);
+        var policy = await policies.ResolveAsync(endpoint, ct);
         var filter = policy.ToFilter(excludedGuids);
         var byId = catalog.Values.ToDictionary(u => u.Id);
         var byGuid = catalog.Values.GroupBy(u => u.UpdateGuid).ToDictionary(g => g.Key, g => g.MaxBy(u => u.RevisionNumber)!);
@@ -232,7 +232,7 @@ public sealed class ScanIngestionService(
 
         var lifecycle = await db.OsLifecycleEntries.AsNoTracking().ToListAsync(ct);
         ComplianceService.ApplyLifecycle(endpoint, lifecycle, now);
-        var policy = await policies.ResolveAsync(endpoint.OrganizationId, endpoint.SiteId, ct);
+        var policy = await policies.ResolveAsync(endpoint, ct);
         ComplianceService.ReevaluateStatus(endpoint, policy, now);
 
         if (previousOs is not null && previousOs != endpoint.OsBuild)

@@ -23,7 +23,10 @@ public sealed record CreateJobRequest(
     JobTrigger Trigger = JobTrigger.Manual,
     DateTimeOffset? ExpiresAt = null,
     DateTimeOffset? NotAfter = null,
-    string? DedupeSuffix = null);
+    string? DedupeSuffix = null,
+    RestartPayload? Restart = null,
+    NotifyUserPayload? Notify = null,
+    DateTimeOffset? NotBefore = null);
 
 /// <summary>Durable PostgreSQL-backed job queue: creation, leasing to agents, acknowledgement, progress and cancellation.</summary>
 public sealed class JobService(
@@ -52,6 +55,18 @@ public sealed class JobService(
         if (endpoint.Status != EndpointStatus.Active)
         {
             throw AppException.Conflict("The endpoint is not active (its credentials were revoked or it was decommissioned).", "endpoint_not_active");
+        }
+
+        if (AgentCapabilities.RequiredFor(request.Type) is { } capability && !endpoint.AgentCapabilities.Contains(capability))
+        {
+            throw AppException.Conflict(
+                $"The EasyPatch agent on {endpoint.Hostname} (version {endpoint.AgentVersion ?? "unknown"}) cannot run this job. Upgrade the agent first.",
+                "agent_upgrade_required");
+        }
+
+        if (request.NotBefore is { } notBefore && (notBefore < now.AddMinutes(-5) || notBefore > now.AddDays(31)))
+        {
+            throw AppException.BadRequest("The scheduled time must be between now and 31 days from now.", "validation_failed");
         }
 
         var settings = await settingsService.GetAsync(ct);
@@ -111,6 +126,41 @@ public sealed class JobService(
                 break;
             }
 
+            case JobType.Restart:
+            {
+                var payload = request.Restart ?? throw AppException.BadRequest("Restart settings are required.", "validation_failed");
+                var errors = RestartPayload.Validate(payload);
+                if (errors.Count > 0)
+                {
+                    throw AppException.BadRequest(string.Join(" ", errors), "validation_failed");
+                }
+
+                payloadJson = JsonSerializer.Serialize(payload, ContractJson.Options);
+                dedupeKey = "restart";
+                break;
+            }
+
+            case JobType.NotifyUser:
+            {
+                var payload = request.Notify ?? throw AppException.BadRequest("Choose a message.", "validation_failed");
+                if (!Enum.IsDefined(payload.Preset))
+                {
+                    throw AppException.BadRequest("Unknown message.", "validation_failed");
+                }
+
+                if (payload.Preset == UserMessagePreset.RestartScheduled && payload.ScheduledAt is null)
+                {
+                    throw AppException.BadRequest("Enter the time of the scheduled restart.", "validation_failed");
+                }
+
+                payloadJson = JsonSerializer.Serialize(payload with
+                {
+                    ScheduledAt = payload.Preset == UserMessagePreset.RestartScheduled ? payload.ScheduledAt : null,
+                }, ContractJson.Options);
+                dedupeKey = "notify:" + payload.Preset;
+                break;
+            }
+
             default:
                 throw AppException.BadRequest("Unsupported job type.");
         }
@@ -143,14 +193,28 @@ public sealed class JobService(
             RequestedByUserId = request.Trigger == JobTrigger.Manual ? actor.UserId : null,
             RequestedBy = request.Trigger switch
             {
+                JobTrigger.Scheduled when request.Type == JobType.Restart => "Restart schedule",
                 JobTrigger.Scheduled => "Maintenance window",
                 JobTrigger.System => "System",
                 _ => actor.Username ?? "unknown",
             },
-            Priority = request.Type == JobType.InstallUpdates ? 0 : 10,
+            // Scans and inventory first, then installs, then restarts (patch, then restart). Messages are leased separately.
+            Priority = request.Type switch
+            {
+                JobType.InstallUpdates => 0,
+                JobType.Restart => -10,
+                _ => 10,
+            },
             CreatedAt = now,
             UpdatedAt = now,
-            ExpiresAt = request.ExpiresAt ?? now.AddHours(settings.JobDefaultExpiryHours),
+            NotBefore = request.NotBefore,
+            // A restart or a message that arrives hours late would surprise the user, so they expire quickly.
+            ExpiresAt = request.ExpiresAt ?? request.Type switch
+            {
+                JobType.Restart => Later(now, request.NotBefore).AddHours(2),
+                JobType.NotifyUser => Later(now, request.NotBefore).AddHours(1),
+                _ => now.AddHours(settings.JobDefaultExpiryHours),
+            },
             Payload = payloadJson,
             DedupeKey = request.Force ? null : dedupeKey,
             Updates = plannedItems,
@@ -165,7 +229,11 @@ public sealed class JobService(
         if (request.Trigger == JobTrigger.Manual)
         {
             audit.Record("job.create", "Job", job.Id.ToString(), endpoint.OrganizationId, endpoint.Id,
-                new { job.Type, mode = request.InstallMode, updates = request.UpdateGuids?.Count, request.Force });
+                new
+                {
+                    job.Type, mode = request.InstallMode, updates = request.UpdateGuids?.Count, request.Force, restart = request.Restart,
+                    message = request.Notify?.Preset, request.NotBefore,
+                });
         }
 
         try
@@ -183,6 +251,8 @@ public sealed class JobService(
 
         return job;
     }
+
+    private static DateTimeOffset Later(DateTimeOffset now, DateTimeOffset? other) => other is { } o && o > now ? o : now;
 
     private static AppException DuplicateJob(Guid existingId) =>
         AppException.Conflict("An identical job is already queued or running for this endpoint.", "duplicate_job",
@@ -222,9 +292,15 @@ public sealed class JobService(
             throw AppException.Conflict("Only finished jobs can be retried.", "invalid_state");
         }
 
-        InstallUpdatesPayload? payload = original.Payload is null ? null : JsonSerializer.Deserialize<InstallUpdatesPayload>(original.Payload, ContractJson.Options);
-        var job = await CreateAsync(new CreateJobRequest(original.EndpointId, original.Type,
-            payload?.Mode ?? InstallMode.AllEligible, payload?.SelectedUpdateGuids), ct);
+        var request = original.Type switch
+        {
+            JobType.Restart => new CreateJobRequest(original.EndpointId, original.Type, Restart: Payload<RestartPayload>(original)),
+            JobType.NotifyUser => new CreateJobRequest(original.EndpointId, original.Type, Notify: Payload<NotifyUserPayload>(original)),
+            JobType.InstallUpdates when Payload<InstallUpdatesPayload>(original) is { } install =>
+                new CreateJobRequest(original.EndpointId, original.Type, install.Mode, install.SelectedUpdateGuids),
+            _ => new CreateJobRequest(original.EndpointId, original.Type),
+        };
+        var job = await CreateAsync(request, ct);
         job.RetryOfJobId = original.Id;
         job.RetryCount = original.RetryCount + 1;
         await db.SaveChangesAsync(ct);
@@ -306,22 +382,64 @@ public sealed class JobService(
         await db.SaveChangesAsync(ct);
 
         // One job at a time. A job parked in WaitingForReboot does not block scans or inventory (the agent runs
-        // those while it waits), but further installs stay queued until the restart has been handled.
-        var busy = active.Any(j => j.Status is JobStatus.Delivered or JobStatus.Acknowledged or JobStatus.Running);
+        // those while it waits), but further installs stay queued until the restart has been handled. Messages to the
+        // user neither block nor wait for other jobs.
+        var busy = active.Any(j => j.Type != JobType.NotifyUser && j.Status is JobStatus.Delivered or JobStatus.Acknowledged or JobStatus.Running);
         var waitingForReboot = active.Any(j => j.Status == JobStatus.WaitingForReboot);
-        if (deliver.Count == 0 && !busy)
+        if (!deliver.Exists(j => j.Type != JobType.NotifyUser) && !busy)
         {
-            var next = await LeaseNextAsync(endpoint, policy, settings, allowInstall: !waitingForReboot, ct);
+            var next = await LeaseNextAsync(endpoint, policy, settings, allowInstall: !waitingForReboot,
+                allowRestart: endpoint.AgentCapabilities.Contains(AgentCapabilities.Restart), ct);
             if (next is not null)
             {
                 deliver.Add(next);
             }
         }
 
+        if (endpoint.AgentCapabilities.Contains(AgentCapabilities.NotifyUser))
+        {
+            deliver.AddRange(await LeaseMessagesAsync(endpoint, settings, ct));
+        }
+
         return new LeaseResult(deliver.Select(ToAgentJob).ToList(), cancels.Distinct().ToList());
     }
 
-    private async Task<Job?> LeaseNextAsync(Endpoint endpoint, EffectivePolicy policy, ServerSettings settings, bool allowInstall, CancellationToken ct)
+    /// <summary>Leases queued user messages (at most five per check-in), independently of other jobs.</summary>
+    private async Task<IReadOnlyList<Job>> LeaseMessagesAsync(Endpoint endpoint, ServerSettings settings, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var queued = await db.Jobs.FromSql($"""
+                SELECT *, xmin FROM jobs
+                WHERE endpoint_id = {endpoint.Id} AND status = 'Queued' AND type = 'NotifyUser' AND (not_before IS NULL OR not_before <= {now})
+                ORDER BY created_at
+                LIMIT 5
+                FOR UPDATE SKIP LOCKED
+                """).ToListAsync(ct);
+        var leased = new List<Job>();
+        foreach (var job in queued)
+        {
+            if (job.ExpiresAt <= now)
+            {
+                Finish(job, JobStatus.Expired, now, "The message expired before the endpoint picked it up.");
+                continue;
+            }
+
+            job.Status = JobStatus.Delivered;
+            job.DeliveredAt = now;
+            job.LeaseExpiresAt = now.AddMinutes(settings.DeliveryLeaseMinutes);
+            job.DeliveryCount++;
+            job.UpdatedAt = now;
+            leased.Add(job);
+        }
+
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return leased;
+    }
+
+    private async Task<Job?> LeaseNextAsync(Endpoint endpoint, EffectivePolicy policy, ServerSettings settings, bool allowInstall, bool allowRestart,
+        CancellationToken ct)
     {
         for (var attempt = 0; attempt < 5; attempt++)
         {
@@ -331,6 +449,7 @@ public sealed class JobService(
                     SELECT *, xmin FROM jobs
                     WHERE endpoint_id = {endpoint.Id} AND status = 'Queued' AND (not_before IS NULL OR not_before <= {now})
                       AND ({allowInstall} OR type <> 'InstallUpdates')
+                      AND ({allowRestart} OR type <> 'Restart') AND type <> 'NotifyUser'
                     ORDER BY priority DESC, created_at
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -391,11 +510,15 @@ public sealed class JobService(
             Trigger = job.Trigger,
             CreatedAt = job.CreatedAt,
             ExpiresAt = job.ExpiresAt,
-            Install = job.Type == JobType.InstallUpdates && job.Payload is not null
-                ? JsonSerializer.Deserialize<InstallUpdatesPayload>(job.Payload, ContractJson.Options)
-                : null,
+            Install = job.Type == JobType.InstallUpdates ? Payload<InstallUpdatesPayload>(job) : null,
+            Restart = job.Type == JobType.Restart ? Payload<RestartPayload>(job) : null,
+            Notify = job.Type == JobType.NotifyUser ? Payload<NotifyUserPayload>(job) : null,
         };
     }
+
+    public static T? Payload<T>(Job job)
+        where T : class =>
+        job.Payload is null ? null : JsonSerializer.Deserialize<T>(job.Payload, ContractJson.Options);
 
     public async Task<JobAckResponse> AcknowledgeAsync(Guid endpointId, Guid jobId, CancellationToken ct = default)
     {
@@ -524,7 +647,7 @@ public sealed class JobService(
 
         if (updatesChanged || report.RebootRequired)
         {
-            var policy = await policies.ResolveAsync(endpoint.OrganizationId, endpoint.SiteId, ct);
+            var policy = await policies.ResolveAsync(endpoint, ct);
             var rows = await db.EndpointUpdates.Where(u => u.EndpointId == endpointId).ToListAsync(ct);
             ComplianceService.ApplyCounts(endpoint, rows, policy, now);
         }
@@ -646,6 +769,8 @@ public sealed class JobService(
         JobType.InstallUpdates => "Update installation",
         JobType.UpdateScan => "Update scan",
         JobType.InventoryRefresh => "Inventory refresh",
+        JobType.Restart => "Restart",
+        JobType.NotifyUser => "Message to users",
         _ => type.ToString(),
     };
 }

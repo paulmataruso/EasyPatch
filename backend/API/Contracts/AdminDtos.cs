@@ -1,4 +1,6 @@
 using EasyPatch.Contracts;
+using EasyPatch.Contracts.Policy;
+using EasyPatch.Core.Domain;
 using EasyPatch.Core.Entities;
 
 namespace EasyPatch.Api.Contracts;
@@ -147,7 +149,26 @@ public sealed record PolicyDto(
     int? MaintenanceDurationMinutes,
     int? ScanStaleAfterHours,
     int? MaxConcurrentInstallsPerSite,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    Guid? EndpointId = null,
+    bool? TrayIconEnabled = null,
+    bool? InstallNotificationsEnabled = null,
+    RestartScheduleDto? RestartSchedule = null,
+    PolicyWindowsUpdate? WindowsUpdate = null);
+
+/// <summary>Recurring restart. <c>Time</c> is "HH:mm" in the site (or organization) time zone; days use 0 = Sunday … 6 = Saturday.</summary>
+public sealed record RestartScheduleDto(
+    bool Enabled,
+    IReadOnlyList<int> Days,
+    string Time,
+    RestartCondition Condition,
+    RestartMode Mode,
+    int CountdownMinutes,
+    int DeadlineMinutes,
+    int ExpiryMinutes);
+
+/// <summary>A Windows Update policy registry value EasyPatch sets (or deletes) under HKLM.</summary>
+public sealed record PolicyRegistryValueDto(WindowsUpdatePolicyGroup Group, string Path, string Name, string Value);
 
 public sealed record PolicyRequest(
     int? CheckInIntervalSeconds,
@@ -163,7 +184,11 @@ public sealed record PolicyRequest(
     string? MaintenanceStart,
     int? MaintenanceDurationMinutes,
     int? ScanStaleAfterHours,
-    int? MaxConcurrentInstallsPerSite);
+    int? MaxConcurrentInstallsPerSite,
+    bool? TrayIconEnabled = null,
+    bool? InstallNotificationsEnabled = null,
+    RestartScheduleDto? RestartSchedule = null,
+    PolicyWindowsUpdate? WindowsUpdate = null);
 
 public sealed record EffectivePolicyDto(
     int CheckInIntervalSeconds,
@@ -181,7 +206,12 @@ public sealed record EffectivePolicyDto(
     string TimeZone,
     int ScanStaleAfterHours,
     int MaxConcurrentInstallsPerSite,
-    IReadOnlyDictionary<string, PolicyScope> Sources);
+    IReadOnlyDictionary<string, PolicyScope> Sources,
+    bool TrayIconEnabled = true,
+    bool InstallNotificationsEnabled = true,
+    RestartScheduleDto? RestartSchedule = null,
+    WindowsUpdatePolicySettings? WindowsUpdate = null,
+    IReadOnlyList<PolicyRegistryValueDto>? WindowsUpdateValues = null);
 
 // ---------------------------------------------------------------------------------------------
 // Endpoints
@@ -259,7 +289,13 @@ public sealed record EndpointDetailDto(
     DateTimeOffset? ComplianceEvaluatedAt,
     string? Notes,
     IReadOnlyList<CredentialDto> Credentials,
-    JobSummaryDto? ActiveJob);
+    JobSummaryDto? ActiveJob,
+    IReadOnlyList<string> AgentCapabilities,
+    int? SignedInUsers,
+    int? TrayConnectedSessions,
+    WindowsUpdatePolicyReport? WindowsUpdatePolicy,
+    DateTimeOffset? WindowsUpdatePolicyReportedAt,
+    bool HasOwnPolicy);
 
 public sealed record UpdateEndpointRequest(Guid? SiteId, string? Notes, EsuOverride? EsuOverride);
 
@@ -303,6 +339,25 @@ public sealed record InstallUpdatesRequest(InstallMode Mode, IReadOnlyList<Guid>
 public sealed record ExclusionRequest(Guid UpdateGuid, string? Reason);
 
 public sealed record BulkEndpointsRequest(IReadOnlyList<Guid> EndpointIds, bool Force);
+
+/// <summary>Restart an endpoint now or at <c>ScheduledAt</c>. If it is offline, the restart is abandoned after <c>ExpiresAfterMinutes</c>.</summary>
+public sealed record RestartRequest(
+    RestartMode Mode,
+    RestartCondition Condition,
+    int? CountdownMinutes,
+    int? DeadlineMinutes,
+    DateTimeOffset? ScheduledAt,
+    int? ExpiresAfterMinutes,
+    bool Force);
+
+/// <summary>Show a preset message. <c>RestartAt</c> fills in the <see cref="UserMessagePreset.RestartScheduled"/> text.</summary>
+public sealed record NotifyRequest(UserMessagePreset Preset, DateTimeOffset? RestartAt);
+
+public sealed record BulkRestartRequest(IReadOnlyList<Guid> EndpointIds, RestartRequest Restart);
+
+public sealed record BulkNotifyRequest(IReadOnlyList<Guid> EndpointIds, NotifyRequest Message);
+
+public sealed record UserMessagePresetDto(UserMessagePreset Preset, string Title, string Body, bool NeedsRestartTime);
 
 public sealed record BulkItemResult(Guid EndpointId, string? Hostname, bool Success, Guid? JobId, string? ErrorCode, string? Message);
 

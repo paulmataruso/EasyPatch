@@ -30,7 +30,7 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
             var exclusionsByEndpoint = exclusions.ToLookup(x => x.EndpointId, x => x.UpdateGuid);
             foreach (var endpoint in endpoints)
             {
-                var policy = resolver(endpoint.OrganizationId, endpoint.SiteId);
+                var policy = resolver(endpoint.OrganizationId, endpoint.SiteId, endpoint.Id);
                 ApplyRequirementFlags(updatesByEndpoint[endpoint.Id], exclusionsByEndpoint[endpoint.Id].ToHashSet(), policy, now);
                 ApplyCounts(endpoint, updatesByEndpoint[endpoint.Id], policy, now);
                 ApplyLifecycle(endpoint, lifecycle, now);

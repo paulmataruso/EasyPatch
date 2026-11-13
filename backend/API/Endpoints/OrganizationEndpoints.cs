@@ -324,12 +324,18 @@ public static class OrganizationEndpoints
         p.Id, p.Scope, p.OrganizationId, p.SiteId, p.CheckInIntervalSeconds, p.ScanIntervalMinutes, p.InventoryIntervalMinutes, p.JitterPercent,
         p.AllowedCategories, p.IncludeOptional, p.ExcludedKbs, p.AcceptEulas, p.AutoInstallEnabled, p.MaintenanceDays,
         p.MaintenanceStart?.ToString("HH:mm", CultureInfo.InvariantCulture), p.MaintenanceDurationMinutes, p.ScanStaleAfterHours,
-        p.MaxConcurrentInstallsPerSite, p.UpdatedAt);
+        p.MaxConcurrentInstallsPerSite, p.UpdatedAt, p.EndpointId, p.TrayIconEnabled, p.InstallNotificationsEnabled,
+        ToDto(p.RestartSchedule), p.WindowsUpdate);
 
-    private static PolicyDto EmptyPolicy(PolicyScope scope, Guid? organizationId, Guid? siteId) => new(
-        null, scope, organizationId, siteId, null, null, null, null, null, null, [], null, null, null, null, null, null, null, null);
+    internal static RestartScheduleDto? ToDto(RestartScheduleSettings? r) => r is null
+        ? null
+        : new RestartScheduleDto(r.Enabled, r.Days, r.Time.ToString("HH:mm", CultureInfo.InvariantCulture), r.Condition, r.Mode,
+            r.CountdownMinutes, r.DeadlineMinutes, r.ExpiryMinutes);
 
-    private static Policy FromRequest(PolicyRequest r)
+    internal static PolicyDto EmptyPolicy(PolicyScope scope, Guid? organizationId, Guid? siteId, Guid? endpointId = null) => new(
+        null, scope, organizationId, siteId, null, null, null, null, null, null, [], null, null, null, null, null, null, null, null, endpointId);
+
+    internal static Policy FromRequest(PolicyRequest r)
     {
         TimeOnly? start = null;
         if (Validator.Clean(r.MaintenanceStart) is { } text)
@@ -360,6 +366,35 @@ public static class OrganizationEndpoints
             MaintenanceDurationMinutes = r.MaintenanceDurationMinutes,
             ScanStaleAfterHours = r.ScanStaleAfterHours,
             MaxConcurrentInstallsPerSite = r.MaxConcurrentInstallsPerSite,
+            TrayIconEnabled = r.TrayIconEnabled,
+            InstallNotificationsEnabled = r.InstallNotificationsEnabled,
+            RestartSchedule = FromRequest(r.RestartSchedule),
+            WindowsUpdate = r.WindowsUpdate,
+        };
+    }
+
+    private static RestartScheduleSettings? FromRequest(RestartScheduleDto? r)
+    {
+        if (r is null)
+        {
+            return null;
+        }
+
+        if (!TimeOnly.TryParseExact(r.Time ?? "", ["HH:mm", "H:mm"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var time))
+        {
+            throw AppException.BadRequest("restartSchedule.time must be a time in HH:mm format.", "validation_failed");
+        }
+
+        return new RestartScheduleSettings
+        {
+            Enabled = r.Enabled,
+            Days = (r.Days ?? []).Distinct().Order().ToList(),
+            Time = time,
+            Condition = r.Condition,
+            Mode = r.Mode,
+            CountdownMinutes = r.CountdownMinutes,
+            DeadlineMinutes = r.DeadlineMinutes,
+            ExpiryMinutes = r.ExpiryMinutes,
         };
     }
 }

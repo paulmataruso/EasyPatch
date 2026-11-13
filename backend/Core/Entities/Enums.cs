@@ -57,6 +57,7 @@ public enum PolicyScope
     Global,
     Organization,
     Site,
+    Endpoint,
 }
 
 public enum EnrollmentRequestStatus

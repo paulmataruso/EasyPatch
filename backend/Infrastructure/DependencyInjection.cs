@@ -64,12 +64,14 @@ public static class DependencyInjection
         services.AddScoped<JobMaintenanceTask>();
         services.AddScoped<PresenceMonitorTask>();
         services.AddScoped<ScheduledInstallTask>();
+        services.AddScoped<ScheduledRestartTask>();
         services.AddScoped<ComplianceSnapshotTask>();
         services.AddScoped<RetentionTask>();
         services.AddSingleton<MaintenanceHeartbeat>();
         services.AddHostedService<MaintenanceLoop<JobMaintenanceTask>>();
         services.AddHostedService<MaintenanceLoop<PresenceMonitorTask>>();
         services.AddHostedService<MaintenanceLoop<ScheduledInstallTask>>();
+        services.AddHostedService<MaintenanceLoop<ScheduledRestartTask>>();
         services.AddHostedService<MaintenanceLoop<ComplianceSnapshotTask>>();
         services.AddHostedService<MaintenanceLoop<RetentionTask>>();
         return services;

@@ -1,8 +1,12 @@
 using System.Globalization;
 using System.Security.Claims;
+using System.Text.Json;
 using EasyPatch.Api.Contracts;
 using EasyPatch.Api.Security;
 using EasyPatch.Contracts;
+using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Json;
+using EasyPatch.Contracts.Policy;
 using EasyPatch.Core.Domain;
 using EasyPatch.Core.Entities;
 using EasyPatch.Infrastructure.Data;
@@ -172,14 +176,58 @@ public static class EndpointEndpoints
             var endpoint = await db.Endpoints.AsNoTracking().Include(e => e.Site).Include(e => e.Organization)
                 .FirstOrDefaultAsync(e => e.Id == id, ct) ?? throw AppException.NotFound("Endpoint");
             tenant.EnsureAccess(endpoint.OrganizationId);
-            var p = await policies.ResolveAsync(endpoint.OrganizationId, endpoint.SiteId, ct);
+            var p = await policies.ResolveAsync(endpoint, ct);
             var window = p.MaintenanceWindow;
+            var registry = Enum.GetValues<WindowsUpdatePolicyGroup>()
+                .SelectMany(g => (WindowsUpdatePolicyRegistry.DesiredValues(p.WindowsUpdate, g) ?? [])
+                    .Select(v => new PolicyRegistryValueDto(g, @"HKLM\" + v.Path, v.Name, v.Display)))
+                .ToList();
             return TypedResults.Ok(new EffectivePolicyDto(
                 p.CheckInIntervalSeconds, p.ScanIntervalMinutes, p.InventoryIntervalMinutes, p.JitterPercent, p.AllowedCategories, p.IncludeOptional,
                 p.ExcludedKbs, p.AcceptEulas, p.AutoInstallEnabled, window?.Days.Select(d => (int)d).ToList(),
                 window?.Start.ToString("HH:mm", CultureInfo.InvariantCulture), window?.DurationMinutes,
-                endpoint.Site?.TimeZone ?? endpoint.Organization!.TimeZone, p.ScanStaleAfterHours, p.MaxConcurrentInstallsPerSite, p.Sources));
+                endpoint.Site?.TimeZone ?? endpoint.Organization!.TimeZone, p.ScanStaleAfterHours, p.MaxConcurrentInstallsPerSite, p.Sources,
+                p.TrayIconEnabled, p.InstallNotificationsEnabled, OrganizationEndpoints.ToDto(p.RestartSchedule), p.WindowsUpdate, registry));
         });
+
+        // Per-endpoint policy overrides (the most specific layer).
+        g.MapGet("/{id:guid}/policy", async (Guid id, EasyPatchDbContext db, ITenantContext tenant, PolicyService policies, CancellationToken ct) =>
+        {
+            var endpoint = await db.Endpoints.AsNoTracking().FirstOrDefaultAsync(e => e.Id == id, ct) ?? throw AppException.NotFound("Endpoint");
+            tenant.EnsureAccess(endpoint.OrganizationId);
+            var policy = await policies.GetEndpointPolicyAsync(id, ct);
+            return TypedResults.Ok(policy is null
+                ? OrganizationEndpoints.EmptyPolicy(PolicyScope.Endpoint, endpoint.OrganizationId, endpoint.SiteId, id)
+                : OrganizationEndpoints.ToDto(policy));
+        });
+
+        g.MapPut("/{id:guid}/policy", async (Guid id, PolicyRequest request, EasyPatchDbContext db, ITenantContext tenant, PolicyService policies,
+            ComplianceService compliance, AuditService audit, ClaimsPrincipal user, CancellationToken ct) =>
+        {
+            var endpoint = await db.Endpoints.AsNoTracking().FirstOrDefaultAsync(e => e.Id == id, ct) ?? throw AppException.NotFound("Endpoint");
+            tenant.EnsureAccess(endpoint.OrganizationId);
+            var stored = await policies.UpsertAsync(PolicyScope.Endpoint, endpoint.OrganizationId, null, id, OrganizationEndpoints.FromRequest(request),
+                user.GetUserId(), ct);
+            audit.Record("policy.update", "Policy", stored.Id.ToString(), endpoint.OrganizationId, id, request);
+            await db.SaveChangesAsync(ct);
+            await compliance.RecomputeAsync([id], ct);
+            return TypedResults.Ok(OrganizationEndpoints.ToDto(stored));
+        }).RequireAuthorization(Policies.Operator);
+
+        g.MapDelete("/{id:guid}/policy", async (Guid id, EasyPatchDbContext db, ITenantContext tenant, PolicyService policies,
+            ComplianceService compliance, AuditService audit, CancellationToken ct) =>
+        {
+            var endpoint = await db.Endpoints.AsNoTracking().FirstOrDefaultAsync(e => e.Id == id, ct) ?? throw AppException.NotFound("Endpoint");
+            tenant.EnsureAccess(endpoint.OrganizationId);
+            if (await policies.DeleteAsync(PolicyScope.Endpoint, id, ct))
+            {
+                audit.Record("policy.delete", "Policy", null, endpoint.OrganizationId, id);
+                await db.SaveChangesAsync(ct);
+                await compliance.RecomputeAsync([id], ct);
+            }
+
+            return TypedResults.NoContent();
+        }).RequireAuthorization(Policies.Operator);
 
         g.MapGet("/{id:guid}/install-preview", async (Guid id, string? mode, string? updateGuids, EasyPatchDbContext db, ITenantContext tenant,
             InstallPreviewService previews, CancellationToken ct) =>
@@ -256,7 +304,63 @@ public static class EndpointEndpoints
         g.MapPost("/bulk/install-updates", (BulkEndpointsRequest request, EasyPatchDbContext db, ITenantContext tenant, JobService jobs, CancellationToken ct) =>
             BulkAsync(request, db, tenant, jobs, id => new CreateJobRequest(id, JobType.InstallUpdates, InstallMode.AllEligible, Force: request.Force), ct))
             .RequireAuthorization(Policies.Operator);
+
+        // Restarts are always an explicit administrator action (or an administrator-configured schedule).
+        g.MapPost("/{id:guid}/restart", async (Guid id, RestartRequest request, EasyPatchDbContext db, ITenantContext tenant, JobService jobs,
+            TimeProvider clock, CancellationToken ct) =>
+        {
+            await EnsureEndpointAccessAsync(db, tenant, id, ct);
+            var job = await jobs.CreateAsync(RestartJob(id, request, clock.GetUtcNow()), ct);
+            return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await JobEndpoints.LoadSummaryAsync(db, job.Id, ct));
+        }).RequireAuthorization(Policies.Operator);
+
+        g.MapPost("/{id:guid}/notify", async (Guid id, NotifyRequest request, EasyPatchDbContext db, ITenantContext tenant, JobService jobs,
+            CancellationToken ct) =>
+        {
+            await EnsureEndpointAccessAsync(db, tenant, id, ct);
+            var job = await jobs.CreateAsync(NotifyJob(id, request), ct);
+            return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await JobEndpoints.LoadSummaryAsync(db, job.Id, ct));
+        }).RequireAuthorization(Policies.Operator);
+
+        g.MapPost("/bulk/restart", (BulkRestartRequest request, EasyPatchDbContext db, ITenantContext tenant, JobService jobs, TimeProvider clock,
+                CancellationToken ct) =>
+            BulkAsync(new BulkEndpointsRequest(request.EndpointIds, request.Restart.Force), db, tenant, jobs,
+                id => RestartJob(id, request.Restart, clock.GetUtcNow()), ct))
+            .RequireAuthorization(Policies.Operator);
+
+        g.MapPost("/bulk/notify", (BulkNotifyRequest request, EasyPatchDbContext db, ITenantContext tenant, JobService jobs, CancellationToken ct) =>
+            BulkAsync(new BulkEndpointsRequest(request.EndpointIds, false), db, tenant, jobs, id => NotifyJob(id, request.Message), ct))
+            .RequireAuthorization(Policies.Operator);
+
+        app.MapGet("/api/v1/user-messages", () => TypedResults.Ok(Enum.GetValues<UserMessagePreset>()
+                .Select(p => new UserMessagePresetDto(p, UserMessages.Title(p), UserMessages.Body(p, p == UserMessagePreset.RestartScheduled ? "{time}" : null),
+                    p == UserMessagePreset.RestartScheduled))
+                .ToList()))
+            .WithTags("Endpoints").RequireAuthorization(Policies.Viewer);
     }
+
+    private static CreateJobRequest RestartJob(Guid id, RestartRequest request, DateTimeOffset now)
+    {
+        var expiresAfter = request.ExpiresAfterMinutes ?? 120;
+        if (expiresAfter is < 15 or > 1440)
+        {
+            throw AppException.BadRequest("A restart can wait 15 minutes to 24 hours for an offline computer.", "validation_failed");
+        }
+
+        var payload = new RestartPayload
+        {
+            Mode = request.Mode,
+            Condition = request.Condition,
+            CountdownMinutes = request.CountdownMinutes ?? 5,
+            DeadlineMinutes = request.DeadlineMinutes ?? 240,
+        };
+        var start = request.ScheduledAt is { } at && at > now ? at : now;
+        return new CreateJobRequest(id, JobType.Restart, Force: request.Force, Restart: payload, NotBefore: request.ScheduledAt,
+            ExpiresAt: start.AddMinutes(expiresAfter));
+    }
+
+    private static CreateJobRequest NotifyJob(Guid id, NotifyRequest request) =>
+        new(id, JobType.NotifyUser, Notify: new NotifyUserPayload { Preset = request.Preset, ScheduledAt = request.RestartAt });
 
     internal static async Task<PagedResult<EndpointSummaryDto>> ListAsync(EndpointListQuery q, EasyPatchDbContext db, ITenantContext tenant,
         AgentPackageService packages, CancellationToken ct)
@@ -359,7 +463,11 @@ public static class EndpointEndpoints
             e.RebootReasons, e.RebootPendingSince, e.UpdateSourceType, e.UpdateSourceServer, e.MicrosoftUpdateRegistered, e.WufbPoliciesConfigured,
             e.DeferQualityUpdatesDays, e.DeferFeatureUpdatesDays, e.TargetReleaseVersion, e.AutomaticUpdatesMode, e.ManagedByMdm,
             e.WindowsUpdateServiceStartMode, e.WindowsUpdateServiceState, e.OsEndOfServicing, e.EsuLicenseDetected, e.EsuOverride, e.InstalledCount,
-            e.PendingRebootUpdateCount, e.ComplianceEvaluatedAt, e.Notes, credentials, activeJob);
+            e.PendingRebootUpdateCount, e.ComplianceEvaluatedAt, e.Notes, credentials, activeJob, e.AgentCapabilities, e.SignedInUsers,
+            e.TrayConnectedSessions,
+            e.WindowsUpdatePolicyStatus is null ? null : JsonSerializer.Deserialize<WindowsUpdatePolicyReport>(e.WindowsUpdatePolicyStatus, ContractJson.Options),
+            e.WindowsUpdatePolicyReportedAt,
+            await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Endpoint && p.EndpointId == id, ct));
     }
 
     internal static async Task EnsureEndpointAccessAsync(EasyPatchDbContext db, ITenantContext tenant, Guid id, CancellationToken ct)

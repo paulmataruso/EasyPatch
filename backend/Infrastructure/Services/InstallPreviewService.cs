@@ -33,7 +33,7 @@ public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService p
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentNullException.ThrowIfNull(selected);
         var now = clock.GetUtcNow();
-        var policy = await policies.ResolveAsync(endpoint.OrganizationId, endpoint.SiteId, ct);
+        var policy = await policies.ResolveAsync(endpoint, ct);
         var exclusions = await db.UpdateExclusions.AsNoTracking().Where(x => x.EndpointId == endpoint.Id).Select(x => x.UpdateGuid).ToListAsync(ct);
         var filter = policy.ToFilter(exclusions);
         var payload = new InstallUpdatesPayload { Mode = mode, SelectedUpdateGuids = selected.ToArray(), Filter = filter };

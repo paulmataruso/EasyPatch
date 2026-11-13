@@ -35,13 +35,14 @@ public sealed class Site
     public DateTimeOffset? ArchivedAt { get; set; }
 }
 
-/// <summary>Layered policy. Global row has every field set; organization/site rows override non-null fields.</summary>
+/// <summary>Layered policy. Global row has every field set; organization, site and endpoint rows override non-null fields.</summary>
 public sealed class Policy
 {
     public Guid Id { get; set; }
     public PolicyScope Scope { get; set; }
     public Guid? OrganizationId { get; set; }
     public Guid? SiteId { get; set; }
+    public Guid? EndpointId { get; set; }
 
     public int? CheckInIntervalSeconds { get; set; }
     public int? ScanIntervalMinutes { get; set; }
@@ -65,6 +66,15 @@ public sealed class Policy
 
     public int? ScanStaleAfterHours { get; set; }
     public int? MaxConcurrentInstallsPerSite { get; set; }
+
+    public bool? TrayIconEnabled { get; set; }
+    public bool? InstallNotificationsEnabled { get; set; }
+
+    /// <summary>Recurring restart, overriding the level above as a unit (null = inherit).</summary>
+    public Domain.RestartScheduleSettings? RestartSchedule { get; set; }
+
+    /// <summary>Windows Update settings to enforce, per group (a missing group inherits).</summary>
+    public Domain.PolicyWindowsUpdate? WindowsUpdate { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? UpdatedByUserId { get; set; }

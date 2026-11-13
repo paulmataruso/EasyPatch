@@ -1,3 +1,5 @@
+using EasyPatch.Contracts.Policy;
+
 namespace EasyPatch.Contracts.Agent;
 
 // ---------------------------------------------------------------------------------------------
@@ -63,6 +65,11 @@ public sealed record AgentConfig
     public int ScanIntervalMinutes { get; init; } = 360;
     public int InventoryIntervalMinutes { get; init; } = 1440;
     public int JitterPercent { get; init; } = 10;
+
+    public UserExperienceConfig UserExperience { get; init; } = new();
+
+    /// <summary>Windows Update settings to enforce. Null (or a null group) means leave Windows' configuration alone.</summary>
+    public WindowsUpdatePolicySettings? WindowsUpdate { get; init; }
 }
 
 public sealed record CheckInRequest
@@ -77,6 +84,14 @@ public sealed record CheckInRequest
 
     /// <summary>Short human-readable activity, e.g. "Idle", "Scanning", "Installing KB5044284".</summary>
     public string? CurrentActivity { get; init; }
+
+    /// <summary><see cref="AgentCapabilities"/> this agent supports. Agents that send none get only the original job types.</summary>
+    public IReadOnlyList<string> Capabilities { get; init; } = [];
+
+    public UserSessionInfo? Sessions { get; init; }
+
+    /// <summary>Windows Update policy enforcement status; sent only when it has changed.</summary>
+    public WindowsUpdatePolicyReport? WindowsUpdatePolicy { get; init; }
 }
 
 public sealed record CheckInResponse
@@ -117,6 +132,12 @@ public sealed record AgentJob
 
     /// <summary>Present for <see cref="JobType.InstallUpdates"/>.</summary>
     public InstallUpdatesPayload? Install { get; init; }
+
+    /// <summary>Present for <see cref="JobType.Restart"/>.</summary>
+    public RestartPayload? Restart { get; init; }
+
+    /// <summary>Present for <see cref="JobType.NotifyUser"/>.</summary>
+    public NotifyUserPayload? Notify { get; init; }
 }
 
 public sealed record InstallUpdatesPayload

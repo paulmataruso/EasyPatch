@@ -114,6 +114,7 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
             services.AddScoped<JobMaintenanceTask>();
             services.AddScoped<PresenceMonitorTask>();
             services.AddScoped<ScheduledInstallTask>();
+            services.AddScoped<ScheduledRestartTask>();
             services.AddScoped<ComplianceSnapshotTask>();
             services.AddScoped<RetentionTask>();
         });
@@ -306,14 +307,17 @@ public sealed class SignedAgent(HttpClient http, TimeProvider clock) : IDisposab
         return await http.SendAsync(request);
     }
 
-    public async Task<CheckInResponse> CheckInAsync(IReadOnlyList<Guid>? activeJobs = null, bool rebootPending = false)
-    {
-        using var response = await PostAsync(AgentRoutes.CheckIn, new CheckInRequest
+    public Task<CheckInResponse> CheckInAsync(IReadOnlyList<Guid>? activeJobs = null, bool rebootPending = false) =>
+        CheckInAsync(new CheckInRequest
         {
             AgentVersion = "1.0.0",
             RebootPending = rebootPending,
             ActiveJobIds = activeJobs ?? [],
         });
+
+    public async Task<CheckInResponse> CheckInAsync(CheckInRequest request)
+    {
+        using var response = await PostAsync(AgentRoutes.CheckIn, request);
         await AdminSession.EnsureAsync(response, HttpStatusCode.OK);
         return (await response.Content.ReadFromJsonAsync<CheckInResponse>(TestJson.Options))!;
     }

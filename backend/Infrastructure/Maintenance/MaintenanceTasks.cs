@@ -1,4 +1,5 @@
 using EasyPatch.Contracts;
+using EasyPatch.Contracts.Agent;
 using EasyPatch.Core.Domain;
 using EasyPatch.Core.Entities;
 using EasyPatch.Infrastructure.Data;
@@ -130,7 +131,7 @@ public sealed class PresenceMonitorTask(EasyPatchDbContext db, SettingsService s
         var staled = 0;
         foreach (var e in candidates)
         {
-            var policy = resolver(e.OrganizationId, e.SiteId);
+            var policy = resolver(e.OrganizationId, e.SiteId, e.Id);
             if (now - e.LastScanAt!.Value > TimeSpan.FromHours(policy.ScanStaleAfterHours))
             {
                 ComplianceService.ReevaluateStatus(e, policy, now);
@@ -173,7 +174,7 @@ public sealed class ScheduledInstallTask(
         var created = 0;
         foreach (var e in candidates)
         {
-            var policy = resolver(e.OrganizationId, e.SiteId);
+            var policy = resolver(e.OrganizationId, e.SiteId, e.Id);
             if (!policy.AutoInstallEnabled || policy.MaintenanceWindow is null)
             {
                 continue;
@@ -208,6 +209,83 @@ public sealed class ScheduledInstallTask(
         if (created > 0)
         {
             logger.LogInformation("Scheduled {Count} maintenance-window installation job(s) (global limit {Limit})", created, settings.GlobalMaxConcurrentInstalls);
+        }
+    }
+}
+
+/// <summary>Creates restart jobs for endpoints whose policy has a recurring restart schedule. Each occurrence is
+/// created at most once; with <see cref="RestartCondition.OnlyIfPending"/> only endpoints reporting a pending restart
+/// are included (the agent checks again before restarting).</summary>
+public sealed class ScheduledRestartTask(
+    EasyPatchDbContext db,
+    PolicyService policies,
+    JobService jobs,
+    TimeProvider clock,
+    ILogger<ScheduledRestartTask> logger) : IMaintenanceTask
+{
+    public string Name => "scheduled-restarts";
+    public long LockKey => 0x4550_0006;
+    public TimeSpan Interval => TimeSpan.FromMinutes(2);
+
+    public async Task RunOnceAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var resolver = await policies.CreateResolverAsync(ct);
+        var candidates = await db.Endpoints.AsNoTracking()
+            .Where(e => e.Status == EndpointStatus.Active && e.Organization!.IsActive && e.AgentCapabilities.Contains(AgentCapabilities.Restart))
+            .Select(e => new
+            {
+                e.Id, e.OrganizationId, e.SiteId, e.RebootPending, SiteTz = e.Site != null ? e.Site.TimeZone : null, OrgTz = e.Organization!.TimeZone,
+            })
+            .ToListAsync(ct);
+
+        var created = 0;
+        foreach (var e in candidates)
+        {
+            if (resolver(e.OrganizationId, e.SiteId, e.Id).RestartSchedule is not { } schedule)
+            {
+                continue;
+            }
+
+            if (schedule.Condition == RestartCondition.OnlyIfPending && !e.RebootPending)
+            {
+                continue;
+            }
+
+            // The occurrence stays open for the expiry period, so a worker restart does not lose it.
+            var occurrence = MaintenanceWindow.FindOpenWindow(
+                new MaintenanceWindowSettings(schedule.Days.Select(d => (DayOfWeek)d).ToArray(), schedule.Time, schedule.ExpiryMinutes),
+                e.SiteTz ?? e.OrgTz, now);
+            if (occurrence is not { } open || open.End - now < TimeSpan.FromMinutes(5))
+            {
+                continue;
+            }
+
+            var suffix = "schedule:" + open.Start.UtcDateTime.ToString("yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture);
+            var key = "restart:" + suffix;
+            var exists = await db.Jobs.AnyAsync(j => j.EndpointId == e.Id && j.Type == JobType.Restart &&
+                                                     (j.DedupeKey == key || JobTransitions.DedupeStatuses.Contains(j.Status)), ct);
+            if (exists)
+            {
+                continue; // already created for this occurrence, or another restart is pending
+            }
+
+            try
+            {
+                // The occurrence is already open, so the job is deliverable at once and expires when the occurrence closes.
+                await jobs.CreateAsync(new CreateJobRequest(e.Id, JobType.Restart, Trigger: JobTrigger.Scheduled, ExpiresAt: open.End,
+                    DedupeSuffix: suffix, Restart: schedule.ToPayload()), ct);
+                created++;
+            }
+            catch (AppException ex) when (ex.Code is "duplicate_job" or "endpoint_not_active" or "agent_upgrade_required")
+            {
+                db.ChangeTracker.Clear();
+            }
+        }
+
+        if (created > 0)
+        {
+            logger.LogInformation("Scheduled {Count} restart job(s) from restart schedules", created);
         }
     }
 }

@@ -64,6 +64,15 @@ public sealed class Endpoint
     public string? WindowsUpdateServiceStartMode { get; set; }
     public string? WindowsUpdateServiceState { get; set; }
 
+    /// <summary><see cref="EasyPatch.Contracts.Agent.AgentCapabilities"/> from the latest check-in.</summary>
+    public List<string> AgentCapabilities { get; set; } = [];
+    public int? SignedInUsers { get; set; }
+    public int? TrayConnectedSessions { get; set; }
+
+    /// <summary>Latest <see cref="EasyPatch.Contracts.Policy.WindowsUpdatePolicyReport"/> (JSON).</summary>
+    public string? WindowsUpdatePolicyStatus { get; set; }
+    public DateTimeOffset? WindowsUpdatePolicyReportedAt { get; set; }
+
     // Lifecycle
     public OsSupportStatus OsSupportStatus { get; set; }
     public DateOnly? OsEndOfServicing { get; set; }

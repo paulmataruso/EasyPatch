@@ -260,7 +260,7 @@ public sealed class EnrollmentService(
         var match = existingCredential.FirstOrDefault(c => c.PublicKey.AsSpan().SequenceEqual(spki));
         if (match is not null && match.Endpoint is { Status: EndpointStatus.Active })
         {
-            var policy = await policies.ResolveAsync(match.Endpoint.OrganizationId, match.Endpoint.SiteId, ct);
+            var policy = await policies.ResolveAsync(match.Endpoint, ct);
             return ActiveResponse(match.Endpoint, match, fingerprint, policy.ToAgentConfig(), now);
         }
 
@@ -295,7 +295,7 @@ public sealed class EnrollmentService(
             spki, fingerprint, settings.CredentialLifetimeDays, token.Id, null, now, ct);
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
-        var policy = await policies.ResolveAsync(endpoint.OrganizationId, endpoint.SiteId, ct);
+        var policy = await policies.ResolveAsync(endpoint, ct);
         logger.LogInformation("Endpoint {EndpointId} ({Hostname}) enrolled with token {Prefix}", endpoint.Id, endpoint.Hostname, token.TokenPrefix);
         return ActiveResponse(endpoint, credential, fingerprint, policy.ToAgentConfig(), now);
     }
@@ -394,7 +394,7 @@ public sealed class EnrollmentService(
                     return Terminal(EnrollmentState.Rejected, request, "The approved endpoint has since been revoked.", now);
                 }
 
-                var policy = await policies.ResolveAsync(endpoint.OrganizationId, endpoint.SiteId, ct);
+                var policy = await policies.ResolveAsync(endpoint, ct);
                 return ActiveResponse(endpoint, credential, request.KeyFingerprint, policy.ToAgentConfig(), now);
             }
 

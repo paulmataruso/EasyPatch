@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
+using EasyPatch.Contracts.Json;
+using EasyPatch.Contracts.Policy;
 using EasyPatch.Contracts.Agent;
 using EasyPatch.Core.Entities;
 using EasyPatch.Infrastructure.Data;
@@ -183,7 +186,7 @@ public sealed class CheckInService(
 
         var endpoint = await db.Endpoints.FirstOrDefaultAsync(e => e.Id == credential.EndpointId, ct) ?? throw AppException.NotFound("Endpoint");
         var settings = await settingsService.GetAsync(ct);
-        var policy = await policies.ResolveAsync(endpoint.OrganizationId, endpoint.SiteId, ct);
+        var policy = await policies.ResolveAsync(endpoint, ct);
 
         // Only write when slow-changing state actually changed.
         var version = ScanIngestionService.Truncate(request.AgentVersion, 255);
@@ -207,6 +210,8 @@ public sealed class CheckInService(
         {
             ComplianceService.ReevaluateStatus(endpoint, policy, now);
         }
+
+        ApplyUserExperienceState(db, endpoint, request, now);
 
         if (!endpoint.IsOnline && endpoint.Status == EndpointStatus.Active)
         {
@@ -234,5 +239,58 @@ public sealed class CheckInService(
             RotateCredential = credential.ExpiresAt - now < TimeSpan.FromDays(settings.CredentialRotateBeforeDays),
             LatestAgent = latest is null ? null : new AgentVersionInfo { Version = latest.Version, FileName = latest.FileName, Sha256 = latest.Sha256 },
         };
+    }
+
+    /// <summary>Capabilities, signed-in sessions and Windows Update policy status. Writes only on change.</summary>
+    internal static void ApplyUserExperienceState(EasyPatchDbContext db, Endpoint endpoint, CheckInRequest request, DateTimeOffset now)
+    {
+        var capabilities = request.Capabilities
+            .Where(c => AgentCapabilities.All.Contains(c, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        if (!capabilities.SequenceEqual(endpoint.AgentCapabilities))
+        {
+            endpoint.AgentCapabilities = capabilities;
+        }
+
+        if (request.Sessions is { } sessions)
+        {
+            var signedIn = Math.Clamp(sessions.SignedInUsers, 0, 10_000);
+            var tray = Math.Clamp(sessions.TrayConnected, 0, signedIn);
+            if (endpoint.SignedInUsers != signedIn || endpoint.TrayConnectedSessions != tray)
+            {
+                endpoint.SignedInUsers = signedIn;
+                endpoint.TrayConnectedSessions = tray;
+            }
+        }
+
+        if (request.WindowsUpdatePolicy is { } report && report.Groups.Count <= 16)
+        {
+            var groups = report.Groups
+                .Where(g => Enum.IsDefined(g.Group) && Enum.IsDefined(g.State))
+                .GroupBy(g => g.Group).Select(g => g.Last())
+                .Select(g => g with
+                {
+                    Message = ScanIngestionService.Truncate(g.Message, 1000),
+                    ConflictingValues = g.ConflictingValues.Take(16).Select(v => ScanIngestionService.Truncate(v, 128) ?? "").ToList(),
+                })
+                .ToList();
+            var json = JsonSerializer.Serialize(report with { Groups = groups }, ContractJson.Options);
+            if (json != endpoint.WindowsUpdatePolicyStatus)
+            {
+                var previous = endpoint.WindowsUpdatePolicyStatus is null
+                    ? null
+                    : JsonSerializer.Deserialize<WindowsUpdatePolicyReport>(endpoint.WindowsUpdatePolicyStatus, ContractJson.Options);
+                foreach (var conflict in groups.Where(g => g.State == WindowsUpdatePolicyState.Conflict &&
+                                                           previous?.Groups.FirstOrDefault(p => p.Group == g.Group)?.State != WindowsUpdatePolicyState.Conflict))
+                {
+                    EndpointEvents.Add(db, endpoint, "WindowsUpdatePolicyConflict",
+                        $"Windows Update {conflict.Group} settings were changed by another policy source; EasyPatch stopped re-applying them. {conflict.Message}",
+                        now, EventSeverity.Warning);
+                }
+
+                endpoint.WindowsUpdatePolicyStatus = json;
+                endpoint.WindowsUpdatePolicyReportedAt = now;
+            }
+        }
     }
 }

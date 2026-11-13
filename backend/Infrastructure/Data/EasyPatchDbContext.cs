@@ -1,8 +1,12 @@
 using System.Text;
+using System.Text.Json;
 using EasyPatch.Contracts;
+using EasyPatch.Contracts.Json;
 using EasyPatch.Core.Domain;
 using EasyPatch.Core.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace EasyPatch.Infrastructure.Data;
 
@@ -149,8 +153,12 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.HasIndex(x => x.Scope).IsUnique().HasFilter("scope = 'Global'");
             e.HasIndex(x => x.OrganizationId).IsUnique().HasFilter("scope = 'Organization'");
             e.HasIndex(x => x.SiteId).IsUnique().HasFilter("scope = 'Site'");
+            e.HasIndex(x => x.EndpointId).IsUnique().HasFilter("scope = 'Endpoint'");
             e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Site>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Endpoint>().WithMany().HasForeignKey(x => x.EndpointId).OnDelete(DeleteBehavior.Cascade);
+            Json(e.Property(x => x.RestartSchedule));
+            Json(e.Property(x => x.WindowsUpdate));
         });
         b.Entity<ServerSettingsRow>(e =>
         {
@@ -198,6 +206,8 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
 
             e.Property(x => x.LastScanError).HasMaxLength(2000);
             e.Property(x => x.Notes).HasMaxLength(4000);
+            e.Property(x => x.WindowsUpdatePolicyStatus).HasColumnType("jsonb");
+            e.Property(x => x.AgentCapabilities).HasDefaultValueSql("'{}'::text[]");
             e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(x => x.OrganizationId);
@@ -367,6 +377,19 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.HasIndex(x => x.UpdateGuid);
             e.HasIndex(x => x.CompletedAt);
         });
+    }
+
+    /// <summary>Maps a settings record to a jsonb column (serialized with the agent protocol's JSON options).</summary>
+    private static void Json<T>(PropertyBuilder<T?> property)
+        where T : class
+    {
+        property.HasColumnType("jsonb").HasConversion(
+            v => JsonSerializer.Serialize(v, ContractJson.Options),
+            v => JsonSerializer.Deserialize<T>(v, ContractJson.Options),
+            new ValueComparer<T?>(
+                (a, b) => JsonSerializer.Serialize(a, ContractJson.Options) == JsonSerializer.Serialize(b, ContractJson.Options),
+                v => v == null ? 0 : JsonSerializer.Serialize(v, ContractJson.Options).GetHashCode(StringComparison.Ordinal),
+                v => v == null ? null : JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(v, ContractJson.Options), ContractJson.Options)));
     }
 
     private static void Seed(ModelBuilder b)

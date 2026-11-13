@@ -297,6 +297,13 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.PrimitiveCollection<List<string>>("AgentCapabilities")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("agent_capabilities")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<DateTimeOffset?>("AgentInstalledAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("agent_installed_at");
@@ -531,6 +538,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("serial_number");
 
+                    b.Property<int?>("SignedInUsers")
+                        .HasColumnType("integer")
+                        .HasColumnName("signed_in_users");
+
                     b.Property<Guid?>("SiteId")
                         .HasColumnType("uuid")
                         .HasColumnName("site_id");
@@ -568,6 +579,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("total_memory_bytes");
 
+                    b.Property<int?>("TrayConnectedSessions")
+                        .HasColumnType("integer")
+                        .HasColumnName("tray_connected_sessions");
+
                     b.Property<string>("UpdateSourceServer")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -581,6 +596,14 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
+
+                    b.Property<DateTimeOffset?>("WindowsUpdatePolicyReportedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("windows_update_policy_reported_at");
+
+                    b.Property<string>("WindowsUpdatePolicyStatus")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("windows_update_policy_status");
 
                     b.Property<string>("WindowsUpdateServiceStartMode")
                         .HasMaxLength(255)
@@ -1694,6 +1717,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("check_in_interval_seconds");
 
+                    b.Property<Guid?>("EndpointId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("endpoint_id");
+
                     b.PrimitiveCollection<List<string>>("ExcludedKbs")
                         .IsRequired()
                         .HasColumnType("text[]")
@@ -1702,6 +1729,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.Property<bool?>("IncludeOptional")
                         .HasColumnType("boolean")
                         .HasColumnName("include_optional");
+
+                    b.Property<bool?>("InstallNotificationsEnabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("install_notifications_enabled");
 
                     b.Property<int?>("InventoryIntervalMinutes")
                         .HasColumnType("integer")
@@ -1731,6 +1762,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
 
+                    b.Property<string>("RestartSchedule")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("restart_schedule");
+
                     b.Property<int?>("ScanIntervalMinutes")
                         .HasColumnType("integer")
                         .HasColumnName("scan_interval_minutes");
@@ -1749,6 +1784,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("site_id");
 
+                    b.Property<bool?>("TrayIconEnabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("tray_icon_enabled");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -1757,7 +1796,15 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("updated_by_user_id");
 
+                    b.Property<string>("WindowsUpdate")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("windows_update");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("EndpointId")
+                        .IsUnique()
+                        .HasFilter("scope = 'Endpoint'");
 
                     b.HasIndex("OrganizationId")
                         .IsUnique()
@@ -2454,6 +2501,11 @@ namespace EasyPatch.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("EasyPatch.Core.Entities.Policy", b =>
                 {
+                    b.HasOne("EasyPatch.Core.Entities.Endpoint", null)
+                        .WithMany()
+                        .HasForeignKey("EndpointId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("EasyPatch.Core.Entities.Organization", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId")

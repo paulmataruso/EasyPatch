@@ -20,6 +20,41 @@ public enum JobType
     UpdateScan,
     InstallUpdates,
     InventoryRefresh,
+    /// <summary>Restart the computer (always an explicit administrator action or administrator-configured schedule).</summary>
+    Restart,
+    /// <summary>Show a preset message to the signed-in users. Never executes anything.</summary>
+    NotifyUser,
+}
+
+/// <summary>How a <see cref="JobType.Restart"/> job treats signed-in users. With nobody signed in, every mode restarts at once.</summary>
+public enum RestartMode
+{
+    /// <summary>Restart straight away.</summary>
+    Immediate,
+    /// <summary>Show a countdown, then restart. Users can restart sooner but cannot postpone.</summary>
+    Countdown,
+    /// <summary>Ask the user, who may postpone until a deadline; then a short final countdown and restart.</summary>
+    PromptWithDeadline,
+    /// <summary>Ask the user and keep reminding; while someone is signed in, restart only when a user accepts.</summary>
+    PromptNoDeadline,
+}
+
+public enum RestartCondition
+{
+    Always,
+    /// <summary>Only restart when Windows reports a pending restart when the job runs.</summary>
+    OnlyIfPending,
+}
+
+/// <summary>The only messages EasyPatch can show to users. There is deliberately no free-text message.</summary>
+public enum UserMessagePreset
+{
+    UpdatesInstalling,
+    UpdatesInstalled,
+    RestartRequired,
+    SaveYourWork,
+    MaintenanceTonight,
+    RestartScheduled,
 }
 
 public enum JobStatus
