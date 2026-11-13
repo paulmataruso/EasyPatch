@@ -13,7 +13,6 @@ import {
   Moon,
   PackageCheck,
   Settings,
-  ShieldCheck,
   Sun,
   UserCircle,
   X,
@@ -64,13 +63,24 @@ export function ThemeToggle({ className }: { className?: string }) {
   );
 }
 
-export function Logo({ className }: { className?: string }) {
+/**
+ * Logo mark plus wordmark. The wordmark's colours are made for dark backgrounds; `onDark` is for surfaces that are
+ * dark in both themes (the sidebar), otherwise the light-background variant is shown in the light theme.
+ */
+export function Logo({ className, onDark = false, large = false }: { className?: string; onDark?: boolean; large?: boolean }) {
+  const mark = large ? 'size-12' : 'size-8';
+  const word = cx('w-auto', large ? 'h-10' : 'h-7');
   return (
-    <span className={cx('inline-flex items-center gap-2 font-semibold tracking-tight', className)}>
-      <span className="inline-flex size-7 items-center justify-center rounded-md bg-accent text-accent-fg">
-        <ShieldCheck className="size-4" aria-hidden />
-      </span>
-      EasyPatch
+    <span className={cx('inline-flex items-center gap-2', className)}>
+      <img src="/logo.svg" alt="" className={cx('shrink-0', mark)} />
+      {onDark ? (
+        <img src="/wordmark.svg" alt="EasyPatch" className={word} />
+      ) : (
+        <>
+          <img src="/wordmark.svg" alt="EasyPatch" className={cx('hidden dark:block', word)} />
+          <img src="/wordmark-light.svg" alt="EasyPatch" className={cx('dark:hidden', word)} />
+        </>
+      )}
     </span>
   );
 }
@@ -115,7 +125,7 @@ export function AppLayout() {
   const sidebar = (
     <nav aria-label="Main" className="flex h-full flex-col bg-sidebar text-sidebar-fg">
       <div className="flex h-14 items-center justify-between px-4 text-white">
-        <Logo />
+        <Logo onDark />
         <button type="button" className="rounded p-1 lg:hidden" onClick={() => setMobileOpen(false)} aria-label="Close menu">
           <X className="size-5" aria-hidden />
         </button>
@@ -214,8 +224,8 @@ export function AuthShell({ children, title, subtitle }: { children: ReactNode; 
         <ThemeToggle />
       </div>
       <div className="w-full max-w-sm">
-        <div className="mb-6 flex justify-center text-lg">
-          <Logo />
+        <div className="mb-6 flex justify-center">
+          <Logo large />
         </div>
         <div className="rounded-xl border border-line bg-surface p-6 shadow-sm">
           <h1 className="text-lg font-semibold">{title}</h1>

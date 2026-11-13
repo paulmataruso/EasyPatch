@@ -1,4 +1,12 @@
-# EasyPatch
+<p align="center">
+  <img src="frontend/public/logo.svg" width="112" alt="">
+</p>
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="frontend/public/wordmark.svg">
+    <img src="frontend/public/wordmark-light.svg" height="72" alt="EasyPatch">
+  </picture>
+</h1>
 
 EasyPatch is a self-hosted Windows patch management platform for Managed Service Providers.
 A small Windows agent reports Windows Update status to a central web console. From there an
@@ -130,7 +138,7 @@ backend/     Core (domain), Infrastructure (EF Core, services), API, Worker, Tes
 agent/       Agent core, communication, Windows Update, inventory, service host, tests, WiX installer
 frontend/    Web console
 deployment/  Dockerfiles and Caddy configuration
-scripts/     init-secrets, backup, restore, agent and MSI builds, dependency audit
+scripts/     init-secrets, backup, restore, agent and MSI builds, agent icon, dependency audit
 docs/        Documentation
 ```
 

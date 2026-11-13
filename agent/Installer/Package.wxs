@@ -29,6 +29,9 @@
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
+    <!-- Installed apps / Programs and Features icon (the agent executable carries the same icon). -->
+    <Icon Id="EasyPatch.ico" SourceFile="$(sys.SOURCEFILEDIR)..\EasyPatch.Agent\EasyPatch.ico" />
+    <Property Id="ARPPRODUCTICON" Value="EasyPatch.ico" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPCOMMENTS" Value="Windows Update agent for the self-hosted EasyPatch patch management platform." />
 
