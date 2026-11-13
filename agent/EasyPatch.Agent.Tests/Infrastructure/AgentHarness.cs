@@ -34,7 +34,12 @@ public sealed class AgentHarness : IDisposable
 
         var options = new AgentRuntimeOptions { DataDirectory = DataDirectory, AgentVersion = "1.0.0" };
         Options = configure?.Invoke(options) ?? options;
-        Platform = new AgentPlatform(WindowsUpdate, Inventory, RebootDetector, new FakeUpdateSource(), Protector, Bootstrap, BootTime);
+        Platform = new AgentPlatform(WindowsUpdate, Inventory, RebootDetector, new FakeUpdateSource(), Protector, Bootstrap, BootTime)
+        {
+            UserInteraction = Users,
+            SystemRestart = SystemRestart,
+            PolicyRegistry = PolicyRegistry,
+        };
         Runtime = CreateRuntime();
     }
 
@@ -47,6 +52,9 @@ public sealed class AgentHarness : IDisposable
     public FakeInventory Inventory { get; } = new();
     public FakeRebootDetector RebootDetector { get; } = new();
     public TestSecretProtector Protector { get; } = new();
+    public FakeUserInteraction Users { get; } = new();
+    public FakeSystemRestart SystemRestart { get; } = new();
+    public FakePolicyRegistry PolicyRegistry { get; } = new();
     public AgentRuntimeOptions Options { get; }
     public AgentPlatform Platform { get; }
     public AgentRuntime Runtime { get; private set; }
@@ -115,6 +123,36 @@ public sealed class AgentHarness : IDisposable
     {
         Categories = [UpdateCategory.Security, UpdateCategory.Critical, UpdateCategory.Cumulative, UpdateCategory.ServicingStack, UpdateCategory.DotNet, UpdateCategory.Definition],
     };
+
+    public static AgentJob RestartJob(RestartMode mode, int deadlineMinutes = 240, int countdownMinutes = 5,
+        RestartCondition condition = RestartCondition.Always) => new()
+    {
+        JobId = Guid.NewGuid(),
+        Type = JobType.Restart,
+        Trigger = JobTrigger.Manual,
+        ExpiresAt = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero),
+        Restart = new RestartPayload { Mode = mode, Condition = condition, DeadlineMinutes = deadlineMinutes, CountdownMinutes = countdownMinutes },
+    };
+
+    public static AgentJob MessageJob(UserMessagePreset preset, DateTimeOffset? scheduledAt = null, DateTimeOffset? expiresAt = null) => new()
+    {
+        JobId = Guid.NewGuid(),
+        Type = JobType.NotifyUser,
+        Trigger = JobTrigger.Manual,
+        ExpiresAt = expiresAt ?? new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero),
+        Notify = new NotifyUserPayload { Preset = preset, ScheduledAt = scheduledAt },
+    };
+
+    /// <summary>Advances the clock and runs one pass of the job loop (restart ticks, messages, runnable jobs), then flushes.</summary>
+    public async Task TickAsync(TimeSpan? advance = null)
+    {
+        if (advance is { } by)
+        {
+            Time.Advance(by);
+        }
+
+        await RunJobsAndFlushAsync();
+    }
 
     public static AgentJob SimpleJob(JobType type) => new()
     {

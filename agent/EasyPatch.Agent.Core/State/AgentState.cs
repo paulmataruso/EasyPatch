@@ -1,4 +1,5 @@
 using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Policy;
 
 namespace EasyPatch.Agent.Core.State;
 
@@ -20,8 +21,12 @@ public enum JobRunState
     Acknowledged,
     Running,
 
-    /// <summary>Parked until the computer restarts (Windows requires a reboot before installing).</summary>
+    /// <summary>Parked until the computer restarts (Windows requires a reboot before installing, or a restart job
+    /// has started the restart).</summary>
     WaitingForReboot,
+
+    /// <summary>A restart job waiting for a signed-in user, a postponement, a countdown or a deadline.</summary>
+    WaitingForUser,
 }
 
 /// <summary>Durable agent state, persisted as JSON under &lt;data&gt;/state/agent-state.json.</summary>
@@ -80,6 +85,9 @@ public sealed class AgentState
     /// <summary>Jobs held by the agent, in delivery order. At most one is executing at a time.</summary>
     public List<JobRecord> Jobs { get; set; } = [];
 
+    /// <summary>Windows Update policy values EasyPatch manages, with the original values to restore.</summary>
+    public WindowsUpdatePolicyEnforcement WindowsUpdatePolicy { get; set; } = new();
+
     public JobRecord? FindJob(Guid jobId) => Jobs.Find(j => j.Job.JobId == jobId);
 }
 
@@ -111,4 +119,62 @@ public sealed class JobRecord
 
     /// <summary>Latest known per-update progress (used to keep earlier results across a resume).</summary>
     public List<JobItemReport> Items { get; set; } = [];
+
+    /// <summary>Signed-in users were told that updates are installing (install jobs; avoids repeats after a crash).</summary>
+    public bool UsersNotified { get; set; }
+
+    /// <summary>Progress of a restart job.</summary>
+    public RestartProgress? Restart { get; set; }
+}
+
+public sealed class RestartProgress
+{
+    public DateTimeOffset StartedAt { get; set; }
+
+    /// <summary>Boot time when the job started; a restart by anyone afterwards completes the job.</summary>
+    public DateTimeOffset BootTimeAtStart { get; set; }
+
+    public DateTimeOffset? Deadline { get; set; }
+
+    /// <summary>The restart starts at this time (countdown).</summary>
+    public DateTimeOffset? RestartAt { get; set; }
+
+    public DateTimeOffset? PostponedUntil { get; set; }
+
+    public int Postponements { get; set; }
+
+    /// <summary>When the restart was requested from Windows.</summary>
+    public DateTimeOffset? IssuedAt { get; set; }
+
+    public TimeSpan GracePeriod { get; set; }
+
+    public DateTimeOffset? LastHeartbeatAt { get; set; }
+}
+
+/// <summary>Per-group enforcement state of Windows Update policy overrides.</summary>
+public sealed class WindowsUpdatePolicyEnforcement
+{
+    public Dictionary<WindowsUpdatePolicyGroup, ManagedPolicyGroup> Groups { get; set; } = [];
+
+    /// <summary>Hash of the last status report the server accepted, and when.</summary>
+    public string? LastReportedHash { get; set; }
+
+    public DateTimeOffset? LastReportedAt { get; set; }
+}
+
+public sealed class ManagedPolicyGroup
+{
+    /// <summary>Values before EasyPatch first changed them; restored when the group is no longer managed.</summary>
+    public List<PolicyRegistryValue> Original { get; set; } = [];
+
+    /// <summary>Values EasyPatch wrote (the desired state the last time it applied the group).</summary>
+    public List<PolicyRegistryValue> Applied { get; set; } = [];
+
+    public WindowsUpdatePolicyState State { get; set; } = WindowsUpdatePolicyState.Applied;
+
+    public string? Message { get; set; }
+
+    public DateTimeOffset? AppliedAt { get; set; }
+
+    public List<string> ConflictingValues { get; set; } = [];
 }

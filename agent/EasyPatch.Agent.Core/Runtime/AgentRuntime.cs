@@ -2,6 +2,7 @@ using EasyPatch.Agent.Core.Abstractions;
 using EasyPatch.Agent.Core.Enrollment;
 using EasyPatch.Agent.Core.Jobs;
 using EasyPatch.Agent.Core.Outbox;
+using EasyPatch.Agent.Core.Policy;
 using EasyPatch.Agent.Core.Scanning;
 using EasyPatch.Agent.Core.Security;
 using EasyPatch.Agent.Core.State;
@@ -34,8 +35,10 @@ public sealed class AgentRuntime : IDisposable
     private readonly ScanService _scans;
     private readonly InventoryService _inventory;
     private readonly JobRunner _jobs;
+    private readonly WindowsUpdatePolicyManager? _policy;
     private readonly SemaphoreSlim _flushSignal = new(0, int.MaxValue);
     private string? _announcedVersion;
+    private bool _rebootPending;
 
     public AgentRuntime(
         AgentRuntimeOptions options,
@@ -71,8 +74,14 @@ public sealed class AgentRuntime : IDisposable
         _scans = new ScanService(platform, State, _outbox, _gate, options, _time, loggerFactory.CreateLogger<ScanService>());
         _inventory = new InventoryService(platform, State, _outbox, _scans, options, _time, loggerFactory.CreateLogger<InventoryService>());
         var reporter = new JobReporter(State, _outbox);
-        var install = new InstallUpdatesHandler(platform, State, reporter, _scans, _time, loggerFactory.CreateLogger<InstallUpdatesHandler>());
-        _jobs = new JobRunner(platform, State, reporter, _scans, _inventory, install, _gate, options, _time, loggerFactory.CreateLogger<JobRunner>());
+        var notifier = new UserNotifier(platform, State, loggerFactory.CreateLogger<UserNotifier>());
+        var install = new InstallUpdatesHandler(platform, State, reporter, _scans, notifier, _time, loggerFactory.CreateLogger<InstallUpdatesHandler>());
+        var restart = new RestartHandler(platform, State, reporter, options, _time, loggerFactory.CreateLogger<RestartHandler>());
+        _jobs = new JobRunner(platform, State, reporter, _scans, _inventory, install, restart, notifier, _gate, options, _time, loggerFactory.CreateLogger<JobRunner>());
+        if (platform.PolicyRegistry is not null)
+        {
+            _policy = new WindowsUpdatePolicyManager(platform.PolicyRegistry, State, _time, loggerFactory.CreateLogger<WindowsUpdatePolicyManager>());
+        }
 
         State.Update(s => s.FirstStartedAt ??= _time.GetUtcNow());
     }
@@ -129,7 +138,9 @@ public sealed class AgentRuntime : IDisposable
         }
 
         var reboot = await DetectRebootAsync(cancellationToken);
+        _rebootPending = reboot.Pending;
         var held = _jobs.HeldJobIds().Union(_outbox.PendingJobIds()).ToList();
+        var policyReport = _policy?.PendingReport();
         var request = new CheckInRequest
         {
             AgentVersion = _options.AgentVersion,
@@ -138,6 +149,9 @@ public sealed class AgentRuntime : IDisposable
             RebootReasons = reboot.Reasons,
             ActiveJobIds = held,
             CurrentActivity = _jobs.CurrentActivity,
+            Capabilities = _platform.Capabilities,
+            Sessions = _platform.UserInteraction is null ? null : SafeSessions(),
+            WindowsUpdatePolicy = policyReport,
         };
 
         CheckInResponse response;
@@ -160,11 +174,24 @@ public sealed class AgentRuntime : IDisposable
             s.LastAuthFailureAt = null;
         });
 
+        if (_policy is not null)
+        {
+            if (policyReport is not null)
+            {
+                _policy.MarkReported(policyReport);
+            }
+
+            _policy.Apply(config.WindowsUpdate);
+        }
+
         var toAcknowledge = _jobs.Accept(response.Jobs);
         foreach (var jobId in toAcknowledge)
         {
             await AcknowledgeAsync(client, jobId, cancellationToken);
         }
+
+        _jobs.DispatchMessages();
+        PublishTrayStatus();
 
         foreach (var jobId in response.CancelJobIds)
         {
@@ -243,9 +270,11 @@ public sealed class AgentRuntime : IDisposable
             response.CredentialId, fingerprint, response.ExpiresAt);
     }
 
-    /// <summary>Best-effort server notification followed by deletion of all local identity (MSI uninstall).</summary>
+    /// <summary>Best-effort server notification, restoration of any Windows Update settings EasyPatch changed, then
+    /// deletion of all local identity (MSI uninstall).</summary>
     public async Task UnenrollAsync(string? reason, CancellationToken cancellationToken = default)
     {
+        RestoreWindowsUpdatePolicy();
         var client = GetActiveClient();
         if (client is not null)
         {
@@ -271,7 +300,8 @@ public sealed class AgentRuntime : IDisposable
 
     // ================================================================== service loop
 
-    /// <summary>Runs until <paramref name="stoppingToken"/> is cancelled. Never reboots the computer.</summary>
+    /// <summary>Runs until <paramref name="stoppingToken"/> is cancelled. Restarts the computer only for an administrator's
+    /// restart job.</summary>
     public async Task RunAsync(CancellationToken stoppingToken)
     {
         var snapshot = State.Snapshot();
@@ -477,7 +507,9 @@ public sealed class AgentRuntime : IDisposable
         {
             try
             {
-                if (await _jobs.ProcessNextAsync(token))
+                var processed = await _jobs.ProcessNextAsync(token);
+                PublishTrayStatus();
+                if (processed)
                 {
                     continue;
                 }
@@ -569,6 +601,8 @@ public sealed class AgentRuntime : IDisposable
             "The server rejected this agent's credential ({Code}). Normal operation is suspended. Re-enroll the agent with a new enrollment token or deployment code.",
             ex.ErrorCode);
         _outbox.Clear();
+        RestoreWindowsUpdatePolicy();
+        SafeUserCall(u => u.SetRestartPrompt(null));
         State.Update(s =>
         {
             s.Status = AgentEnrollmentStatus.Revoked;
@@ -576,6 +610,61 @@ public sealed class AgentRuntime : IDisposable
             s.LastAuthFailureAt = _time.GetUtcNow();
             s.Jobs.Clear();
         });
+    }
+
+    private void RestoreWindowsUpdatePolicy()
+    {
+        try
+        {
+            _policy?.RestoreAll();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not restore the original Windows Update settings.");
+        }
+    }
+
+    private UserSessionInfo? SafeSessions()
+    {
+        try
+        {
+            return _platform.Users.GetSessions();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not enumerate signed-in users.");
+            return null;
+        }
+    }
+
+    private void PublishTrayStatus()
+    {
+        if (_platform.UserInteraction is null)
+        {
+            return;
+        }
+
+        var (lastContact, showIcon) = State.Read(s => (s.LastCheckInAt, s.Config.UserExperience.TrayIcon));
+        SafeUserCall(u => u.SetStatus(new TrayStatus
+        {
+            Activity = _jobs.CurrentActivity,
+            LastContactAt = lastContact,
+            RebootPending = _rebootPending,
+            AgentVersion = _options.AgentVersion,
+            ShowIcon = showIcon,
+        }));
+    }
+
+    private void SafeUserCall(Action<IUserInteraction> action)
+    {
+        try
+        {
+            action(_platform.Users);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not update the tray.");
+        }
     }
 
     private void AnnounceLatestVersion(AgentVersionInfo? latest)

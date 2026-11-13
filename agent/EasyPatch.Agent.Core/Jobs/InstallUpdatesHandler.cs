@@ -35,6 +35,7 @@ public sealed class InstallUpdatesHandler
     private readonly AgentStateStore _state;
     private readonly JobReporter _reporter;
     private readonly ScanService _scans;
+    private readonly UserNotifier _notifier;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
 
@@ -43,6 +44,7 @@ public sealed class InstallUpdatesHandler
         AgentStateStore state,
         JobReporter reporter,
         ScanService scans,
+        UserNotifier notifier,
         TimeProvider time,
         ILogger<InstallUpdatesHandler> logger)
     {
@@ -50,6 +52,7 @@ public sealed class InstallUpdatesHandler
         _state = state;
         _reporter = reporter;
         _scans = scans;
+        _notifier = notifier;
         _time = time;
         _logger = logger;
     }
@@ -130,6 +133,7 @@ public sealed class InstallUpdatesHandler
 
                 var basePercent = 5 + (int)(90.0 * index / plan.ToInstall.Count);
                 var startedAt = _time.GetUtcNow();
+                _notifier.InstallStarting(jobId);
 
                 // ---- download
                 if (!candidate.Update.IsDownloaded)
@@ -224,6 +228,7 @@ public sealed class InstallUpdatesHandler
             message += " A restart is required to complete installation.";
         }
 
+        _notifier.InstallFinished(succeeded, rebootRequired);
         var firstFailure = items.FirstOrDefault(i => i.Status == JobItemStatus.Failed);
         _reporter.Report(jobId, status, "Completed", 100, message, items,
             errorCode: status == JobStatus.Failed ? firstFailure?.ErrorCode : null,
@@ -249,7 +254,7 @@ public sealed class InstallUpdatesHandler
             }
         });
         _reporter.Report(jobId, JobStatus.WaitingForReboot, "WaitingForReboot", null, message, items, rebootRequired: true);
-        _logger.LogWarning("Job {JobId} is waiting for a restart: {Message} The agent never restarts the computer itself.", jobId, message);
+        _logger.LogWarning("Job {JobId} is waiting for a restart: {Message} The agent restarts the computer only for an administrator's restart job.", jobId, message);
         return JobOutcome.WaitingForReboot;
     }
 

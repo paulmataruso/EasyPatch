@@ -151,7 +151,7 @@ public sealed class InstallJobTests
         Assert.Contains(job.JobId, h.Server.CheckIns[^1].ActiveJobIds);
         Assert.Equal(1, h.Server.Jobs[job.JobId].Deliveries);
 
-        // The agent never restarts the computer itself; once someone does, the job resumes.
+        // An install job never restarts the computer itself; once someone does, the job resumes.
         var runtime = h.Reboot();
         Assert.True(await runtime.ProcessNextJobAsync(Ct));
         Assert.True(await runtime.FlushOutboxAsync(Ct));

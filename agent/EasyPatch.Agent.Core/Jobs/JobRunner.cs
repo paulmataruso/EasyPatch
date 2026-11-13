@@ -11,7 +11,8 @@ namespace EasyPatch.Agent.Core.Jobs;
 
 /// <summary>
 /// Holds the agent's jobs in durable state and executes them one at a time. Only the explicitly supported job
-/// types are executed; anything else is rejected.
+/// types are executed; anything else is rejected. Messages to users are shown as soon as they are acknowledged, and a
+/// restart job waiting for its users does not block other work.
 /// </summary>
 public sealed class JobRunner
 {
@@ -21,6 +22,8 @@ public sealed class JobRunner
     private readonly ScanService _scans;
     private readonly InventoryService _inventory;
     private readonly InstallUpdatesHandler _install;
+    private readonly RestartHandler _restart;
+    private readonly UserNotifier _notifier;
     private readonly WuaOperationGate _gate;
     private readonly AgentRuntimeOptions _options;
     private readonly TimeProvider _time;
@@ -36,6 +39,8 @@ public sealed class JobRunner
         ScanService scans,
         InventoryService inventory,
         InstallUpdatesHandler install,
+        RestartHandler restart,
+        UserNotifier notifier,
         WuaOperationGate gate,
         AgentRuntimeOptions options,
         TimeProvider time,
@@ -47,13 +52,16 @@ public sealed class JobRunner
         _scans = scans;
         _inventory = inventory;
         _install = install;
+        _restart = restart;
+        _notifier = notifier;
         _gate = gate;
         _options = options;
         _time = time;
         _logger = logger;
     }
 
-    public bool HasRunnableOrActiveJob => _state.Read(s => s.Jobs.Exists(j => j.RunState != JobRunState.WaitingForReboot));
+    /// <summary>True while a job is queued or running (parked jobs waiting for a restart or for users do not count).</summary>
+    public bool HasRunnableOrActiveJob => _state.Read(s => s.Jobs.Exists(j => j.RunState is not (JobRunState.WaitingForReboot or JobRunState.WaitingForUser)));
 
     public string CurrentActivity
     {
@@ -63,7 +71,7 @@ public sealed class JobRunner
             {
                 if (_executingJobId is null)
                 {
-                    return _gate.IsBusy ? "Scanning" : "Idle";
+                    return _gate.IsBusy ? "Scanning" : _restart.Activity ?? "Idle";
                 }
 
                 return _install.Activity ?? _activity ?? "Running job";
@@ -165,15 +173,96 @@ public sealed class JobRunner
             return;
         }
 
-        _reporter.Report(jobId, JobStatus.Cancelled, "Cancelled", null, "Cancelled by an administrator before it started.");
+        var isRestart = _state.Read(s => s.FindJob(jobId)?.Job.Type == JobType.Restart);
+        if (isRestart && !_restart.TryCancel(jobId))
+        {
+            return; // Windows is already restarting; the job completes when it comes back
+        }
+
+        _reporter.Report(jobId, JobStatus.Cancelled, "Cancelled", null,
+            isRestart && record.RunState != JobRunState.Received && record.RunState != JobRunState.Acknowledged
+                ? "Restart cancelled by an administrator."
+                : "Cancelled by an administrator before it started.");
         _state.Update(s => s.Jobs.RemoveAll(j => j.Job.JobId == jobId));
-        _logger.LogInformation("Job {JobId} cancelled before it started.", jobId);
+        _logger.LogInformation("Job {JobId} cancelled.", jobId);
+        if (isRestart)
+        {
+            _restart.Refresh();
+        }
+    }
+
+    /// <summary>Shows acknowledged messages to the signed-in users. They do not wait for other jobs.</summary>
+    public void DispatchMessages()
+    {
+        var now = _time.GetUtcNow();
+        var messages = _state.Read(s => s.Jobs
+            .Where(j => j.Job.Type == JobType.NotifyUser && j.RunState is JobRunState.Acknowledged or JobRunState.Running)
+            .Select(j => j.Job).ToList());
+        foreach (var job in messages)
+        {
+            var jobId = job.JobId;
+            if (job.ExpiresAt != default && job.ExpiresAt < now)
+            {
+                _reporter.Report(jobId, JobStatus.Expired, "Expired", null, "The message expired before it could be shown.",
+                    errorCode: "job_expired", errorMessage: "The message expired before it could be shown.");
+                Remove(jobId);
+                continue;
+            }
+
+            var attempts = _state.Update(s =>
+            {
+                var r = s.FindJob(jobId)!;
+                r.Attempts++;
+                r.RunState = JobRunState.Running;
+                return r.Attempts;
+            });
+            if (attempts > _options.MaxJobAttempts)
+            {
+                _reporter.Report(jobId, JobStatus.Failed, "Failed", null, null, errorCode: "agent_interrupted",
+                    errorMessage: "Showing the message was interrupted repeatedly and has been abandoned.");
+                Remove(jobId);
+                continue;
+            }
+
+            var reached = _notifier.Notify(new UserNotice { Preset = job.Notify!.Preset, ScheduledAt = job.Notify.ScheduledAt });
+            if (reached > 0)
+            {
+                _reporter.Report(jobId, JobStatus.Completed, "Completed", 100,
+                    $"Delivered to the EasyPatch tray in {reached} signed-in session(s).");
+            }
+            else
+            {
+                var signedIn = SafeSignedInUsers();
+                var reason = signedIn == 0
+                    ? "No one was signed in, so the message was not shown."
+                    : "The EasyPatch tray was not running for the signed-in users, so the message was not shown.";
+                _reporter.Report(jobId, JobStatus.Failed, "Failed", 100, reason, errorCode: "no_recipients", errorMessage: reason);
+            }
+
+            _logger.LogInformation("Message job {JobId} ({Preset}) delivered to {Count} session(s).", jobId, job.Notify.Preset, reached);
+            Remove(jobId);
+        }
+    }
+
+    private int SafeSignedInUsers()
+    {
+        try
+        {
+            return _platform.Users.GetSessions().SignedInUsers;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not enumerate signed-in users.");
+            return -1;
+        }
     }
 
     /// <summary>Executes the next runnable job, if any. Returns true when a job was processed.</summary>
     public async Task<bool> ProcessNextAsync(CancellationToken cancellationToken)
     {
         ExpireStaleJobs();
+        DispatchMessages();
+        _restart.Tick();
         var next = PickNext();
         if (next is null)
         {
@@ -181,6 +270,13 @@ public sealed class JobRunner
         }
 
         var jobId = next.Job.JobId;
+        if (next.Job.Type == JobType.Restart)
+        {
+            // Restarts never take the Windows Update gate: they wait for users and must not hold up scans.
+            await _restart.StartAsync(jobId, cancellationToken);
+            return true;
+        }
+
         var attempts = _state.Update(s =>
         {
             var r = s.FindJob(jobId)!;
@@ -284,8 +380,11 @@ public sealed class JobRunner
         var boot = _platform.BootTime.GetLastBootTime();
         return _state.Read(s =>
         {
+            // Messages and restarts are driven by DispatchMessages and the restart handler.
+            static bool Runnable(JobRecord j) => j.Job.Type is not (JobType.NotifyUser or JobType.Restart);
+
             // 1. A parked job whose restart has happened.
-            var resumable = s.Jobs.Find(j => j.RunState == JobRunState.WaitingForReboot &&
+            var resumable = s.Jobs.Find(j => Runnable(j) && j.RunState == JobRunState.WaitingForReboot &&
                                             j.WaitingBootTime is { } waitedOn &&
                                             (boot - waitedOn).Duration() > _options.BootTimeTolerance);
             if (resumable is not null)
@@ -294,8 +393,8 @@ public sealed class JobRunner
             }
 
             // 2. An interrupted job (was Running when the agent stopped), then acknowledged jobs in order.
-            return s.Jobs.Find(j => j.RunState == JobRunState.Running)
-                ?? s.Jobs.Find(j => j.RunState == JobRunState.Acknowledged);
+            return s.Jobs.Find(j => Runnable(j) && j.RunState == JobRunState.Running)
+                ?? s.Jobs.Find(j => j.RunState == JobRunState.Acknowledged && j.Job.Type != JobType.NotifyUser);
         });
     }
 
@@ -303,7 +402,8 @@ public sealed class JobRunner
     {
         var now = _time.GetUtcNow();
         var stale = _state.Read(s => s.Jobs
-            .Where(j => (j.RunState == JobRunState.WaitingForReboot && j.WaitingSince is { } since && now - since > _options.WaitingForRebootMaxAge) ||
+            .Where(j => (j.RunState == JobRunState.WaitingForReboot && j.Job.Type == JobType.InstallUpdates && j.WaitingSince is { } since &&
+                         now - since > _options.WaitingForRebootMaxAge) ||
                         (j.RunState is JobRunState.Received or JobRunState.Acknowledged && j.Job.ExpiresAt != default && j.Job.ExpiresAt < now))
             .Select(j => (j.Job.JobId, j.RunState))
             .ToList());
@@ -331,10 +431,12 @@ public sealed class JobRunner
 
     private void Remove(Guid jobId) => _state.Update(s => s.Jobs.RemoveAll(j => j.Job.JobId == jobId));
 
-    private static bool IsSupported(AgentJob job) => job.Type switch
+    private bool IsSupported(AgentJob job) => job.Type switch
     {
         JobType.UpdateScan or JobType.InventoryRefresh => true,
         JobType.InstallUpdates => job.Install is not null,
+        JobType.Restart => job.Restart is not null && _platform.SystemRestart is not null && RestartPayload.Validate(job.Restart).Count == 0,
+        JobType.NotifyUser => job.Notify is not null && _platform.UserInteraction is not null && Enum.IsDefined(job.Notify.Preset),
         _ => false,
     };
 }

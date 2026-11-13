@@ -26,7 +26,8 @@ internal static class AgentComposition
         AgentVersion = AgentVersion,
     };
 
-    public static AgentPlatform CreatePlatform(ILoggerFactory loggerFactory, IBootstrapConfigSource bootstrap)
+    /// <param name="users">The tray broker (service only); CLI commands have no tray.</param>
+    public static AgentPlatform CreatePlatform(ILoggerFactory loggerFactory, IBootstrapConfigSource bootstrap, IUserInteraction? users = null)
     {
         ArgumentNullException.ThrowIfNull(loggerFactory);
         var windowsUpdate = new WuaWindowsUpdateService(loggerFactory.CreateLogger<WuaWindowsUpdateService>());
@@ -42,13 +43,18 @@ internal static class AgentComposition
             updateSource,
             new DpapiSecretProtector(),
             bootstrap,
-            new TickCountBootTimeProvider());
+            new TickCountBootTimeProvider())
+        {
+            UserInteraction = users,
+            SystemRestart = new WindowsSystemRestart(),
+            PolicyRegistry = new WindowsPolicyRegistry(),
+        };
     }
 
-    public static AgentRuntime CreateRuntime(ILoggerFactory loggerFactory)
+    public static AgentRuntime CreateRuntime(ILoggerFactory loggerFactory, IUserInteraction? users = null)
     {
         var bootstrap = new RegistryBootstrapConfigSource();
-        return new AgentRuntime(CreateOptions(), CreatePlatform(loggerFactory, bootstrap), new AgentHttpClientFactory(bootstrap), loggerFactory);
+        return new AgentRuntime(CreateOptions(), CreatePlatform(loggerFactory, bootstrap, users), new AgentHttpClientFactory(bootstrap), loggerFactory);
     }
 
     /// <summary>Optional <c>LogLevel</c> registry value (Trace, Debug, Information, Warning) for the file log.</summary>

@@ -5,6 +5,8 @@
     <RootNamespace>EasyPatch.Agent</RootNamespace>
     <AssemblyName>EasyPatch.Agent</AssemblyName>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <!-- Windows Forms needs a Windows runtime pack, so plain builds (also on Linux) target win-x64; publish passes -r -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
@@ -15,7 +17,14 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>EasyPatch.ico</ApplicationIcon>
+    <!-- The tray ("EasyPatch.Agent.exe tray") is part of the agent executable, started by the service in each user session -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- LibraryImport (source-generated P/Invoke) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="EasyPatch.ico" LogicalName="EasyPatch.ico" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />

@@ -36,6 +36,9 @@ public static class AgentEventIds
     public static readonly EventId EnrollmentRejected = new(1003, "EnrollmentRejected");
     public static readonly EventId CredentialRevoked = new(1004, "CredentialRevoked");
     public static readonly EventId CredentialRotated = new(1005, "CredentialRotated");
+    public static readonly EventId RestartStarted = new(1010, "RestartStarted");
+    public static readonly EventId WindowsUpdatePolicyChanged = new(1011, "WindowsUpdatePolicyChanged");
+    public static readonly EventId WindowsUpdatePolicyConflict = new(1012, "WindowsUpdatePolicyConflict");
 }
 
 /// <summary>
@@ -338,6 +341,7 @@ public static class AgentConfigLimits
             ScanIntervalMinutes = Math.Clamp(config.ScanIntervalMinutes, 30, 7 * 24 * 60),
             InventoryIntervalMinutes = Math.Clamp(config.InventoryIntervalMinutes, 60, 7 * 24 * 60),
             JitterPercent = Math.Clamp(config.JitterPercent, 0, 50),
+            UserExperience = config.UserExperience ?? new UserExperienceConfig(),
         };
     }
 }

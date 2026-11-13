@@ -1,6 +1,7 @@
 using EasyPatch.Agent.Core.Abstractions;
 using EasyPatch.Contracts;
 using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Policy;
 using EasyPatch.Contracts.Updates;
 
 namespace EasyPatch.Agent.Tests.Infrastructure;
@@ -303,4 +304,123 @@ public sealed class FakeWindowsUpdate : IWindowsUpdateService
             }
         }
     }
+}
+
+/// <summary>Signed-in users and their trays. Answers are queued with <see cref="Answer"/>.</summary>
+public sealed class FakeUserInteraction : IUserInteraction
+{
+    private readonly List<RestartPromptResponse> _responses = [];
+
+    public int SignedInUsers { get; set; } = 1;
+    public int TrayConnected { get; set; } = 1;
+    public List<UserNotice> Notices { get; } = [];
+
+    /// <summary>Every prompt published, in order (null = removed).</summary>
+    public List<RestartPrompt?> Prompts { get; } = [];
+
+    public RestartPrompt? CurrentPrompt => Prompts.Count == 0 ? null : Prompts[^1];
+    public TrayStatus? Status { get; private set; }
+
+    public UserSessionInfo GetSessions() => new() { SignedInUsers = SignedInUsers, TrayConnected = TrayConnected };
+
+    public int Notify(UserNotice notice)
+    {
+        if (TrayConnected > 0)
+        {
+            Notices.Add(notice);
+        }
+
+        return TrayConnected;
+    }
+
+    public void SetRestartPrompt(RestartPrompt? prompt) => Prompts.Add(prompt);
+
+    public IReadOnlyList<RestartPromptResponse> TakeResponses()
+    {
+        var list = _responses.ToList();
+        _responses.Clear();
+        return list;
+    }
+
+    public void SetStatus(TrayStatus status) => Status = status;
+
+    public void Answer(Guid jobId, bool restartNow, int? postponeMinutes = null) =>
+        _responses.Add(new RestartPromptResponse(jobId, restartNow, postponeMinutes, SessionId: 1));
+}
+
+public sealed class FakeSystemRestart : ISystemRestart
+{
+    /// <summary>Grace period of every restart requested.</summary>
+    public List<TimeSpan> Requests { get; } = [];
+    public Exception? Failure { get; set; }
+    public bool AbortSucceeds { get; set; } = true;
+    public int Aborts { get; private set; }
+
+    public void Restart(TimeSpan gracePeriod, string message)
+    {
+        if (Failure is not null)
+        {
+            throw Failure;
+        }
+
+        Requests.Add(gracePeriod);
+    }
+
+    public bool TryAbort()
+    {
+        Aborts++;
+        return AbortSucceeds;
+    }
+}
+
+/// <summary>The two Windows Update policy keys, in memory.</summary>
+public sealed class FakePolicyRegistry : IPolicyRegistry
+{
+    private readonly Dictionary<(PolicyRegistryKey, string), PolicyRegistryValue> _values = [];
+
+    public List<string> Writes { get; } = [];
+    public Exception? Failure { get; set; }
+    public bool Mdm { get; set; }
+
+    public PolicyRegistryValue Read(PolicyRegistryKey key, string name)
+    {
+        if (Failure is not null)
+        {
+            throw Failure;
+        }
+
+        return _values.TryGetValue((key, name.ToUpperInvariant()), out var v) ? v : new PolicyRegistryValue(key, name);
+    }
+
+    public void Write(PolicyRegistryValue value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (Failure is not null)
+        {
+            throw Failure;
+        }
+
+        Writes.Add($"{value.Name}={value.Display}");
+        Set(value);
+    }
+
+    public bool MdmUpdatePoliciesPresent() => Mdm;
+
+    /// <summary>Changes a value behind EasyPatch's back (another policy source).</summary>
+    public void Set(PolicyRegistryValue value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.IsAbsent)
+        {
+            _values.Remove((value.Key, value.Name.ToUpperInvariant()));
+        }
+        else
+        {
+            _values[(value.Key, value.Name.ToUpperInvariant())] = value;
+        }
+    }
+
+    public int? DWord(PolicyRegistryKey key, string name) => Read(key, name).DWord;
+
+    public int Count => _values.Count;
 }

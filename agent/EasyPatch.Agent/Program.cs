@@ -1,4 +1,5 @@
 using EasyPatch.Agent;
+using EasyPatch.Agent.Core.Ipc;
 using EasyPatch.Agent.Core.Logging;
 using EasyPatch.Agent.Core.Runtime;
 using EasyPatch.Agent.Platform;
@@ -16,6 +17,7 @@ try
     return command switch
     {
         "run" => await RunAgentAsync(rest),
+        "tray" => EasyPatch.Agent.Tray.TrayApplication.Run(),
         "enroll" => await Cli.EnrollAsync(rest),
         "status" => Cli.Status(rest),
         "unenroll" => await Cli.UnenrollAsync(rest),
@@ -101,7 +103,19 @@ static async Task<int> RunAgentAsync(string[] arguments)
         });
     }
 
-    builder.Services.AddSingleton(sp => AgentComposition.CreateRuntime(sp.GetRequiredService<ILoggerFactory>()));
+    if (isService)
+    {
+        // Trays in the users' sessions (messages and restart prompts). Only the LocalSystem service can start them.
+        builder.Services.AddSingleton(sp => TrayBrokerFactory.Create(sp.GetRequiredService<ILoggerFactory>()));
+        builder.Services.AddSingleton(sp => AgentComposition.CreateRuntime(sp.GetRequiredService<ILoggerFactory>(), sp.GetRequiredService<TrayBroker>()));
+        builder.Services.AddHostedService<TrayPipeServer>();
+        builder.Services.AddHostedService<TrayLauncher>();
+    }
+    else
+    {
+        builder.Services.AddSingleton(sp => AgentComposition.CreateRuntime(sp.GetRequiredService<ILoggerFactory>()));
+    }
+
     builder.Services.AddHostedService<AgentHostedService>();
 
     using var host = builder.Build();

@@ -206,6 +206,8 @@ public sealed class FixedHttpClientFactory : IAgentHttpClientFactory
 }
 
 /// <summary>Bundle of the platform services an <see cref="Runtime.AgentRuntime"/> needs.</summary>
+/// <remarks>The optional services enable the matching <see cref="AgentCapabilities"/>; without them the agent only
+/// scans, installs and reports, exactly like an agent built before they existed.</remarks>
 public sealed record AgentPlatform(
     IWindowsUpdateService WindowsUpdate,
     IInventoryCollector Inventory,
@@ -213,4 +215,41 @@ public sealed record AgentPlatform(
     IUpdateSourceDetector UpdateSource,
     ISecretProtector SecretProtector,
     IBootstrapConfigSource Bootstrap,
-    IBootTimeProvider BootTime);
+    IBootTimeProvider BootTime)
+{
+    /// <summary>The EasyPatch tray in each signed-in session (messages and restart prompts).</summary>
+    public IUserInteraction? UserInteraction { get; init; }
+
+    /// <summary>Restarts for administrator restart jobs.</summary>
+    public ISystemRestart? SystemRestart { get; init; }
+
+    /// <summary>Windows Update policy overrides.</summary>
+    public IPolicyRegistry? PolicyRegistry { get; init; }
+
+    public IUserInteraction Users => UserInteraction ?? NoUserInteraction.Instance;
+
+    public IReadOnlyList<string> Capabilities
+    {
+        get
+        {
+            var list = new List<string>();
+            if (SystemRestart is not null)
+            {
+                list.Add(AgentCapabilities.Restart);
+            }
+
+            if (UserInteraction is not null)
+            {
+                list.Add(AgentCapabilities.NotifyUser);
+                list.Add(AgentCapabilities.Tray);
+            }
+
+            if (PolicyRegistry is not null)
+            {
+                list.Add(AgentCapabilities.WindowsUpdatePolicy);
+            }
+
+            return list;
+        }
+    }
+}
