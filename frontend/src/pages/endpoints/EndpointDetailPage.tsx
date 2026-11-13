@@ -1,0 +1,375 @@
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
+import { Ban, Download, MoreHorizontal, Pencil, Power, RefreshCw, ScanSearch, Trash2, WifiOff } from 'lucide-react';
+import { ApiError, api } from '../../api/client';
+import { useApi, useApiMutation, useSites } from '../../api/hooks';
+import { ESU_OVERRIDES, type EndpointDetailDto, type EsuOverride, type UpdateEndpointRequest } from '../../api/types';
+import { useAuth } from '../../auth/AuthContext';
+import { ConfirmDialog, Dialog } from '../../components/Dialog';
+import { InstallUpdatesDialog, jobIdOf } from '../../components/InstallDialog';
+import { ComplianceBadge, EndpointStatusBadge, JobStatusBadge, OnlineBadge, OsSupportBadge } from '../../components/StatusBadges';
+import { useToast } from '../../components/Toast';
+import {
+  Alert,
+  Button,
+  Card,
+  ErrorState,
+  Field,
+  InlineError,
+  PageHeader,
+  ProgressBar,
+  Select,
+  Spinner,
+  StatTile,
+  Tabs,
+  Textarea,
+} from '../../components/ui';
+import { formatDateTime, formatRelative, humanize } from '../../lib/format';
+import { useUrlState } from '../../lib/urlState';
+import { ActivityTab, EffectivePolicyTab, HistoryTab, InstalledTab, JobsTab, OverviewTab, UpdatesTab } from './EndpointTabs';
+
+export function EndpointDetailPage() {
+  const { id = '' } = useParams();
+  const url = useUrlState();
+  const tab = url.get('tab', 'overview');
+  const { canOperate } = useAuth();
+  const [install, setInstall] = useState<{ mode: 'AllEligible' | 'Selected'; guids?: string[] } | null>(null);
+  const endpoint = useApi<EndpointDetailDto>(`/endpoints/${id}`, undefined, {
+    // Poll quickly while a job is active so progress is live.
+    refetchInterval: (data) => (data?.activeJob ? 5_000 : 30_000),
+  });
+  const active = endpoint.data?.activeJob;
+
+  if (endpoint.isPending) return <Spinner />;
+  if (endpoint.isError) return <ErrorState error={endpoint.error} onRetry={() => void endpoint.refetch()} />;
+  const e = endpoint.data;
+  const s = e.summary;
+  const managed = s.status === 'Active';
+
+  return (
+    <>
+      <PageHeader
+        breadcrumb={
+          <>
+            <Link to="/endpoints" className="hover:text-fg">Endpoints</Link>
+            {' / '}
+            <Link to={`/organizations/${s.organizationId}`} className="hover:text-fg">{s.organizationName}</Link>
+            {s.siteName && <> · {s.siteName}</>}
+          </>
+        }
+        title={
+          <span className="flex flex-wrap items-center gap-2">
+            {s.hostname}
+            <EndpointStatusBadge status={s.status} />
+            <ComplianceBadge status={s.complianceStatus} />
+          </span>
+        }
+        subtitle={
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <OnlineBadge online={s.isOnline} lastSeen={s.lastCheckInAt} />
+            <span>{s.operatingSystem ?? 'Unknown OS'}{s.osVersion ? ` ${s.osVersion}` : ''}{s.osBuild ? ` (build ${s.osBuild})` : ''}</span>
+            <OsSupportBadge status={s.osSupportStatus} />
+            <span>Last check-in {formatRelative(s.lastCheckInAt)}</span>
+            {s.currentActivity && <span className="text-accent">{s.currentActivity}</span>}
+          </span>
+        }
+        actions={canOperate && managed && <EndpointActions endpoint={e} onInstallAll={() => setInstall({ mode: 'AllEligible' })} />}
+      />
+
+      <div className="mb-4 flex flex-col gap-3">
+        {!managed && (
+          <Alert tone="danger" title={`This endpoint is ${s.status.toLowerCase()}`}>
+            Its credentials are revoked. The agent can no longer report or receive jobs. Reinstall the agent and enroll again to manage it.
+          </Alert>
+        )}
+        {e.summary.rebootPending && (
+          <Alert tone="info" title={`Restart pending${e.rebootPendingSince ? ` since ${formatDateTime(e.rebootPendingSince)}` : ''}`}>
+            <p>
+              {e.pendingRebootUpdateCount > 0 && `${e.pendingRebootUpdateCount} installed update${e.pendingRebootUpdateCount === 1 ? '' : 's'} take effect after a restart. `}
+              {e.rebootReasons.length > 0 && <>Reported by Windows: {e.rebootReasons.join(', ')}. </>}
+            </p>
+            <p className="mt-1">
+              <Power className="mr-1 inline size-3.5" aria-hidden />
+              EasyPatch never restarts endpoints. Restart this machine through your own change process; the agent reports the new state after it comes back.
+            </p>
+          </Alert>
+        )}
+        {managed && !s.isOnline && (
+          <Alert tone="warn" title="Endpoint offline">
+            <WifiOff className="mr-1 inline size-3.5" aria-hidden />
+            No check-in since {formatDateTime(s.lastCheckInAt)}. New jobs stay queued until it reconnects or they expire.
+          </Alert>
+        )}
+        {active && <ActiveJobCard job={active} />}
+      </div>
+
+      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
+        <StatTile label="Missing (required)" value={s.missingRequiredCount} tone={s.missingRequiredCount ? 'warn' : 'ok'} hint={`${s.missingTotalCount} missing in total`} />
+        <StatTile label="Failed" value={s.failedCount} tone={s.failedCount ? 'danger' : undefined} />
+        <StatTile label="Installed" value={e.installedCount} />
+        <StatTile label="Pending restart" value={e.pendingRebootUpdateCount} tone={e.pendingRebootUpdateCount ? 'info' : undefined} />
+        <StatTile label="Last scan" value={<span className="text-base">{formatRelative(s.lastScanAt)}</span>} hint={e.lastScanError ? <span className="text-danger">Last attempt failed</span> : undefined} />
+        <StatTile label="Agent" value={<span className="font-mono text-base">{s.agentVersion ?? '—'}</span>} tone={s.agentOutdated ? 'warn' : undefined} hint={s.agentOutdated ? 'Newer version available' : undefined} />
+      </div>
+
+      <Tabs
+        active={tab}
+        onChange={(t) => url.set({ tab: t === 'overview' ? null : t, state: null, category: null })}
+        tabs={[
+          { id: 'overview', label: 'Overview' },
+          { id: 'updates', label: 'Updates', count: s.missingTotalCount + s.failedCount },
+          { id: 'installed', label: 'Installed' },
+          { id: 'history', label: 'Update history' },
+          { id: 'jobs', label: 'Jobs' },
+          { id: 'activity', label: 'Activity' },
+          { id: 'policy', label: 'Effective policy' },
+        ]}
+      />
+      {tab === 'overview' && <OverviewTab endpoint={e} />}
+      {tab === 'updates' && <UpdatesTab endpoint={e} onInstallSelected={(guids) => setInstall({ mode: 'Selected', guids })} onInstallAll={() => setInstall({ mode: 'AllEligible' })} />}
+      {tab === 'installed' && <InstalledTab endpointId={e.summary.id} />}
+      {tab === 'history' && <HistoryTab endpointId={e.summary.id} />}
+      {tab === 'jobs' && <JobsTab endpointId={e.summary.id} />}
+      {tab === 'activity' && <ActivityTab endpointId={e.summary.id} />}
+      {tab === 'policy' && <EffectivePolicyTab endpointId={e.summary.id} />}
+
+      <InstallUpdatesDialog
+        endpointId={s.id}
+        hostname={s.hostname}
+        mode={install?.mode ?? 'AllEligible'}
+        updateGuids={install?.guids}
+        open={install !== null}
+        onClose={() => setInstall(null)}
+      />
+    </>
+  );
+}
+
+function ActiveJobCard({ job }: { job: NonNullable<EndpointDetailDto['activeJob']> }) {
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center gap-3">
+        <JobStatusBadge status={job.status} />
+        <Link to={`/jobs/${job.id}`} className="font-medium hover:text-accent">
+          {humanize(job.type)}
+        </Link>
+        <span className="text-sm text-muted">
+          requested by {job.requestedBy} {formatRelative(job.createdAt)}
+        </span>
+        <span className="flex-1" />
+        {job.itemCount > 0 && (
+          <span className="text-sm text-muted">
+            {job.succeededCount} of {job.itemCount} installed{job.failedCount ? `, ${job.failedCount} failed` : ''}
+          </span>
+        )}
+      </div>
+      {(job.status === 'Running' || job.progressPercent !== null) && (
+        <div className="mt-3 flex items-center gap-3">
+          <ProgressBar value={job.progressPercent} label="Job progress" />
+          <span className="w-10 text-right text-xs tabular-nums">{job.progressPercent ?? 0}%</span>
+        </div>
+      )}
+      {(job.phase || job.progressMessage) && (
+        <p className="mt-2 text-sm text-muted">
+          {job.phase && <span className="font-medium text-fg">{humanize(job.phase)}: </span>}
+          {job.progressMessage}
+        </p>
+      )}
+      {job.status === 'Queued' && <p className="mt-2 text-sm text-muted">Waiting for the agent to pick up the job at its next check-in.</p>}
+    </Card>
+  );
+}
+
+function EndpointActions({ endpoint, onInstallAll }: { endpoint: EndpointDetailDto; onInstallAll: () => void }) {
+  const s = endpoint.summary;
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [menu, setMenu] = useState(false);
+  const [dialog, setDialog] = useState<'edit' | 'revoke' | 'delete' | null>(null);
+
+  const queueJob = useApiMutation((kind: 'scan' | 'inventory-refresh') => api.post<unknown>(`/endpoints/${s.id}/${kind}`), {
+    invalidate: [`/endpoints/${s.id}`, '/jobs'],
+    onSuccess: (result, kind) => {
+      const jobId = jobIdOf(result);
+      toast.success(
+        <span>
+          {kind === 'scan' ? 'Update scan' : 'Inventory refresh'} queued.{' '}
+          {jobId && <Link to={`/jobs/${jobId}`} className="text-accent hover:underline">View job</Link>}
+        </span>,
+      );
+    },
+  });
+
+  useEffect(() => {
+    const err = queueJob.error;
+    if (!err) return;
+    if (err instanceof ApiError && err.code === 'duplicate_job') {
+      const existing = err.extension<string>('existingJobId');
+      toast.info(
+        <span>
+          That job is already queued or running.{' '}
+          {existing && <Link to={`/jobs/${existing}`} className="text-accent hover:underline">View job</Link>}
+        </span>,
+      );
+    } else {
+      toast.error(err.message);
+    }
+  }, [queueJob.error, toast]);
+
+  const revoke = useApiMutation(() => api.post(`/endpoints/${s.id}/revoke`, { reason: 'Revoked by administrator' }), {
+    invalidate: [`/endpoints`, '/dashboard'],
+    onSuccess: () => {
+      toast.success('Endpoint credentials revoked.');
+      setDialog(null);
+    },
+  });
+  const remove = useApiMutation(() => api.del(`/endpoints/${s.id}`), {
+    invalidate: ['/endpoints', '/dashboard', '/organizations'],
+    onSuccess: () => {
+      toast.success(`${s.hostname} deleted.`);
+      navigate('/endpoints', { replace: true });
+    },
+  });
+
+  return (
+    <>
+      <Button variant="primary" icon={<Download className="size-4" aria-hidden />} onClick={onInstallAll}>
+        Install All Missing Updates
+      </Button>
+      <Button icon={<ScanSearch className="size-4" aria-hidden />} loading={queueJob.isPending && queueJob.variables === 'scan'} onClick={() => queueJob.mutate('scan')}>
+        Scan now
+      </Button>
+      <div className="relative">
+        <Button aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} icon={<MoreHorizontal className="size-4" aria-hidden />}>
+          More
+        </Button>
+        {menu && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} aria-hidden />
+            <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-line bg-surface py-1 shadow-lg"
+              onKeyDown={(e) => e.key === 'Escape' && setMenu(false)}>
+              <MenuItem icon={<RefreshCw className="size-4" aria-hidden />} onClick={() => { setMenu(false); queueJob.mutate('inventory-refresh'); }}>
+                Refresh inventory
+              </MenuItem>
+              <MenuItem icon={<Pencil className="size-4" aria-hidden />} onClick={() => { setMenu(false); setDialog('edit'); }}>
+                Edit site, notes, ESU
+              </MenuItem>
+              <MenuItem icon={<Ban className="size-4" aria-hidden />} danger onClick={() => { setMenu(false); setDialog('revoke'); }}>
+                Revoke credentials
+              </MenuItem>
+              <MenuItem icon={<Trash2 className="size-4" aria-hidden />} danger onClick={() => { setMenu(false); setDialog('delete'); }}>
+                Delete endpoint
+              </MenuItem>
+            </div>
+          </>
+        )}
+      </div>
+      <EditEndpointDialog endpoint={endpoint} open={dialog === 'edit'} onClose={() => setDialog(null)} />
+      <ConfirmDialog
+        open={dialog === 'revoke'}
+        onClose={() => setDialog(null)}
+        onConfirm={() => revoke.mutate(undefined)}
+        loading={revoke.isPending}
+        error={revoke.error}
+        tone="danger"
+        title={`Revoke ${s.hostname}?`}
+        confirmLabel="Revoke credentials"
+      >
+        The agent's credentials stop working immediately. The endpoint keeps its history but can no longer report or receive jobs. To manage it again, reinstall
+        and re-enroll the agent.
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={dialog === 'delete'}
+        onClose={() => setDialog(null)}
+        onConfirm={() => remove.mutate(undefined)}
+        loading={remove.isPending}
+        error={remove.error}
+        tone="danger"
+        title={`Delete ${s.hostname}?`}
+        confirmLabel="Delete endpoint"
+        confirmText={s.hostname}
+      >
+        The endpoint record, its update state, jobs and history are deleted and its credentials are revoked. The agent remains installed on the device until you
+        uninstall it.
+      </ConfirmDialog>
+    </>
+  );
+}
+
+function MenuItem({ children, icon, onClick, danger }: { children: string; icon: ReactNode; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-hover ${danger ? 'text-danger' : 'text-fg'}`}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+function EditEndpointDialog({ endpoint, open, onClose }: { endpoint: EndpointDetailDto; open: boolean; onClose: () => void }) {
+  const s = endpoint.summary;
+  const toast = useToast();
+  const sites = useSites(open ? s.organizationId : null);
+  const [form, setForm] = useState<UpdateEndpointRequest>({ siteId: s.siteId, notes: endpoint.notes, esuOverride: endpoint.esuOverride });
+  useEffect(() => {
+    if (open) setForm({ siteId: s.siteId, notes: endpoint.notes, esuOverride: endpoint.esuOverride });
+  }, [open, s.siteId, endpoint.notes, endpoint.esuOverride]);
+
+  const save = useApiMutation((req: UpdateEndpointRequest) => api.put(`/endpoints/${s.id}`, req), {
+    invalidate: [`/endpoints`],
+    onSuccess: () => {
+      toast.success('Endpoint updated.');
+      onClose();
+    },
+  });
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    save.mutate({ ...form, notes: form.notes?.trim() ? form.notes : null });
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} title={`Edit ${s.hostname}`}>
+      <form onSubmit={submit} className="flex flex-col gap-3.5">
+        <Field label="Site" htmlFor="ep-site" hint="Moving an endpoint changes which site policy and maintenance window apply.">
+          <Select id="ep-site" value={form.siteId ?? ''} onChange={(e) => setForm({ ...form, siteId: e.target.value || null })}>
+            <option value="">No site</option>
+            {sites.page.items.map((site) => (
+              <option key={site.id} value={site.id} disabled={!site.isActive && site.id !== s.siteId}>
+                {site.name}
+                {!site.isActive ? ' (archived)' : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field
+          label="Extended Security Updates (ESU)"
+          htmlFor="ep-esu"
+          hint={`Detected automatically: ${endpoint.esuLicenseDetected ? 'ESU license found' : 'no ESU license found'}. Override only if detection is wrong.`}
+        >
+          <Select id="ep-esu" value={form.esuOverride ?? 'Auto'} onChange={(e) => setForm({ ...form, esuOverride: e.target.value as EsuOverride })}>
+            {ESU_OVERRIDES.map((o) => (
+              <option key={o} value={o}>
+                {o === 'Auto' ? 'Automatic detection' : o === 'Enrolled' ? 'Enrolled in ESU' : 'Not enrolled'}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Notes" htmlFor="ep-notes">
+          <Textarea id="ep-notes" value={form.notes ?? ''} maxLength={4000} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        </Field>
+        <InlineError error={save.error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>
+            Save changes
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}

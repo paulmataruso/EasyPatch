@@ -1,0 +1,627 @@
+import { useMemo, useState, type ReactNode } from 'react';
+import { Link } from 'react-router';
+import { Ban, CheckCircle2, Download, ExternalLink, EyeOff, ShieldCheck } from 'lucide-react';
+import { api } from '../../api/client';
+import { useApi, useApiMutation, useList } from '../../api/hooks';
+import {
+  ENDPOINT_UPDATE_STATES,
+  UPDATE_CATEGORIES,
+  type EffectivePolicyDto,
+  type EndpointDetailDto,
+  type EndpointEventDto,
+  type EndpointUpdateDto,
+  type EndpointUpdateState,
+  type JobSummaryDto,
+  type PolicyScope,
+  type UpdateHistoryDto,
+} from '../../api/types';
+import { useAuth } from '../../auth/AuthContext';
+import { Dialog } from '../../components/Dialog';
+import { EnumSelect } from '../../components/Filters';
+import { JobTable } from '../../components/JobTable';
+import { CategoryBadge, EventSeverityDot, JobItemStatusBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
+import { useToast } from '../../components/Toast';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  EmptyState,
+  ErrorState,
+  InlineError,
+  KeyValueList,
+  Mono,
+  Pagination,
+  Spinner,
+  TableWrap,
+  TextField,
+  Toolbar,
+} from '../../components/ui';
+import { formatBytes, formatDate, formatDateTime, formatDays, formatDuration, formatRelative, humanize } from '../../lib/format';
+import { useUrlState } from '../../lib/urlState';
+
+// ---------------------------------------------------------------------------------------------
+// Overview
+// ---------------------------------------------------------------------------------------------
+
+export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
+  const s = e.summary;
+  const yesNo = (v: boolean | null) => (v === null ? '—' : v ? 'Yes' : 'No');
+  const wsus = e.updateSourceType?.toLowerCase().includes('wsus');
+  const diskLow = e.systemDriveFreeBytes !== null && e.systemDriveFreeBytes < 10 * 1024 ** 3;
+  const auOff = e.windowsUpdateServiceStartMode?.toLowerCase() === 'disabled';
+
+  return (
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <Card title="Operating system">
+        <KeyValueList
+          items={[
+            ['Operating system', s.operatingSystem],
+            ['Edition', e.osEdition],
+            ['Version / build', [s.osVersion, s.osBuild && `build ${s.osBuild}`].filter(Boolean).join(' · ') || null],
+            ['Product type', e.osProductType],
+            ['Architecture', s.architecture],
+            ['Installed', formatDate(e.osInstallDate)],
+            [
+              'Support status',
+              <span className="flex flex-wrap items-center gap-2">
+                {humanize(s.osSupportStatus)}
+                {e.osEndOfServicing && <span className="text-muted">end of servicing {formatDate(e.osEndOfServicing)}</span>}
+              </span>,
+            ],
+            ['ESU', `${e.esuLicenseDetected ? 'License detected' : 'No license detected'}${e.esuOverride !== 'Auto' ? ` (override: ${humanize(e.esuOverride)})` : ''}`],
+            ['Last boot', e.lastBootAt ? `${formatDateTime(e.lastBootAt)} (${formatRelative(e.lastBootAt)})` : null],
+            ['Time zone', e.timeZoneId],
+          ]}
+        />
+        {s.osSupportStatus === 'Unsupported' && (
+          <Alert tone="danger" className="mt-4" title="Operating system out of support">
+            This version no longer receives security updates from Microsoft. Upgrade it or enroll it in Extended Security Updates.
+          </Alert>
+        )}
+      </Card>
+
+      <Card title="Windows Update configuration">
+        <KeyValueList
+          items={[
+            ['Update source', e.updateSourceType ? `${e.updateSourceType}${e.updateSourceServer ? ` (${e.updateSourceServer})` : ''}` : null],
+            ['Microsoft Update registered', yesNo(e.microsoftUpdateRegistered)],
+            ['Automatic Updates', e.automaticUpdatesMode],
+            ['WUfB policies', e.wufbPoliciesConfigured ? 'Configured' : 'Not configured'],
+            ['Quality update deferral', e.deferQualityUpdatesDays !== null ? `${e.deferQualityUpdatesDays} days` : null],
+            ['Feature update deferral', e.deferFeatureUpdatesDays !== null ? `${e.deferFeatureUpdatesDays} days` : null],
+            ['Target release version', e.targetReleaseVersion],
+            ['Managed by MDM', yesNo(e.managedByMdm)],
+            ['Windows Update service', [e.windowsUpdateServiceState, e.windowsUpdateServiceStartMode && `start: ${e.windowsUpdateServiceStartMode}`].filter(Boolean).join(' · ') || null],
+            ['Last scan', s.lastScanAt ? `${formatDateTime(s.lastScanAt)} (${formatRelative(s.lastScanAt)})` : 'Never'],
+            ['Last scan attempt', formatDateTime(e.lastScanAttemptAt)],
+          ]}
+        />
+        <div className="mt-4 flex flex-col gap-2">
+          {wsus && (
+            <Alert tone="warn" title="Managed by WSUS">
+              This endpoint gets updates from {e.updateSourceServer ?? 'a WSUS server'}. Only updates approved there are visible and installable. EasyPatch reports this
+              configuration and does not change it.
+            </Alert>
+          )}
+          {e.wufbPoliciesConfigured && (
+            <Alert tone="warn" title="Windows Update for Business policies detected">
+              Deferral or release-targeting policies apply. Installing through EasyPatch can install updates before the deferral period ends.
+            </Alert>
+          )}
+          {auOff && <Alert tone="danger" title="Windows Update service disabled">Scans and installations fail until the service start mode is restored.</Alert>}
+          {e.lastScanError && <Alert tone="danger" title="Last scan failed">{e.lastScanError}</Alert>}
+        </div>
+      </Card>
+
+      <Card title="Hardware">
+        <KeyValueList
+          items={[
+            ['Manufacturer / model', [e.manufacturer, e.model].filter(Boolean).join(' ') || null],
+            ['Serial number', e.serialNumber],
+            ['Virtual machine', yesNo(e.isVirtualMachine)],
+            ['Processor', e.processorName],
+            ['Memory', formatBytes(e.totalMemoryBytes)],
+            [
+              'System drive',
+              e.systemDriveTotalBytes !== null ? (
+                <span className={diskLow ? 'text-warn' : undefined}>
+                  {formatBytes(e.systemDriveFreeBytes)} free of {formatBytes(e.systemDriveTotalBytes)}
+                  {diskLow && ' — low; cumulative updates may need 10 GB or more'}
+                </span>
+              ) : null,
+            ],
+            ['Domain', e.dnsDomain ? `${e.dnsDomain}${e.domainJoined ? ' (joined)' : ''}` : e.domainJoined === false ? 'Workgroup' : null],
+            ['Last seen IP', s.lastSeenIp],
+            ['Inventory updated', formatDateTime(e.lastInventoryAt)],
+          ]}
+        />
+      </Card>
+
+      <Card title="Agent and enrollment">
+        <KeyValueList
+          items={[
+            ['Agent version', <span className="flex items-center gap-2"><Mono>{s.agentVersion ?? '—'}</Mono>{s.agentOutdated && <Badge tone="warn">update available</Badge>}</span>],
+            ['Agent installed', formatDateTime(e.agentInstalledAt)],
+            ['Enrolled', formatDateTime(e.enrolledAt)],
+            ['Last check-in', s.lastCheckInAt ? `${formatDateTime(s.lastCheckInAt)} (${formatRelative(s.lastCheckInAt)})` : 'Never'],
+            ['Compliance evaluated', formatDateTime(e.complianceEvaluatedAt)],
+            ['Notes', e.notes ? <span className="whitespace-pre-wrap">{e.notes}</span> : null],
+          ]}
+        />
+        <h3 className="mt-5 mb-2 text-xs font-semibold tracking-wide text-muted uppercase">Credentials</h3>
+        {e.credentials.length === 0 ? (
+          <p className="text-sm text-muted">No credentials.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {e.credentials.map((c) => (
+              <li key={c.credentialId} className="rounded-md border border-line px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Mono>{c.keyFingerprint}</Mono>
+                  {c.revokedAt ? <Badge tone="danger">Revoked</Badge> : new Date(c.expiresAt) < new Date() ? <Badge>Expired</Badge> : <Badge tone="ok">Active</Badge>}
+                </div>
+                <p className="mt-1 text-xs text-muted">
+                  {c.credentialId} · created {formatDate(c.createdAt)} · expires {formatDate(c.expiresAt)} · last used {formatRelative(c.lastUsedAt)}
+                  {c.revokedReason && ` · ${c.revokedReason}`}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Updates
+// ---------------------------------------------------------------------------------------------
+
+const OUTSTANDING: EndpointUpdateState[] = ['Missing', 'Failed', 'PendingVerification', 'PendingReboot', 'Excluded'];
+const STATE_ORDER: Record<EndpointUpdateState, number> = {
+  Failed: 0,
+  Missing: 1,
+  PendingVerification: 2,
+  PendingReboot: 3,
+  Excluded: 4,
+  Installed: 5,
+  Superseded: 6,
+  NotApplicable: 7,
+};
+
+export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
+  endpoint: EndpointDetailDto;
+  onInstallSelected: (guids: string[]) => void;
+  onInstallAll: () => void;
+}) {
+  const id = endpoint.summary.id;
+  const { canOperate } = useAuth();
+  const toast = useToast();
+  const url = useUrlState();
+  const state = url.get('state');
+  const category = url.get('category');
+  const requiredOnly = url.get('requiredOnly') === 'true';
+  const list = useList<EndpointUpdateDto>(
+    `/endpoints/${id}/updates`,
+    { state: state || undefined, category: category || undefined, requiredOnly: requiredOnly || undefined },
+    { refetchInterval: endpoint.activeJob ? 5_000 : 30_000, keepPrevious: true },
+  );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [excluding, setExcluding] = useState<EndpointUpdateDto | null>(null);
+  const managed = endpoint.summary.status === 'Active';
+
+  const rows = useMemo(() => {
+    const items = state ? list.page.items : list.page.items.filter((u) => OUTSTANDING.includes(u.state));
+    return [...items].sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || Number(b.isRequired) - Number(a.isRequired) || a.title.localeCompare(b.title));
+  }, [list.page.items, state]);
+  const installable = (u: EndpointUpdateDto) => (u.state === 'Missing' || u.state === 'Failed') && !u.isExcluded && !u.activeJob;
+  const selectable = rows.filter(installable);
+  const allSelected = selectable.length > 0 && selectable.every((u) => selected.has(u.updateGuid));
+
+  const include = useApiMutation((guid: string) => api.del(`/endpoints/${id}/exclusions/${guid}`), {
+    invalidate: [`/endpoints/${id}`],
+    onSuccess: () => toast.success('Update included again. Compliance is recalculated.'),
+  });
+
+  return (
+    <>
+      <Toolbar>
+        <EnumSelect label="State" value={state} onChange={(v) => url.set({ state: v })} options={ENDPOINT_UPDATE_STATES} format={humanize} allLabel="Outstanding" />
+        <EnumSelect label="Category" value={category} onChange={(v) => url.set({ category: v })} options={UPDATE_CATEGORIES} format={humanize} />
+        <Checkbox label="Required by policy only" checked={requiredOnly} onChange={(e) => url.set({ requiredOnly: e.target.checked })} className="pb-2" />
+        <span className="flex-1" />
+        {canOperate && managed && (
+          <div className="flex gap-2 pb-0.5">
+            <Button disabled={selected.size === 0} onClick={() => onInstallSelected([...selected])} icon={<Download className="size-4" aria-hidden />}>
+              Install selected{selected.size ? ` (${selected.size})` : ''}
+            </Button>
+            <Button variant="primary" onClick={onInstallAll} icon={<Download className="size-4" aria-hidden />}>
+              Install all missing
+            </Button>
+          </div>
+        )}
+      </Toolbar>
+      <InlineError error={include.error} />
+      {list.isPending ? (
+        <Spinner />
+      ) : list.isError ? (
+        <ErrorState error={list.error} onRetry={() => void list.refetch()} />
+      ) : rows.length === 0 ? (
+        <EmptyState title={state || category ? 'No updates match these filters' : 'No outstanding updates'} icon={<ShieldCheck className="size-8 text-ok" aria-hidden />}>
+          {!state && !category && (endpoint.summary.lastScanAt ? `The last scan (${formatRelative(endpoint.summary.lastScanAt)}) found nothing missing.` : 'This endpoint has not reported a scan yet.')}
+        </EmptyState>
+      ) : (
+        <TableWrap>
+          <table className="table-base">
+            <thead>
+              <tr>
+                {canOperate && managed && (
+                  <th className="w-8">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      aria-label="Select all installable updates"
+                      checked={allSelected}
+                      disabled={selectable.length === 0}
+                      onChange={() => setSelected(allSelected ? new Set() : new Set(selectable.map((u) => u.updateGuid)))}
+                    />
+                  </th>
+                )}
+                <th>Update</th>
+                <th>Category</th>
+                <th>Severity</th>
+                <th>State</th>
+                <th className="text-right">Size</th>
+                <th>Detected</th>
+                {canOperate && <th className="text-right">Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((u) => (
+                <tr key={u.updateGuid}>
+                  {canOperate && managed && (
+                    <td>
+                      <input
+                        type="checkbox"
+                        className="size-4"
+                        aria-label={`Select ${u.title}`}
+                        disabled={!installable(u)}
+                        checked={selected.has(u.updateGuid)}
+                        onChange={() =>
+                          setSelected((s) => {
+                            const next = new Set(s);
+                            if (next.has(u.updateGuid)) next.delete(u.updateGuid);
+                            else next.add(u.updateGuid);
+                            return next;
+                          })
+                        }
+                      />
+                    </td>
+                  )}
+                  <td className="min-w-72">
+                    <div className="font-medium" title={u.description ?? undefined}>
+                      {u.title}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted">
+                      {u.kbNumbers.length > 0 && <span className="font-mono">{u.kbNumbers.join(', ')}</span>}
+                      {!u.isRequired && <span title="Not installed by policy (category, optional or excluded)">not required by policy</span>}
+                      {u.rebootLikely && <span className="text-info">restart likely</span>}
+                      {u.supportUrl && (
+                        <a href={u.supportUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-0.5 text-accent hover:underline">
+                          details <ExternalLink className="size-3" aria-hidden />
+                        </a>
+                      )}
+                    </div>
+                    {u.state === 'Failed' && (u.errorMessage || u.errorCode) && (
+                      <p className="mt-1 text-xs text-danger">
+                        {u.errorCode && <span className="font-mono">{u.errorCode} </span>}
+                        {u.errorMessage}
+                        {u.failedAttempts > 1 && ` (${u.failedAttempts} attempts)`}
+                      </p>
+                    )}
+                  </td>
+                  <td>
+                    <CategoryBadge category={u.category} />
+                  </td>
+                  <td>
+                    <SeverityBadge severity={u.msrcSeverity} />
+                  </td>
+                  <td>
+                    <div className="flex flex-col items-start gap-1">
+                      {u.isExcluded ? <Badge icon={<EyeOff className="size-3" aria-hidden />}>Excluded</Badge> : <UpdateStateBadge state={u.state} />}
+                      {u.activeJob && (
+                        <Link to={`/jobs/${u.activeJob.jobId}`} className="hover:opacity-80" title="Part of an active job">
+                          <JobItemStatusBadge status={u.activeJob.itemStatus} percent={u.activeJob.downloadPercent} />
+                        </Link>
+                      )}
+                    </div>
+                  </td>
+                  <td className="text-right whitespace-nowrap tabular-nums">{formatBytes(u.sizeBytes)}</td>
+                  <td className="whitespace-nowrap text-muted" title={formatDateTime(u.firstDetectedAt)}>
+                    {formatRelative(u.firstDetectedAt)}
+                  </td>
+                  {canOperate && (
+                    <td className="text-right">
+                      {u.isExcluded ? (
+                        <Button size="sm" variant="ghost" icon={<CheckCircle2 className="size-3.5" aria-hidden />} loading={include.isPending && include.variables === u.updateGuid} onClick={() => include.mutate(u.updateGuid)}>
+                          Include
+                        </Button>
+                      ) : (
+                        (u.state === 'Missing' || u.state === 'Failed') && (
+                          <Button size="sm" variant="ghost" icon={<Ban className="size-3.5" aria-hidden />} onClick={() => setExcluding(u)}>
+                            Exclude
+                          </Button>
+                        )
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
+      )}
+      <ExcludeDialog endpointId={id} update={excluding} onClose={() => setExcluding(null)} />
+    </>
+  );
+}
+
+function ExcludeDialog({ endpointId, update, onClose }: { endpointId: string; update: EndpointUpdateDto | null; onClose: () => void }) {
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const exclude = useApiMutation((vars: { guid: string; reason: string | null }) => api.post(`/endpoints/${endpointId}/exclusions`, { updateGuid: vars.guid, reason: vars.reason }), {
+    invalidate: [`/endpoints/${endpointId}`],
+    onSuccess: () => {
+      toast.success('Update excluded on this endpoint.');
+      setReason('');
+      onClose();
+    },
+  });
+  return (
+    <Dialog
+      open={update !== null}
+      onClose={onClose}
+      title="Exclude this update on this endpoint?"
+      size="sm"
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={exclude.isPending} onClick={() => update && exclude.mutate({ guid: update.updateGuid, reason: reason.trim() || null })}>
+            Exclude update
+          </Button>
+        </>
+      }
+    >
+      {update && (
+        <div className="flex flex-col gap-3 text-sm">
+          <p>
+            <strong>{update.title}</strong> will not be installed on this endpoint and no longer counts against its compliance. To exclude a KB everywhere, add it to a
+            policy instead.
+          </p>
+          <TextField label="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} placeholder="e.g. breaks line-of-business app" />
+          <InlineError error={exclude.error} />
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Installed, history, jobs, activity, effective policy
+// ---------------------------------------------------------------------------------------------
+
+export function InstalledTab({ endpointId }: { endpointId: string }) {
+  const [search, setSearch] = useState('');
+  const list = useList<EndpointUpdateDto>(`/endpoints/${endpointId}/installed-updates`);
+  const items = list.page.items.filter((u) => !search || `${u.title} ${u.kbNumbers.join(' ')}`.toLowerCase().includes(search.toLowerCase()));
+  if (list.isPending) return <Spinner />;
+  if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
+  return (
+    <>
+      <Toolbar>
+        <TextField label="Filter" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Title or KB" className="w-72" />
+        <p className="pb-2 text-xs text-muted">Only updates confirmed installed by a Windows Update scan appear here.</p>
+      </Toolbar>
+      {items.length === 0 ? (
+        <EmptyState title="No installed updates reported" />
+      ) : (
+        <TableWrap>
+          <table className="table-base">
+            <thead>
+              <tr>
+                <th>Update</th>
+                <th>KB</th>
+                <th>Category</th>
+                <th>Installed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((u) => (
+                <tr key={u.updateGuid}>
+                  <td className="min-w-72">{u.title}</td>
+                  <td className="font-mono text-xs whitespace-nowrap">{u.kbNumbers.join(', ') || '—'}</td>
+                  <td>
+                    <CategoryBadge category={u.category} />
+                  </td>
+                  <td className="whitespace-nowrap text-muted">{formatDateTime(u.installedAt ?? u.stateChangedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
+      )}
+    </>
+  );
+}
+
+export function HistoryTab({ endpointId }: { endpointId: string }) {
+  const [page, setPage] = useState(1);
+  const list = useList<UpdateHistoryDto>(`/endpoints/${endpointId}/update-history`, { page, pageSize: 100 }, { keepPrevious: true });
+  if (list.isPending) return <Spinner />;
+  if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
+  if (list.page.items.length === 0) return <EmptyState title="No Windows Update history reported yet" />;
+  return (
+    <>
+      <p className="mb-3 text-xs text-muted">History as recorded by Windows Update on the device, including installations made outside EasyPatch.</p>
+      <TableWrap>
+        <table className="table-base">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Update</th>
+              <th>Operation</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.page.items.map((h) => (
+              <tr key={h.id}>
+                <td className="whitespace-nowrap text-muted">{formatDateTime(h.date)}</td>
+                <td className="min-w-72">
+                  {h.title}
+                  {h.kbNumber && <span className="ml-2 font-mono text-xs text-muted">{h.kbNumber}</span>}
+                </td>
+                <td>{humanize(h.operation)}</td>
+                <td>
+                  <Badge tone={/succeed/i.test(h.result) ? 'ok' : /fail|abort/i.test(h.result) ? 'danger' : 'neutral'}>{humanize(h.result)}</Badge>
+                  {h.hResult && (
+                    <div className="mt-0.5 text-xs text-muted">
+                      <span className="font-mono">{h.hResult}</span>
+                      {h.errorDescription && ` ${h.errorDescription}`}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+      <Pagination page={list.page.page} pageSize={list.page.pageSize} totalCount={list.page.totalCount} onPage={setPage} />
+    </>
+  );
+}
+
+export function JobsTab({ endpointId }: { endpointId: string }) {
+  const [page, setPage] = useState(1);
+  const list = useList<JobSummaryDto>(`/endpoints/${endpointId}/jobs`, { page, pageSize: 50 }, { keepPrevious: true, refetchInterval: 10_000 });
+  if (list.isPending) return <Spinner />;
+  if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
+  if (list.page.items.length === 0) return <EmptyState title="No jobs yet">Scans, installations and inventory refreshes for this endpoint appear here.</EmptyState>;
+  return (
+    <>
+      <JobTable jobs={list.page.items} showEndpoint={false} />
+      <Pagination page={list.page.page} pageSize={list.page.pageSize} totalCount={list.page.totalCount} onPage={setPage} />
+    </>
+  );
+}
+
+export function ActivityTab({ endpointId }: { endpointId: string }) {
+  const [page, setPage] = useState(1);
+  const list = useList<EndpointEventDto>(`/endpoints/${endpointId}/events`, { page, pageSize: 100 }, { keepPrevious: true, refetchInterval: 15_000 });
+  if (list.isPending) return <Spinner />;
+  if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
+  if (list.page.items.length === 0) return <EmptyState title="No activity recorded yet" />;
+  return (
+    <>
+      <EventList events={list.page.items} />
+      <Pagination page={list.page.page} pageSize={list.page.pageSize} totalCount={list.page.totalCount} onPage={setPage} />
+    </>
+  );
+}
+
+export function EventList({ events, showHostname = false }: { events: EndpointEventDto[]; showHostname?: boolean }) {
+  return (
+    <ol className="relative flex flex-col rounded-lg border border-line bg-surface">
+      {events.map((ev) => (
+        <li key={ev.id} className="flex gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
+          <span className="pt-1.5">
+            <EventSeverityDot severity={ev.severity} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm">
+              <span className="font-medium">{humanize(ev.type)}</span>
+              {showHostname && ev.hostname && (
+                <>
+                  {' · '}
+                  <Link to={`/endpoints/${ev.endpointId}`} className="hover:text-accent">
+                    {ev.hostname}
+                  </Link>
+                </>
+              )}
+              <span className="text-muted"> — {ev.message}</span>
+            </p>
+            {ev.jobId && (
+              <Link to={`/jobs/${ev.jobId}`} className="text-xs text-accent hover:underline">
+                View job
+              </Link>
+            )}
+          </div>
+          <time className="text-xs whitespace-nowrap text-muted" dateTime={ev.createdAt} title={formatDateTime(ev.createdAt)}>
+            {formatRelative(ev.createdAt)}
+          </time>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function sourceOf(sources: Record<string, PolicyScope>, field: string): PolicyScope | undefined {
+  const pascal = field.charAt(0).toUpperCase() + field.slice(1);
+  const camel = field.charAt(0).toLowerCase() + field.slice(1);
+  return sources[pascal] ?? sources[camel];
+}
+
+function ScopeBadge({ scope }: { scope: PolicyScope | undefined }) {
+  if (!scope) return null;
+  return <Badge tone={scope === 'Site' ? 'accent' : scope === 'Organization' ? 'info' : 'neutral'}>{scope}</Badge>;
+}
+
+export function EffectivePolicyTab({ endpointId }: { endpointId: string }) {
+  const policy = useApi<EffectivePolicyDto>(`/endpoints/${endpointId}/effective-policy`);
+  if (policy.isPending) return <Spinner />;
+  if (policy.isError) return <ErrorState error={policy.error} onRetry={() => void policy.refetch()} />;
+  const p = policy.data;
+  const row = (label: string, field: string, value: ReactNode): [ReactNode, ReactNode] => [
+    label,
+    <span className="flex flex-wrap items-center gap-2">
+      {value}
+      <ScopeBadge scope={sourceOf(p.sources, field)} />
+    </span>,
+  ];
+  return (
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <Card title="Installation">
+        <KeyValueList
+          items={[
+            row('Allowed categories', 'allowedCategories', p.allowedCategories.map(humanize).join(', ')),
+            row('Include optional updates', 'includeOptional', p.includeOptional ? 'Yes' : 'No'),
+            row('Accept license agreements', 'acceptEulas', p.acceptEulas ? 'Yes' : 'No'),
+            row('Excluded KBs', 'excludedKbs', p.excludedKbs.length ? <span className="font-mono text-xs">{p.excludedKbs.join(', ')}</span> : 'None'),
+            row('Automatic installation', 'autoInstallEnabled', p.autoInstallEnabled ? 'On (inside maintenance window, never restarts)' : 'Off'),
+            row(
+              'Maintenance window',
+              'maintenanceWindow',
+              p.maintenanceDays && p.maintenanceDays.length > 0
+                ? `${formatDays(p.maintenanceDays)} at ${p.maintenanceStart?.slice(0, 5) ?? '—'} for ${formatDuration(p.maintenanceDurationMinutes)} (${p.timeZone})`
+                : 'None',
+            ),
+          ]}
+        />
+      </Card>
+      <Card title="Agent schedule and compliance">
+        <KeyValueList
+          items={[
+            row('Check-in interval', 'checkInIntervalSeconds', `${p.checkInIntervalSeconds} s`),
+            row('Scan interval', 'scanIntervalMinutes', formatDuration(p.scanIntervalMinutes)),
+            row('Inventory interval', 'inventoryIntervalMinutes', formatDuration(p.inventoryIntervalMinutes)),
+            row('Jitter', 'jitterPercent', `${p.jitterPercent}%`),
+            row('Scan stale after', 'scanStaleAfterHours', `${p.scanStaleAfterHours} h`),
+            row('Max concurrent installs per site', 'maxConcurrentInstallsPerSite', p.maxConcurrentInstallsPerSite),
+          ]}
+        />
+        <p className="mt-4 text-xs text-muted">The badge shows which policy layer supplied each value (Global, Organization or Site).</p>
+      </Card>
+    </div>
+  );
+}

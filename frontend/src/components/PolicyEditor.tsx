@@ -1,0 +1,560 @@
+import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Plus, RotateCcw, Save, X } from 'lucide-react';
+import { DEFAULT_INSTALL_CATEGORIES, UPDATE_CATEGORIES, type PolicyDto, type PolicyRequest, type PolicyScope, type UpdateCategory } from '../api/types';
+import { DAY_LABELS, formatDays, formatDuration, humanize, isValidTime, normalizeKb } from '../lib/format';
+import { Alert, Badge, Button, Card, cx, InlineError, Input, Select } from './ui';
+
+/** Values a lower scope inherits (already resolved from the parent scopes), used for "inherited" hints. */
+export type InheritedPolicy = Omit<PolicyRequest, 'excludedKbs'> & { excludedKbs: string[] };
+
+const EMPTY: PolicyRequest = {
+  checkInIntervalSeconds: null,
+  scanIntervalMinutes: null,
+  inventoryIntervalMinutes: null,
+  jitterPercent: null,
+  allowedCategories: null,
+  includeOptional: null,
+  excludedKbs: [],
+  acceptEulas: null,
+  autoInstallEnabled: null,
+  maintenanceDays: null,
+  maintenanceStart: null,
+  maintenanceDurationMinutes: null,
+  scanStaleAfterHours: null,
+  maxConcurrentInstallsPerSite: null,
+};
+
+export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
+  if (!policy) return { ...EMPTY };
+  return {
+    checkInIntervalSeconds: policy.checkInIntervalSeconds,
+    scanIntervalMinutes: policy.scanIntervalMinutes,
+    inventoryIntervalMinutes: policy.inventoryIntervalMinutes,
+    jitterPercent: policy.jitterPercent,
+    allowedCategories: policy.allowedCategories,
+    includeOptional: policy.includeOptional,
+    excludedKbs: policy.excludedKbs ?? [],
+    acceptEulas: policy.acceptEulas,
+    autoInstallEnabled: policy.autoInstallEnabled,
+    maintenanceDays: policy.maintenanceDays,
+    maintenanceStart: policy.maintenanceStart ? policy.maintenanceStart.slice(0, 5) : null,
+    maintenanceDurationMinutes: policy.maintenanceDurationMinutes,
+    scanStaleAfterHours: policy.scanStaleAfterHours,
+    maxConcurrentInstallsPerSite: policy.maxConcurrentInstallsPerSite,
+  };
+}
+
+/** Resolves parent layers (most specific last) into the values a child scope would inherit. */
+export function resolveInherited(layers: (PolicyDto | null | undefined)[]): InheritedPolicy {
+  const out: InheritedPolicy = { ...EMPTY, excludedKbs: [] };
+  const kbs = new Set<string>();
+  for (const layer of layers) {
+    if (!layer) continue;
+    const r = toRequest(layer);
+    for (const key of Object.keys(r) as (keyof PolicyRequest)[]) {
+      if (key === 'excludedKbs' || key === 'maintenanceDays' || key === 'maintenanceStart' || key === 'maintenanceDurationMinutes') continue;
+      const v = r[key];
+      if (v !== null && v !== undefined) (out as unknown as Record<string, unknown>)[key] = v;
+    }
+    if (r.maintenanceDays !== null) {
+      out.maintenanceDays = r.maintenanceDays;
+      out.maintenanceStart = r.maintenanceStart ?? '02:00';
+      out.maintenanceDurationMinutes = r.maintenanceDurationMinutes ?? 180;
+    }
+    for (const kb of r.excludedKbs ?? []) kbs.add(kb.toUpperCase());
+  }
+  out.excludedKbs = [...kbs];
+  return out;
+}
+
+interface NumberSpec {
+  key: 'checkInIntervalSeconds' | 'scanIntervalMinutes' | 'inventoryIntervalMinutes' | 'jitterPercent' | 'scanStaleAfterHours' | 'maxConcurrentInstallsPerSite';
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  hint: string;
+}
+
+const NUMBER_FIELDS: NumberSpec[] = [
+  { key: 'checkInIntervalSeconds', label: 'Check-in interval', unit: 'seconds', min: 15, max: 3600, hint: 'How often idle agents contact the server. Agents with an active job check in every 15 s.' },
+  { key: 'scanIntervalMinutes', label: 'Scan interval', unit: 'minutes', min: 30, max: 10080, hint: 'How often agents run a Windows Update scan.' },
+  { key: 'inventoryIntervalMinutes', label: 'Inventory interval', unit: 'minutes', min: 60, max: 10080, hint: 'How often agents report OS and hardware inventory.' },
+  { key: 'jitterPercent', label: 'Jitter', unit: '%', min: 0, max: 50, hint: 'Randomizes intervals so endpoints do not all check in together.' },
+  { key: 'scanStaleAfterHours', label: 'Scan considered stale after', unit: 'hours', min: 1, max: 720, hint: 'Endpoints without a successful scan for this long are reported as Scan stale.' },
+  { key: 'maxConcurrentInstallsPerSite', label: 'Max concurrent installs per site', unit: 'endpoints', min: 1, max: 1000, hint: 'Limits how many endpoints in one site install at the same time.' },
+];
+
+export function PolicyEditor({
+  scope,
+  policy,
+  inherited,
+  readOnly,
+  saving,
+  deleting,
+  error,
+  onSave,
+  onReset,
+  timeZone,
+}: {
+  scope: PolicyScope;
+  policy: PolicyDto | null;
+  inherited?: InheritedPolicy;
+  readOnly: boolean;
+  saving?: boolean;
+  deleting?: boolean;
+  error?: unknown;
+  onSave: (request: PolicyRequest) => void;
+  /** Removes this policy layer (everything inherits). Not offered for the global policy. */
+  onReset?: () => void;
+  timeZone?: string;
+}) {
+  const isGlobal = scope === 'Global';
+  const initial = useMemo(() => toRequest(policy), [policy]);
+  const [form, setForm] = useState<PolicyRequest>(initial);
+  const [kbInput, setKbInput] = useState('');
+  const [kbError, setKbError] = useState<string | null>(null);
+  useEffect(() => setForm(initial), [initial]);
+
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  const windowExplicit = form.maintenanceDays !== null;
+  const validation = validatePolicy(form, isGlobal);
+
+  function update<K extends keyof PolicyRequest>(key: K, value: PolicyRequest[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (validation) return;
+    onSave({ ...form, excludedKbs: form.excludedKbs ?? [] });
+  }
+
+  function addKb() {
+    const kb = normalizeKb(kbInput);
+    if (!kb) {
+      setKbError('Enter a KB number such as KB5034441.');
+      return;
+    }
+    setKbError(null);
+    const list = form.excludedKbs ?? [];
+    if (!list.includes(kb)) update('excludedKbs', [...list, kb]);
+    setKbInput('');
+  }
+
+  const categories = form.allowedCategories as UpdateCategory[] | null;
+  const effectiveCategories = (categories ?? (inherited?.allowedCategories as UpdateCategory[] | null) ?? DEFAULT_INSTALL_CATEGORIES) as readonly UpdateCategory[];
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      {!isGlobal && (
+        <Alert tone="info">
+          Fields set to <strong>Inherit</strong> use the value from the {scope === 'Site' ? 'organization or global' : 'global'} policy. Excluded KBs are added
+          to the inherited exclusions; the maintenance window is inherited or overridden as a whole.
+        </Alert>
+      )}
+
+      <Card title="Agent schedule">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {NUMBER_FIELDS.filter((f) => f.key !== 'scanStaleAfterHours' && f.key !== 'maxConcurrentInstallsPerSite').map((f) => (
+            <NumberRow key={f.key} spec={f} value={form[f.key]} inherited={inherited?.[f.key] ?? null} isGlobal={isGlobal} readOnly={readOnly} onChange={(v) => update(f.key, v)} />
+          ))}
+        </div>
+      </Card>
+
+      <Card title="What gets installed">
+        <div className="flex flex-col gap-5">
+          <Row
+            label="Allowed categories"
+            hint="Updates in other categories are never installed by “Install all missing updates” or scheduled installs. Driver and Feature updates are excluded by default because they can change hardware behavior or upgrade Windows to a new release."
+            inheritable={!isGlobal}
+            explicit={categories !== null}
+            readOnly={readOnly}
+            inheritedText={inherited?.allowedCategories ? inherited.allowedCategories.map(humanize).join(', ') : 'Default categories'}
+            onToggle={(explicit) => update('allowedCategories', explicit ? [...effectiveCategories] : null)}
+          >
+            <div className="flex flex-wrap gap-2">
+              {UPDATE_CATEGORIES.map((c) => {
+                const checked = effectiveCategories.includes(c);
+                const disabled = readOnly || (!isGlobal && categories === null);
+                return (
+                  <label
+                    key={c}
+                    className={cx(
+                      'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm',
+                      checked ? 'border-accent/50 bg-accent-soft' : 'border-line',
+                      disabled && 'opacity-60',
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-3.5"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={(e) => {
+                        const set = new Set(effectiveCategories);
+                        if (e.target.checked) set.add(c);
+                        else set.delete(c);
+                        update('allowedCategories', UPDATE_CATEGORIES.filter((x) => set.has(x)));
+                      }}
+                    />
+                    {humanize(c)}
+                    {(c === 'Driver' || c === 'Feature') && <Badge tone="warn" className="ml-0.5">caution</Badge>}
+                  </label>
+                );
+              })}
+            </div>
+          </Row>
+
+          <BoolRow
+            label="Include optional updates"
+            hint="Optional (non-mandatory) updates such as preview cumulative updates."
+            value={form.includeOptional}
+            inherited={inherited?.includeOptional ?? null}
+            isGlobal={isGlobal}
+            readOnly={readOnly}
+            onChange={(v) => update('includeOptional', v)}
+          />
+          <BoolRow
+            label="Accept license agreements automatically"
+            hint="Some updates require accepting a EULA. When off, those updates are skipped."
+            value={form.acceptEulas}
+            inherited={inherited?.acceptEulas ?? null}
+            isGlobal={isGlobal}
+            readOnly={readOnly}
+            onChange={(v) => update('acceptEulas', v)}
+          />
+
+          <div>
+            <p className="text-sm font-medium">Excluded KBs</p>
+            <p className="text-xs text-muted">Never installed by EasyPatch at this scope or below. Use for updates with known problems.</p>
+            {!isGlobal && inherited && inherited.excludedKbs.length > 0 && (
+              <p className="mt-1 text-xs text-muted">Inherited: {inherited.excludedKbs.join(', ')}</p>
+            )}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {(form.excludedKbs ?? []).length === 0 && <span className="text-sm text-subtle">None at this scope</span>}
+              {(form.excludedKbs ?? []).map((kb) => (
+                <span key={kb} className="inline-flex items-center gap-1 rounded-full bg-neutral-soft py-0.5 pr-1 pl-2.5 font-mono text-xs">
+                  {kb}
+                  {!readOnly && (
+                    <button type="button" aria-label={`Remove ${kb}`} className="rounded-full p-0.5 hover:bg-hover" onClick={() => update('excludedKbs', (form.excludedKbs ?? []).filter((k) => k !== kb))}>
+                      <X className="size-3" aria-hidden />
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+            {!readOnly && (
+              <div className="mt-2 flex max-w-sm gap-2">
+                <Input
+                  aria-label="KB number to exclude"
+                  placeholder="KB5034441"
+                  value={kbInput}
+                  onChange={(e) => setKbInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addKb();
+                    }
+                  }}
+                  aria-invalid={kbError ? true : undefined}
+                />
+                <Button onClick={addKb} icon={<Plus className="size-4" aria-hidden />}>
+                  Add
+                </Button>
+              </div>
+            )}
+            {kbError && <p className="mt-1 text-xs text-danger">{kbError}</p>}
+          </div>
+        </div>
+      </Card>
+
+      <Card title="Automatic installation and maintenance window">
+        <div className="flex flex-col gap-5">
+          <Alert tone="info">
+            When automatic installation is on, EasyPatch queues “Install all missing updates” jobs <strong>only while the maintenance window is open</strong>, using the
+            categories above. It never restarts endpoints: restarts remain an administrator decision.
+          </Alert>
+          <BoolRow
+            label="Automatic installation"
+            value={form.autoInstallEnabled}
+            inherited={inherited?.autoInstallEnabled ?? null}
+            isGlobal={isGlobal}
+            readOnly={readOnly}
+            onChange={(v) => update('autoInstallEnabled', v)}
+            onLabel="On"
+            offLabel="Off"
+          />
+          <Row
+            label="Maintenance window"
+            hint={`Times are in the ${timeZone ? `${timeZone} ` : ''}time zone of the site (or organization).`}
+            inheritable={!isGlobal}
+            explicit={windowExplicit}
+            readOnly={readOnly}
+            inheritedText={
+              inherited?.maintenanceDays
+                ? `${formatDays(inherited.maintenanceDays)} at ${inherited.maintenanceStart ?? '02:00'} for ${formatDuration(inherited.maintenanceDurationMinutes ?? 180)}`
+                : 'No window'
+            }
+            onToggle={(explicit) =>
+              setForm((f) => ({
+                ...f,
+                maintenanceDays: explicit ? (inherited?.maintenanceDays ?? []) : null,
+                maintenanceStart: explicit ? (inherited?.maintenanceStart ?? '02:00') : null,
+                maintenanceDurationMinutes: explicit ? (inherited?.maintenanceDurationMinutes ?? 180) : null,
+              }))
+            }
+          >
+            <MaintenanceWindowFields form={form} setForm={setForm} disabled={readOnly || (!isGlobal && !windowExplicit)} isGlobal={isGlobal} />
+          </Row>
+        </div>
+      </Card>
+
+      <Card title="Compliance and limits">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {NUMBER_FIELDS.filter((f) => f.key === 'scanStaleAfterHours' || f.key === 'maxConcurrentInstallsPerSite').map((f) => (
+            <NumberRow key={f.key} spec={f} value={form[f.key]} inherited={inherited?.[f.key] ?? null} isGlobal={isGlobal} readOnly={readOnly} onChange={(v) => update(f.key, v)} />
+          ))}
+        </div>
+      </Card>
+
+      {validation && <Alert tone="warn">{validation}</Alert>}
+      <InlineError error={error} />
+
+      {!readOnly && (
+        <div className="sticky bottom-0 -mx-1 flex flex-wrap items-center justify-end gap-2 border-t border-line bg-canvas/95 px-1 py-3">
+          {policy?.updatedAt && <span className="mr-auto text-xs text-muted">Last changed {new Date(policy.updatedAt).toLocaleString()}</span>}
+          {!isGlobal && onReset && policy?.id && (
+            <Button variant="danger-ghost" onClick={onReset} loading={deleting} icon={<RotateCcw className="size-4" aria-hidden />}>
+              Inherit everything
+            </Button>
+          )}
+          <Button onClick={() => setForm(initial)} disabled={!dirty}>
+            Discard changes
+          </Button>
+          <Button type="submit" variant="primary" loading={saving} disabled={!dirty || !!validation} icon={<Save className="size-4" aria-hidden />}>
+            Save policy
+          </Button>
+        </div>
+      )}
+    </form>
+  );
+}
+
+/** Client-side mirror of the server policy validation, for immediate feedback (the server enforces it). */
+export function validatePolicy(form: PolicyRequest, isGlobal: boolean): string | null {
+  for (const f of NUMBER_FIELDS) {
+    const v = form[f.key];
+    if (v === null) {
+      if (isGlobal) return `${f.label} is required in the global policy.`;
+      continue;
+    }
+    if (!Number.isInteger(v) || v < f.min || v > f.max) return `${f.label} must be between ${f.min} and ${f.max} ${f.unit}.`;
+  }
+  if (isGlobal && (form.includeOptional === null || form.acceptEulas === null || form.autoInstallEnabled === null)) {
+    return 'Every setting is required in the global policy.';
+  }
+  if (form.allowedCategories !== null && form.allowedCategories.length === 0) return 'Select at least one update category.';
+  if (form.maintenanceDays !== null) {
+    if (!form.maintenanceStart || !isValidTime(form.maintenanceStart)) return 'Maintenance window start must be a time such as 02:00.';
+    const d = form.maintenanceDurationMinutes;
+    if (d === null || !Number.isInteger(d) || d < 15 || d > 1440) return 'Maintenance window duration must be between 15 and 1440 minutes.';
+  }
+  if (form.autoInstallEnabled === true && form.maintenanceDays !== null && form.maintenanceDays.length === 0) {
+    return 'Automatic installation needs at least one maintenance day.';
+  }
+  return null;
+}
+
+function Row({ label, hint, inheritable, explicit, readOnly, inheritedText, onToggle, children }: {
+  label: string;
+  hint?: ReactNode;
+  inheritable: boolean;
+  explicit: boolean;
+  readOnly: boolean;
+  inheritedText: ReactNode;
+  onToggle: (explicit: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">{label}</p>
+        {inheritable && <InheritToggle explicit={explicit} readOnly={readOnly} onToggle={onToggle} />}
+      </div>
+      {hint && <p className="text-xs text-muted">{hint}</p>}
+      {inheritable && !explicit && <p className="mt-1 text-xs text-muted">Inherited: {inheritedText}</p>}
+      <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+function InheritToggle({ explicit, readOnly, onToggle }: { explicit: boolean; readOnly: boolean; onToggle: (explicit: boolean) => void }) {
+  return (
+    <div className="inline-flex rounded-md border border-line p-0.5 text-xs" role="group" aria-label="Inherit or override">
+      <button
+        type="button"
+        disabled={readOnly}
+        aria-pressed={!explicit}
+        onClick={() => onToggle(false)}
+        className={cx('rounded px-2 py-0.5', !explicit ? 'bg-accent-soft font-medium text-accent' : 'text-muted hover:text-fg')}
+      >
+        Inherit
+      </button>
+      <button
+        type="button"
+        disabled={readOnly}
+        aria-pressed={explicit}
+        onClick={() => onToggle(true)}
+        className={cx('rounded px-2 py-0.5', explicit ? 'bg-accent-soft font-medium text-accent' : 'text-muted hover:text-fg')}
+      >
+        Override
+      </button>
+    </div>
+  );
+}
+
+function NumberRow({ spec, value, inherited, isGlobal, readOnly, onChange }: {
+  spec: NumberSpec;
+  value: number | null;
+  inherited: number | null;
+  isGlobal: boolean;
+  readOnly: boolean;
+  onChange: (value: number | null) => void;
+}) {
+  const id = useId();
+  const explicit = value !== null || isGlobal;
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label htmlFor={id} className="text-sm font-medium">
+          {spec.label}
+        </label>
+        {!isGlobal && <InheritToggle explicit={value !== null} readOnly={readOnly} onToggle={(e) => onChange(e ? (inherited ?? spec.min) : null)} />}
+      </div>
+      <div className="mt-1.5 flex items-center gap-2">
+        <Input
+          id={id}
+          type="number"
+          min={spec.min}
+          max={spec.max}
+          step={1}
+          className="max-w-36"
+          disabled={readOnly || !explicit}
+          value={value ?? inherited ?? ''}
+          onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        />
+        <span className="text-xs text-muted">{spec.unit}</span>
+        {!isGlobal && value === null && <span className="text-xs text-subtle">(inherited)</span>}
+      </div>
+      <p className="mt-1 text-xs text-muted">{spec.hint}</p>
+    </div>
+  );
+}
+
+function BoolRow({ label, hint, value, inherited, isGlobal, readOnly, onChange, onLabel = 'Yes', offLabel = 'No' }: {
+  label: string;
+  hint?: string;
+  value: boolean | null;
+  inherited: boolean | null;
+  isGlobal: boolean;
+  readOnly: boolean;
+  onChange: (value: boolean | null) => void;
+  onLabel?: string;
+  offLabel?: string;
+}) {
+  const id = useId();
+  const explicit = value !== null || isGlobal;
+  const shown = value ?? inherited ?? false;
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </label>
+        {!isGlobal && <InheritToggle explicit={value !== null} readOnly={readOnly} onToggle={(e) => onChange(e ? (inherited ?? false) : null)} />}
+      </div>
+      {hint && <p className="text-xs text-muted">{hint}</p>}
+      <Select id={id} className="mt-1.5 max-w-36" disabled={readOnly || !explicit} value={shown ? 'true' : 'false'} onChange={(e) => onChange(e.target.value === 'true')}>
+        <option value="true">{onLabel}</option>
+        <option value="false">{offLabel}</option>
+      </Select>
+    </div>
+  );
+}
+
+function MaintenanceWindowFields({ form, setForm, disabled, isGlobal }: {
+  form: PolicyRequest;
+  setForm: (updater: (f: PolicyRequest) => PolicyRequest) => void;
+  disabled: boolean;
+  isGlobal: boolean;
+}) {
+  const startId = useId();
+  const durationId = useId();
+  const days = form.maintenanceDays ?? [];
+  return (
+    <div className="flex flex-col gap-3">
+      <fieldset>
+        <legend className="mb-1 text-xs font-medium text-muted">Days</legend>
+        <div className="flex flex-wrap gap-1.5">
+          {DAY_LABELS.map((label, d) => {
+            const on = days.includes(d);
+            return (
+              <button
+                key={d}
+                type="button"
+                disabled={disabled}
+                aria-pressed={on}
+                onClick={() =>
+                  setForm((f) => {
+                    const current = f.maintenanceDays ?? [];
+                    const next = on ? current.filter((x) => x !== d) : [...current, d].sort((a, b) => a - b);
+                    return { ...f, maintenanceDays: next };
+                  })
+                }
+                className={cx(
+                  'h-8 w-12 rounded-md border text-sm transition-colors disabled:opacity-60',
+                  on ? 'border-accent bg-accent text-accent-fg' : 'border-line bg-surface text-fg hover:bg-hover',
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {isGlobal && days.length === 0 && <p className="mt-1 text-xs text-muted">No days selected: no maintenance window (automatic installation never runs).</p>}
+      </fieldset>
+      <div className="flex flex-wrap gap-4">
+        <div className="flex flex-col gap-1">
+          <label htmlFor={startId} className="text-xs font-medium text-muted">
+            Start time
+          </label>
+          <Input
+            id={startId}
+            type="time"
+            className="w-32"
+            disabled={disabled}
+            value={form.maintenanceStart ?? ''}
+            onChange={(e) => setForm((f) => ({ ...f, maintenanceStart: e.target.value || null }))}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={durationId} className="text-xs font-medium text-muted">
+            Duration (minutes)
+          </label>
+          <Input
+            id={durationId}
+            type="number"
+            min={15}
+            max={1440}
+            step={15}
+            className="w-32"
+            disabled={disabled}
+            value={form.maintenanceDurationMinutes ?? ''}
+            onChange={(e) => setForm((f) => ({ ...f, maintenanceDurationMinutes: e.target.value === '' ? null : Number(e.target.value) }))}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}

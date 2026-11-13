@@ -1,0 +1,152 @@
+import { CircleDashed, Loader2, Power, RotateCw } from 'lucide-react';
+import type {
+  ComplianceStatus,
+  EndpointStatus,
+  EndpointUpdateState,
+  EnrollmentRequestStatus,
+  EventSeverity,
+  JobItemStatus,
+  JobStatus,
+  OsSupportStatus,
+  UpdateCategory,
+} from '../api/types';
+import { humanize } from '../lib/format';
+import { Badge, Dot, type Tone } from './ui';
+
+export const complianceTone: Record<ComplianceStatus, Tone> = {
+  Compliant: 'ok',
+  MissingUpdates: 'warn',
+  FailedUpdates: 'danger',
+  RebootRequired: 'info',
+  ScanStale: 'neutral',
+  NeverScanned: 'neutral',
+};
+
+export function ComplianceBadge({ status }: { status: ComplianceStatus }) {
+  return <Badge tone={complianceTone[status]}>{humanize(status)}</Badge>;
+}
+
+export function OnlineBadge({ online, lastSeen }: { online: boolean; lastSeen?: string | null }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs" title={lastSeen ? `Last check-in ${new Date(lastSeen).toLocaleString()}` : undefined}>
+      <Dot tone={online ? 'ok' : 'neutral'} />
+      <span className={online ? 'text-fg' : 'text-muted'}>{online ? 'Online' : 'Offline'}</span>
+    </span>
+  );
+}
+
+const jobTone: Record<JobStatus, Tone> = {
+  Queued: 'neutral',
+  Delivered: 'info',
+  Acknowledged: 'info',
+  Running: 'accent',
+  Completed: 'ok',
+  Failed: 'danger',
+  Cancelled: 'neutral',
+  Expired: 'warn',
+  WaitingForReboot: 'info',
+};
+
+export function JobStatusBadge({ status, timedOut }: { status: JobStatus; timedOut?: boolean }) {
+  const active = status === 'Running' || status === 'Delivered' || status === 'Acknowledged';
+  return (
+    <Badge tone={jobTone[status]} icon={active ? <Loader2 className="size-3 animate-spin" aria-hidden /> : status === 'WaitingForReboot' ? <Power className="size-3" aria-hidden /> : undefined}>
+      {humanize(status)}
+      {timedOut ? ' (timed out)' : ''}
+    </Badge>
+  );
+}
+
+const itemTone: Record<JobItemStatus, Tone> = {
+  Pending: 'neutral',
+  Downloading: 'accent',
+  Downloaded: 'info',
+  Installing: 'accent',
+  Succeeded: 'ok',
+  Failed: 'danger',
+  Skipped: 'neutral',
+  Cancelled: 'neutral',
+};
+
+export function JobItemStatusBadge({ status, percent }: { status: JobItemStatus; percent?: number | null }) {
+  const busy = status === 'Downloading' || status === 'Installing';
+  return (
+    <Badge tone={itemTone[status]} icon={busy ? <Loader2 className="size-3 animate-spin" aria-hidden /> : undefined}>
+      {humanize(status)}
+      {status === 'Downloading' && percent !== null && percent !== undefined ? ` ${percent}%` : ''}
+    </Badge>
+  );
+}
+
+const updateStateTone: Record<EndpointUpdateState, Tone> = {
+  Missing: 'warn',
+  Failed: 'danger',
+  PendingVerification: 'info',
+  PendingReboot: 'info',
+  Installed: 'ok',
+  Superseded: 'neutral',
+  NotApplicable: 'neutral',
+  Excluded: 'neutral',
+};
+
+export function UpdateStateBadge({ state }: { state: EndpointUpdateState }) {
+  return (
+    <Badge
+      tone={updateStateTone[state]}
+      icon={state === 'PendingReboot' ? <RotateCw className="size-3" aria-hidden /> : state === 'PendingVerification' ? <CircleDashed className="size-3" aria-hidden /> : undefined}
+      title={
+        state === 'PendingVerification'
+          ? 'Windows reported success; the next scan confirms it.'
+          : state === 'PendingReboot'
+            ? 'Installed; takes effect after the endpoint restarts.'
+            : undefined
+      }
+    >
+      {humanize(state)}
+    </Badge>
+  );
+}
+
+const categoryTone: Partial<Record<UpdateCategory, Tone>> = {
+  Security: 'danger',
+  Critical: 'warn',
+  Cumulative: 'accent',
+  Feature: 'info',
+  Driver: 'info',
+};
+
+export function CategoryBadge({ category }: { category: UpdateCategory }) {
+  return <Badge tone={categoryTone[category] ?? 'neutral'}>{humanize(category)}</Badge>;
+}
+
+export function SeverityBadge({ severity }: { severity: string | null }) {
+  if (!severity) return <span className="text-subtle">—</span>;
+  const tone: Tone = severity === 'Critical' ? 'danger' : severity === 'Important' ? 'warn' : severity === 'Moderate' ? 'info' : 'neutral';
+  return <Badge tone={tone}>{severity}</Badge>;
+}
+
+export function OsSupportBadge({ status }: { status: OsSupportStatus }) {
+  if (status === 'Supported') return <Badge tone="ok">Supported</Badge>;
+  if (status === 'ExtendedSecurityUpdates') return <Badge tone="info">ESU</Badge>;
+  if (status === 'Unsupported') return <Badge tone="danger">Unsupported</Badge>;
+  return <Badge tone="neutral">Unknown</Badge>;
+}
+
+export function EndpointStatusBadge({ status }: { status: EndpointStatus }) {
+  if (status === 'Active') return null;
+  return <Badge tone={status === 'Revoked' ? 'danger' : 'neutral'}>{status}</Badge>;
+}
+
+export function EventSeverityDot({ severity }: { severity: EventSeverity }) {
+  return <Dot tone={severity === 'Error' ? 'danger' : severity === 'Warning' ? 'warn' : 'info'} />;
+}
+
+export function RequestStatusBadge({ status }: { status: EnrollmentRequestStatus }) {
+  const tone: Tone = status === 'Approved' ? 'ok' : status === 'Rejected' ? 'danger' : status === 'Expired' ? 'neutral' : 'warn';
+  return <Badge tone={tone}>{status === 'Pending' ? 'Pending approval' : status}</Badge>;
+}
+
+export function StateBadge({ state }: { state: string }) {
+  const tone: Tone = state === 'Active' ? 'ok' : state === 'Revoked' ? 'danger' : state === 'Expired' || state === 'Exhausted' ? 'neutral' : 'info';
+  return <Badge tone={tone}>{state}</Badge>;
+}
