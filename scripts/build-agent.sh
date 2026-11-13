@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds, tests and publishes the EasyPatch agent from Linux or macOS.
-# The MSI itself can only be built on Windows: use scripts/build-agent.ps1 (or the CI workflow).
+# Build the MSI with scripts/build-msi-linux.sh (Docker, WiX under Wine) or on Windows with scripts/build-agent.ps1.
 #
 #   scripts/build-agent.sh [--version 1.2.3] [--no-test] [--rid win-x64|win-arm64|all]
 set -euo pipefail
@@ -53,8 +53,8 @@ for rid in "${rids[@]}"; do
   out="artifacts/agent/$rid"
   echo "==> Publishing $rid to $out"
   rm -rf "$out"
-  dotnet publish agent/EasyPatch.Agent/EasyPatch.Agent.csproj -c Release -r "$rid" -o "$out" "-p:Version=$version"
+  dotnet publish agent/EasyPatch.Agent/EasyPatch.Agent.csproj -c Release -r "$rid" -o "$out" "-p:Version=$version" -p:ContinuousIntegrationBuild=true
   sha256sum "$out/EasyPatch.Agent.exe"
 done
 
-echo "Done. Build the MSI on Windows: pwsh agent/Installer/build-installer.ps1 -Version $version"
+echo "Done. Build the MSI with scripts/build-msi-linux.sh (Docker) or, on Windows, scripts/build-agent.ps1."

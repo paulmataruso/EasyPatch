@@ -47,6 +47,18 @@ public sealed class InstallScriptTests
     }
 
     [Fact]
+    public void Msi_keeps_the_enrollment_token_out_of_its_logs()
+    {
+        var wxs = File.ReadAllText(Path.Combine(RepositoryRoot(), "agent", "Installer", "Package.wxs"));
+
+        Assert.Matches("<Property Id=\"ENROLLMENTTOKEN\"[^>]*Hidden=\"yes\"", wxs);
+        // The token is written by WriteRegistryValues; its progress template must not include the value ([3]).
+        var template = Regex.Match(wxs, "<ProgressText Action=\"WriteRegistryValues\"[^>]*Template=\"(?<t>[^\"]*)\"").Groups["t"].Value;
+        Assert.False(string.IsNullOrEmpty(template));
+        Assert.DoesNotContain("[3]", template, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void One_liner_and_msiexec_commands_point_at_the_public_url()
     {
         Assert.Contains("https://patch.example.com/downloads/install/EPD-ABC.ps1", InstallScriptBuilder.OneLiner("https://patch.example.com/", "EPD-ABC"),

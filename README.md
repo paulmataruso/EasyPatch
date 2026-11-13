@@ -119,8 +119,10 @@ end-to-end lifecycle test, which drives the real agent runtime (with the Windows
 services replaced by test doubles) against the real API: enrollment, scan, install, restart,
 verification and compliance.
 
-The agent builds and tests on Linux with `scripts/build-agent.sh`. The MSI can only be built
-on Windows, with `scripts/build-agent.ps1` or the `agent` GitHub Actions workflow.
+The agent builds and tests on Linux with `scripts/build-agent.sh`. The MSIs can be built on
+Linux with Docker (`scripts/build-msi-linux.sh`, which runs WiX under Wine) or on Windows with
+`scripts/build-agent.ps1`, which can also sign them. The `agent` GitHub Actions workflow builds
+them on Windows.
 
 ```
 shared/      Contracts shared by agent and server (DTOs, request signing, update classification)
@@ -128,7 +130,7 @@ backend/     Core (domain), Infrastructure (EF Core, services), API, Worker, Tes
 agent/       Agent core, communication, Windows Update, inventory, service host, tests, WiX installer
 frontend/    Web console
 deployment/  Dockerfiles and Caddy configuration
-scripts/     init-secrets, backup, restore, agent build, dependency audit
+scripts/     init-secrets, backup, restore, agent and MSI builds, dependency audit
 docs/        Documentation
 ```
 
@@ -137,8 +139,10 @@ docs/        Documentation
 Version 1.0.0, pre-release. Server, console and agent logic are covered by automated tests on
 Linux. The following have not yet been validated by this repository's automated tests:
 
-* the Windows-specific agent components: Windows Update Agent COM calls, WMI inventory, DPAPI
-  key storage, the Windows service host, and the MSI;
+* the Windows-specific agent components on real Windows: Windows Update Agent COM calls, WMI
+  inventory, DPAPI key storage and the Windows service host;
+* the MSI on real Windows. It builds on Linux, and installs, upgrades and uninstalls under
+  Wine, but Windows Installer ICE validation has not been run;
 * the PowerShell install script on Windows.
 
 Validate them on test endpoints before rolling out to production.

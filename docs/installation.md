@@ -241,5 +241,7 @@ npm ci
 npm run typecheck && npm test && npm run build
 ```
 
+`scripts/build-msi-linux.sh --arch all` builds the agent MSIs with Docker (see
+[agent-installation.md](agent-installation.md#building-from-source)).
 `scripts/audit-dependencies.sh` lists known-vulnerable NuGet packages, including transitive
 ones, and runs `npm audit`.

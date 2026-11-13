@@ -87,9 +87,16 @@ There are two ways to enroll an agent.
    * A leaked code therefore lets an attacker add entries to the approval queue, and nothing
      more.
 
-The MSI marks `ENROLLMENTTOKEN` as a hidden property, so it is not written to MSI logs. It
-stores bootstrap values in `HKLM\SOFTWARE\EasyPatch\Agent` with an ACL that allows only
-SYSTEM and Administrators. The agent deletes the token after it enrolls successfully.
+The MSI marks `ENROLLMENTTOKEN` as a hidden property (`MsiHiddenProperties`), which Windows
+Installer masks in its property listings. It also overrides the progress template of
+`WriteRegistryValues` so that registry values are not echoed into the log. The MSI stores
+bootstrap values in `HKLM\SOFTWARE\EasyPatch\Agent` with an ACL that allows only SYSTEM and
+Administrators. The agent deletes the token after it enrolls successfully.
+
+Microsoft does not document masking for every line of a verbose Windows Installer log, and the
+`msiexec` command line itself is visible to process auditing and endpoint security tools.
+Treat verbose logs and command-line telemetry from token installs as sensitive, or use one of
+the alternatives in [agent-installation.md](agent-installation.md#protecting-the-enrollment-token).
 
 ## Agent request signing
 
@@ -155,7 +162,7 @@ protection, and the server holds nothing that would let an attacker impersonate 
 | T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |
 | R1 | Admin actions are denied after the fact | `audit_logs` records the user, IP, correlation ID and details of every mutating admin action |
 | I1 | Tenant data leaks between organizations | One tenant-scope service, organization-filtered queries and integration tests for isolation |
-| I2 | Secrets appear in logs | Tokens and keys are never logged. MSI properties are hidden. Structured logs leave out request bodies. |
+| I2 | Secrets appear in logs | The server and agent never log tokens or keys. The MSI token property is hidden and registry values are not echoed to MSI logs (see above for limits). Structured logs leave out request bodies. |
 | I3 | Database exposure | No published port, internal Docker network, Compose secret for the password |
 | D1 | Check-in floods | Per-credential and per-IP rate limits, request size limits, jitter |
 | D2 | Enrollment queue spam | A deployment code is required, pending requests are capped and expire, per-IP rate limit |
@@ -186,6 +193,9 @@ protection, and the server holds nothing that would let an attacker impersonate 
 * Consumer Windows 10 ESU enrollment (through a Microsoft account) cannot be detected
   reliably. Volume-license ESU keys are detected through licensing WMI. Administrators can
   set ESU status manually.
+* An enrollment token passed to `msiexec` appears on the command line, which process auditing
+  and endpoint security tools may record. Tokens are therefore limited-use, short-lived and
+  revocable, and deployment codes or the environment-variable method avoid the problem.
 * The server cannot verify the Authenticode signatures of agent MSIs it hosts. The generated
   PowerShell installer verifies the SHA-256 and, optionally, the Authenticode signature on
   the endpoint.

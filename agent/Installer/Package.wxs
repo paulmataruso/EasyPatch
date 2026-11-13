@@ -39,6 +39,12 @@
     <Property Id="DEPLOYMENTCODE" Secure="yes" />
     <Property Id="ENROLLMENTTOKEN" Secure="yes" Hidden="yes" />
 
+    <!-- The default WriteRegistryValues progress template ("Key: [1], Name: [2], Value: [3]") would put the enrollment
+         token into verbose MSI logs. Log the key and value name only. -->
+    <UI>
+      <ProgressText Action="WriteRegistryValues" Message="Writing system registry values" Template="Key: [1], Name: [2]" />
+    </UI>
+
     <!-- Remember SERVERURL / PROXYURL across upgrades and repairs (command-line values win). -->
     <Property Id="SAVEDSERVERURL" Secure="yes">
       <RegistrySearch Id="SavedServerUrl" Root="HKLM" Key="SOFTWARE\EasyPatch\Agent" Name="ServerUrl" Type="raw" Bitness="always64" />
@@ -103,6 +109,9 @@
                         Account="LocalSystem"
                         Arguments="run"
                         Vital="yes">
+          <!-- MsiServiceConfig (Windows Installer 5.0) is the only declarative way to set delayed auto-start and to make
+               recovery actions apply when the service stops with an error exit code. WiX warns about it (WIX1149); the
+               util:ServiceConfig alternative below covers restart actions but not these two settings. -->
           <ServiceConfig DelayedAutoStart="yes" FailureActionsWhen="failedToStopOrReturnedError" OnInstall="yes" OnReinstall="yes" />
           <util:ServiceConfig FirstFailureActionType="restart"
                               SecondFailureActionType="restart"
@@ -126,7 +135,7 @@
 
       <!-- Bootstrap registry key, restricted to SYSTEM and Administrators (it may briefly hold an enrollment token). -->
       <Component Id="RegistryKey" Directory="INSTALLFOLDER" Guid="5F3B7E1C-8A2D-4C61-9E4B-6D2A1C7F9B30" Bitness="always64">
-        <RegistryKey Root="HKLM" Key="SOFTWARE\EasyPatch\Agent">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\EasyPatch\Agent" ForceCreateOnInstall="yes">
           <PermissionEx Sddl="O:BAG:SYD:PAI(A;CI;KA;;;SY)(A;CI;KA;;;BA)" />
           <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         </RegistryKey>

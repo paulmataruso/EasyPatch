@@ -61,7 +61,7 @@ with the one on the computer. The agent prints it on the computer in three place
 | Property | Required | Description |
 |---|---|---|
 | `SERVERURL` | First install | `https://` URL of the EasyPatch server, for example `https://patch.example.com` or `https://example.com/easypatch`. Remembered on upgrade |
-| `ENROLLMENTTOKEN` | One of the two | Enrollment token. Hidden MSI property (not written to MSI logs). Deleted by the agent once it has been used |
+| `ENROLLMENTTOKEN` | One of the two | Enrollment token. Hidden MSI property; see *Protecting the enrollment token*. Deleted by the agent once it has been used |
 | `DEPLOYMENTCODE` | One of the two | Deployment code. Deleted by the agent once the request is approved or rejected |
 | `PROXYURL` | No | `http://proxy:8080` style URL of an outbound proxy. Remembered on upgrade. Authenticating proxies are contacted with the computer account (Negotiate/NTLM) |
 
@@ -76,9 +76,17 @@ that does not start with `https://`, or with both `ENROLLMENTTOKEN` and `DEPLOYM
 ### Protecting the enrollment token
 
 Values on an `msiexec` command line are visible to other administrators through the process
-list while the installer runs, and in the command history of the tool that ran it. Tokens are
-therefore single-use and expire (24 hours by default). For extra protection, install with the
-server URL only and enroll with the token in an environment variable:
+list while the installer runs, in the command history of the tool that ran it, and in any
+process-creation auditing or endpoint security telemetry. Tokens are therefore single-use and
+expire (24 hours by default).
+
+The MSI hides `ENROLLMENTTOKEN` from Windows Installer's property listings and does not echo
+registry values into its log, but Microsoft does not document masking for every line of a
+verbose (`/l*v`) log. Treat verbose logs of token installs as sensitive.
+
+To keep the token off the `msiexec` command line and out of MSI logs entirely, use a
+deployment code (no secret at all), or install with the server URL only and enroll with the
+token in an environment variable:
 
 ```powershell
 msiexec /i EasyPatchAgent-1.0.0-x64.msi /qn /norestart SERVERURL=https://patch.example.com
@@ -248,11 +256,18 @@ need them.
 
 ## Building from source
 
-* Linux/macOS (build, test, publish, no MSI): `scripts/build-agent.sh --version 1.2.0 --rid all`
-* Windows (also builds the MSI): `pwsh scripts/build-agent.ps1 -Version 1.2.0 -Architecture x64,arm64`
+* Windows: `pwsh scripts/build-agent.ps1 -Version 1.2.0 -Architecture x64,arm64` builds, tests,
+  optionally signs, and builds the MSIs.
+* Linux with Docker: `scripts/build-msi-linux.sh --version 1.2.0 --arch all` builds, tests and
+  builds the MSIs. It runs the same WiX Toolset 5.0.2 under Wine in a pinned container
+  (`agent/Installer/linux/Dockerfile`), with networking disabled during the build. Two things
+  are not available on Linux: Windows Installer ICE validation (Wine cannot run it) and code
+  signing. Build packages that must be signed on Windows.
+* Linux/macOS without Docker: `scripts/build-agent.sh --version 1.2.0 --rid all` builds, tests and
+  publishes the agent executable only.
 
-Signing is optional and is configured through environment variables, never through files in
-the repository. See `agent/Installer/build-installer.ps1` for `EASYPATCH_SIGN_CERT_THUMBPRINT`,
+On Windows, signing is optional and is configured through environment variables, never
+through files in the repository. See `agent/Installer/build-installer.ps1` for `EASYPATCH_SIGN_CERT_THUMBPRINT`,
 `EASYPATCH_SIGN_PFX_PATH`/`EASYPATCH_SIGN_PFX_PASSWORD` and `EASYPATCH_SIGN_TIMESTAMP_URL`. Each
 MSI is written to `artifacts/installer` together with a `.sha256` file. Copy the MSI to
 `data/agent-packages` on the server to offer it for download. The server computes the SHA-256

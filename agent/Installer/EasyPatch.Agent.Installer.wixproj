@@ -1,7 +1,8 @@
 <Project Sdk="WixToolset.Sdk/5.0.2">
   <!--
     Builds EasyPatchAgent.msi from a published agent (scripts: agent/Installer/build-installer.ps1).
-    Windows only (WiX uses the Windows Installer API). Not part of EasyPatch.slnx.
+    Windows (WiX uses the Windows Installer API). On Linux, scripts/build-msi-linux.sh compiles Package.wxs with the
+    same WiX version under Wine. Not part of EasyPatch.slnx.
 
       dotnet build agent/Installer/EasyPatch.Agent.Installer.wixproj -c Release
         -p:ProductVersion=1.2.3 -p:PublishDir=<abs path to publish output>\ -p:InstallerPlatform=x64
