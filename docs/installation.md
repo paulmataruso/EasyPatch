@@ -223,7 +223,13 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm api crea
 ```
 
 Open `https://localhost:8443` and accept the certificate warning, or trust Caddy's root
-certificate. To use a different port, set `EASYPATCH_HTTPS_PORT`. Agents only connect to a server
+certificate. To use a different port, set `EASYPATCH_HTTPS_PORT`.
+
+To reach a lab server from other machines on a private network, set both the address and the
+name to the host's LAN IP address in `.env`, for example `EASYPATCH_BIND_ADDRESS=192.168.1.20`
+and `EASYPATCH_DOMAIN=192.168.1.20`. Then open `https://192.168.1.20:8443`. Caddy's internal CA
+issues a certificate for the IP address. Anyone who can reach that address can reach the sign-in
+page, so do this only on a trusted network. Agents only connect to a server
 whose certificate chains to a root trusted by Windows. A lab agent therefore needs Caddy's root
 certificate in the computer's Trusted Root store. Do not use this mode in production.
 

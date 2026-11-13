@@ -1,4 +1,5 @@
-# Local / lab override: Caddy's internal CA instead of ACME, published only on 127.0.0.1.
+# Local / lab override: Caddy's internal CA instead of ACME, published on 127.0.0.1 unless EASYPATCH_BIND_ADDRESS
+# names another host address.
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 # Set EASYPATCH_DOMAIN=localhost in .env, then open https://localhost:8443 (accept the certificate warning, or
 # trust Caddy's root CA). See docs/installation.md.
@@ -13,4 +14,4 @@ services:
       EASYPATCH_DOMAIN: ${EASYPATCH_DOMAIN:-localhost}
       ACME_EMAIL: unused@localhost.invalid
     ports: !override
-      - "127.0.0.1:${EASYPATCH_HTTPS_PORT:-8443}:443"
+      - "${EASYPATCH_BIND_ADDRESS:-127.0.0.1}:${EASYPATCH_HTTPS_PORT:-8443}:443"
