@@ -9,7 +9,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidatePattern('^\d{1,3}\.\d{1,3}\.\d{1,5}$')][string]$Version = '1.0.0',
+    [ValidatePattern('^\d{1,3}\.\d{1,3}\.\d{1,5}$')][string]$Version = '1.1.0',
     [ValidateSet('x64', 'arm64')][string[]]$Architecture = @('x64'),
     [switch]$SkipTests,
     [switch]$SkipInstaller,

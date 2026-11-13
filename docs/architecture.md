@@ -9,7 +9,9 @@ It has two parts:
    forwarding. It works behind NAT and CGNAT.
 
 The platform patches the Windows operating system and does nothing else. The agent has no
-remote shell and no arbitrary command execution. It never reboots a machine on its own.
+remote shell and no arbitrary command execution. It restarts a computer only for an
+administrator's restart job: a one-off restart, or one created by a restart schedule an
+administrator configured in policy.
 
 ## 1. Component overview
 
@@ -30,7 +32,7 @@ remote shell and no arbitrary command execution. It never reboots a machine on i
 |---|---|---|
 | `caddy` | `easypatch-proxy` (Caddy plus the built SPA) | Terminates TLS with automatic ACME certificates, enforces TLS 1.2+, adds security headers, serves the React SPA and reverse-proxies `/api/*` and `/downloads/*` to the API. |
 | `api` | `easypatch-server` | ASP.NET Core 10 Web API. Handles admin auth, the admin REST API, the agent protocol and OpenAPI. |
-| `worker` | `easypatch-server` (different entrypoint) | Background processing: job expiry and lease recovery, online/offline detection, scheduled installs, compliance snapshots, retention. |
+| `worker` | `easypatch-server` (different entrypoint) | Background processing: job expiry and lease recovery, online/offline detection, scheduled installs, scheduled restarts, compliance snapshots, retention. |
 | `postgres` | `postgres:18.6-alpine3.24` | System of record, including the durable job queue. Attached only to the internal `data` network. |
 | `migrate` | `easypatch-server` | One-shot container that applies EF Core migrations before `api` and `worker` start. |
 
@@ -50,7 +52,7 @@ agent/EasyPatch.Agent.Core      Platform-independent agent logic (scheduler, job
 agent/EasyPatch.Communication   Signed HTTPS client for the agent protocol
 agent/EasyPatch.WindowsUpdate   Windows Update Agent (WUA) COM integration          [Windows]
 agent/EasyPatch.Inventory       WMI and registry inventory, reboot and update-source detection [Windows]
-agent/EasyPatch.Agent           Windows service host, DPAPI, CLI                     [Windows]
+agent/EasyPatch.Agent           Windows service host, tray app, DPAPI, CLI           [Windows]
 agent/EasyPatch.Agent.Tests     Agent logic tests (run on any OS using fakes)
 agent/Installer                 WiX v5 MSI project
 frontend/                       React + TypeScript + Vite + Tailwind SPA
@@ -86,6 +88,7 @@ erDiagram
     endpoints ||--o{ update_exclusions : excludes
     policies }o--|| organizations : "org scope"
     policies }o--|| sites : "site scope"
+    policies |o--|| endpoints : "endpoint scope"
     users ||--o{ user_sessions : has
     users ||--o{ user_organization_access : "scoped to"
     users ||--o{ password_reset_tokens : has
@@ -100,7 +103,7 @@ erDiagram
 | `user_organization_access` | When a non-SuperAdmin user has rows here, they can only see those organizations. No rows means all organizations. Managed under Settings → Users. |
 | `password_reset_tokens` | Hashed, single-use, expiring tokens issued by an administrator |
 | `organizations`, `sites` | `is_active` and `archived_at`. Archiving is preferred to deleting; hard delete is only allowed when no endpoints exist. |
-| `endpoints` | Identity, OS and hardware inventory, agent version, check-in, scan and inventory timestamps, reboot state and reasons, update source, OS support status, and denormalized compliance counters |
+| `endpoints` | Identity, OS and hardware inventory, agent version and capabilities, check-in, scan and inventory timestamps, reboot state and reasons, signed-in user and tray counts, update source, Windows Update policy status reported by the agent, OS support status, and denormalized compliance counters |
 | `agent_credentials` | Public ID `c_…`, ECDSA P-256 **public key only**, expiry, revocation, `replaced_by` |
 | `enrollment_tokens` | SHA-256 hash, display prefix, org (and optional site) scope, `max_uses` (default 1), `use_count`, expiry, revocation |
 | `deployment_codes` | Non-secret code for tokenless (RMM) installs. Org and optional site scope, cap on pending requests, optional source CIDR allow-list, revocation |
@@ -112,7 +115,7 @@ erDiagram
 | `update_exclusions` | Per-endpoint excluded updates (by GUID). Organization and site exclusions live in policy as KB lists. |
 | `jobs` | Durable job queue. Holds lease and delivery tracking, payload and result (`jsonb`), progress, sequence number, dedupe key (partial unique index over active jobs), and an `xmin` concurrency token |
 | `job_updates` | Per-update results inside an install job |
-| `policies` | One global row plus optional organization and site rows. Nullable fields override the level above. |
+| `policies` | One global row plus optional organization, site and endpoint rows. Nullable fields override the level above. The restart schedule and Windows Update settings are `jsonb`. |
 | `server_settings` | A single `jsonb` row for global limits, retention periods and credential lifetimes |
 | `os_lifecycle_entries` | Editable lifecycle table (product, edition class, build, end of servicing) used for support status |
 | `endpoint_events` | Per-endpoint activity (scans, jobs, enrollment, reboot changes, online and offline transitions) |
@@ -164,8 +167,10 @@ DotNet are derived categories, not Microsoft classifications.
 
 ## 3. Policy
 
-The effective policy is resolved in the order **global → organization → site**. Scalar
-fields take the most specific non-null value. Lists (excluded KBs) are merged.
+The effective policy is resolved in the order **global → organization → site → endpoint**.
+Scalar fields take the most specific non-null value. Lists (excluded KBs) are merged. An
+endpoint policy is optional and holds only the values that differ for that one computer (its
+editor has no per-site install limit).
 
 | Field | Global default |
 |---|---|
@@ -181,13 +186,52 @@ fields take the most specific non-null value. Lists (excluded KBs) are merged.
 | Maintenance window | none (days of week, start time, duration, in the site's or organization's time zone) |
 | Scan considered stale after | 48 h |
 | Max concurrent installs per site | 10 |
+| Tray icon | shown |
+| Install notifications ("Updates are installing") | on |
+| Restart schedule | none |
+| Windows Update settings | each group *Not configured* |
 
 Global limits are stored in `server_settings`. The global max concurrent installs defaults
 to 50.
 
+### Restart schedules
+
+A restart schedule has days of the week, a start time (in the site's or organization's time
+zone), a condition (*always*, or *only if Windows reports a pending restart*), a restart mode
+(see [Restart jobs](#restart-jobs)) and an expiry of 15 minutes to 24 hours. Every 2 minutes
+the worker creates one `Restart` job (trigger `Scheduled`, requested by "Restart schedule")
+for each endpoint whose schedule is due, unless the endpoint already has an active restart
+job. A job is created at most once per occurrence, and it expires when the occurrence's
+expiry period ends, so a computer that is off at the scheduled time is not restarted later.
+With the *only if pending* condition, endpoints that did not report a pending restart are
+skipped, and the agent checks again when the job starts. A lower level can switch an inherited
+schedule off.
+
+### Windows Update settings
+
+Windows Update settings are grouped. Each group is resolved separately: the most specific
+level that sets the group wins. A level can *inherit*, set the group to *Not configured*
+(EasyPatch manages nothing in that group), or configure it. Managing a group means EasyPatch
+decides every registry value of that group: values the configuration does not need are
+deleted. All values are under `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate`
+(and its `AU` subkey):
+
+| Group | Settings | Registry values |
+|---|---|---|
+| Automatic Updates | Disabled, notify before download, download and notify, or download and install on a schedule (day, hour) | `AU\NoAutoUpdate`, `AU\AUOptions`, `AU\ScheduledInstallDay`, `AU\ScheduledInstallTime` |
+| Feature updates | Deferral (days); target product and release version (for example Windows 11, 24H2) | `DeferFeatureUpdates`, `DeferFeatureUpdatesPeriodInDays`, `TargetReleaseVersion`, `ProductVersion`, `TargetReleaseVersionInfo` |
+| Quality updates | Deferral (days); prevent users from pausing updates | `DeferQualityUpdates`, `DeferQualityUpdatesPeriodInDays`, `SetDisablePauseUXAccess` |
+| Restart behaviour | No automatic restart while users are signed in; active hours | `AU\NoAutoRebootWithLoggedOnUsers`, `SetActiveHours`, `ActiveHoursStart`, `ActiveHoursEnd` |
+
+`WUServer`, `WUStatusServer`, `UseWUServer` and every other value are never written, so a
+WSUS configuration stays in place. The effective policy view lists the exact registry values
+an endpoint will receive. How the agent applies and restores them is described in
+[Windows Update policy enforcement](#windows-update-policy-enforcement).
+
 ## 4. Job system
 
-Job types are `UpdateScan`, `InstallUpdates` and `InventoryRefresh`.
+Job types are `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart` and
+`NotifyUser` (a preset message to signed-in users).
 
 ```
 Queued ──lease──► Delivered ──ack──► Acknowledged ──► Running ──► Completed
@@ -207,9 +251,16 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
   transaction. Two API instances can never deliver the same job. A delivered job that is not
   acknowledged within 10 minutes goes back to `Queued`.
 * **One job at a time per endpoint.** A new job is only delivered when the endpoint has no
-  job that is delivered, acknowledged or running. While an install job is parked in
+  job that is delivered, acknowledged or running. `NotifyUser` jobs are the exception: up to
+  five are delivered with every check-in, even while another job runs, and they do not make
+  the endpoint busy. A `Restart` job is delivered after the running job finishes, and while it
+  waits for users no other job is delivered. While an install job is parked in
   `WaitingForReboot`, scans and inventory jobs are still delivered (the agent runs them while
   it waits), but further install jobs stay queued until the restart has been handled.
+* **Agent capabilities.** Agents report what they support in every check-in (`restart`,
+  `notify-user`, `tray`, `windows-update-policy`). Restart and message jobs can only be created
+  for, and are only delivered to, agents that report the matching capability. For older agents
+  the API answers `409 agent_upgrade_required`.
 * **Concurrency limits.** Install jobs are only delivered while the global limit and the
   per-site limit allow it. This check runs under a transaction-scoped advisory lock.
 * **Deduplication.** A partial unique index on (`endpoint_id`, `dedupe_key`) covering active
@@ -229,7 +280,37 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
   reboot is needed to finish them, the job **completes** with `reboot_required = true`, and
   the endpoint shows the pending reboot and which updates caused it.
 * **Expiry.** Queued jobs expire after 7 days by default. Scheduled jobs expire when their
-  maintenance window closes.
+  maintenance window closes. A restart expires if the computer has not picked it up within its
+  expiry period (default 2 hours, 15 minutes to 24 hours), so an offline computer is not
+  restarted at a surprising time. A restart can be scheduled up to 31 days ahead; it is not
+  delivered before that time.
+
+### Restart jobs
+
+| Mode | What signed-in users see |
+|---|---|
+| `Immediate` | Nothing; the computer restarts at once |
+| `Countdown` | A countdown of 1 to 60 minutes (default 5). They can restart sooner but cannot postpone |
+| `PromptWithDeadline` | A request to restart, with *Restart now* and *Postpone* (1 hour, 4 hours or 1 day, never past the deadline). The deadline is 15 minutes to 7 days (default 4 hours). At the deadline a 5-minute final countdown starts |
+| `PromptNoDeadline` | The same request without a deadline. While someone is signed in, the computer is not restarted until a user accepts; the job fails with `restart_not_performed` after 7 days |
+
+* **Only if pending.** With this condition the agent checks Windows' pending-restart state
+  when the job starts. If no restart is pending, the job completes without restarting.
+* **Nobody signed in.** The computer restarts at once, whatever the mode.
+* **Signed-in users but no tray.** For a countdown or the final countdown, Windows' own
+  shutdown warning is shown for the remaining time instead. A prompt without a deadline keeps
+  waiting for a tray.
+* **Verification.** The agent asks Windows to restart (`InitiateShutdown`, with the planned
+  "Operating System: Hot fix" shutdown reason) and records the boot time. The job completes only when the
+  agent sees a new boot time after the restart. If Windows has not restarted 30 minutes after
+  the request (plus any warning period), the job fails with `restart_not_performed`. If the
+  computer was restarted by someone else while the job waited, it completes without another
+  restart.
+* **Progress.** While waiting, the agent reports progress every 30 minutes, so the server's
+  running-job timeout does not end the job.
+* **Cancellation.** Cancelling a waiting restart removes the prompt. If Windows is already
+  showing its warning, the restart is aborted (`AbortSystemShutdown`); once Windows has
+  started shutting down it can no longer be cancelled.
 
 ## 5. Agent lifecycle
 
@@ -247,6 +328,9 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
    scan every 6 h ±10 %      ─► WUA search ─► POST scan-results (+ history delta)
    inventory every 24 h      ─► WMI/registry ─► POST inventory
    job runner                ─► one job at a time, state persisted before each step
+   restart handler, messages ─► every 5 s; prompts and notices go to the tray over a local pipe
+   tray launcher             ─► starts the tray in each signed-in session (every 15 s)
+   Windows Update policy     ─► applied after each check-in when configured
    outbox flusher            ─► reports persisted on disk, retried with exponential backoff
 ```
 
@@ -263,9 +347,10 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
   4. For each update: download, report, install, report.
   5. Run a post-install scan and send the scan results.
   6. Finish as `Completed` or `Failed`, with `reboot_required` if needed.
-* **Reboot.** The agent never reboots. It reports pending-reboot state from WUA
-  `SystemInfo.RebootRequired`, the CBS `RebootPending` key, the WU `RebootRequired` key and
-  `PendingFileRenameOperations`, and lists the reasons.
+* **Reboot.** The agent reports pending-reboot state from WUA `SystemInfo.RebootRequired`,
+  the CBS `RebootPending` key, the WU `RebootRequired` key and `PendingFileRenameOperations`,
+  and lists the reasons. Install jobs never restart the computer. The agent restarts it only
+  for a `Restart` job (see [Restart jobs](#restart-jobs)).
 * **Resilience.** On a service restart or reboot, the agent reloads its saved state and
   resumes the active job, which is idempotent. Reports wait in the on-disk outbox until the
   server accepts them. Network failures use exponential backoff with full jitter, up to
@@ -273,7 +358,46 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
 * **Respecting customer configuration.** WUA searches use the default server selection, so
   WSUS and Group Policy configuration are honored. The agent reports the update source (WSUS
   server, Windows Update or Microsoft Update), Windows Update for Business deferral policies
-  and Automatic Updates mode. It never changes them.
+  and Automatic Updates mode. It changes Windows Update policy values only for the groups an
+  administrator configured (below), and never the WSUS settings.
+
+### Tray
+
+The tray is the same executable started as `EasyPatch.Agent.exe tray` in each signed-in
+user's session. The service starts it (`WTSQueryUserToken` and `CreateProcessAsUser`, as the
+signed-in user, not as SYSTEM) in every active session that has no tray, checking every 15
+seconds and waiting at least 2 minutes before starting it again in the same session. The tray
+exits when it cannot reach the service for a minute, or when the service stops.
+
+* **What it shows.** An icon with a menu: the agent's activity, the time of its last contact
+  with the server, and whether a restart is pending. Preset messages appear as notifications,
+  and a pending restart opens a small window with *Restart now* and, when allowed, *Postpone*.
+  When the *Tray icon* policy is off, the icon appears only while a message or restart request
+  is shown.
+* **Connection.** The service listens on the named pipe `\\.\pipe\EasyPatchAgent`. Frames
+  are a 32-bit little-endian length and UTF-8 JSON, at most 16 KB; anything malformed closes
+  the connection.
+
+### Windows Update policy enforcement
+
+After each check-in the agent applies the effective Windows Update settings, group by group:
+
+1. **Before the first change** to a group, the agent saves the group's current values in its
+   state file.
+2. It writes the values that differ, and reports the group as `Applied`.
+3. At later check-ins it compares the registry with what it wrote. If another policy source
+   (such as domain Group Policy, Intune or a script) changed a value, the group is reported as
+   `Conflict`, with the values involved, and the agent **stops** re-applying it, so the two
+   sources never fight over the registry. Changing the EasyPatch settings for the group applies
+   them again.
+4. When a group is no longer managed (*Not configured*, or the override was removed), the agent
+   restores the saved values. A value that another source changed since EasyPatch wrote it is
+   left as it is. The same restore happens when the agent is uninstalled and when its
+   credential is revoked.
+5. A registry error is reported as `Error` and retried at the next check-in.
+
+The report is sent when it changes and at least once a day, and includes whether MDM (Intune)
+update policies are present, because those can take precedence over the registry values.
 
 ## 6. Docker deployment design
 

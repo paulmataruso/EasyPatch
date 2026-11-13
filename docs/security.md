@@ -9,7 +9,9 @@ The agent only performs a fixed set of operations: Windows Update Agent (WUA) sc
 and install, plus inventory collection. It installs only updates that WUA offers from the
 endpoint's own configured source (Windows Update, Microsoft Update or the customer's WSUS
 server). Those updates are signed by Microsoft and their signatures are checked by Windows.
-There is no shell, no script execution, no file push and no automatic reboot.
+There is no shell, no script execution and no file push. The agent restarts a computer only
+for a restart job that an administrator created, directly or through a restart schedule, and
+changes Windows Update policy values only for settings an administrator configured.
 
 ## Assets
 
@@ -53,7 +55,7 @@ There is no shell, no script execution, no file push and no automatic reboot.
   | Role | Permissions |
   |---|---|
   | SuperAdmin | Everything, including users, server settings and the lifecycle table |
-  | Admin | Organizations, sites, endpoints, jobs, policies, enrollment |
+  | Admin | Organizations, sites, endpoints, jobs (including restarts and user messages), policies (including Windows Update settings and restart schedules), enrollment |
   | ReadOnly | View only |
 
   A SuperAdmin can restrict an Admin or ReadOnly user to specific organizations
@@ -150,6 +152,50 @@ its automatic certificate management. Bearer tokens or HMAC keys would require t
 store reusable secrets. Signing gives per-device asymmetric authentication with replay
 protection, and the server holds nothing that would let an attacker impersonate an agent.
 
+## Restarts, user messages and Windows Update settings
+
+These features act on the computer and its users, so each is limited to a fixed, validated
+shape and to an explicit administrator decision.
+
+* **Restarts.** A `Restart` job is created only by an Operator (Admin or SuperAdmin) for chosen
+  endpoints, or by the worker from a restart schedule that an Operator configured in policy.
+  Install jobs never restart a computer. The job carries only a mode, a condition and two
+  durations, all range-checked by the server and again by the agent. Manual restarts are
+  recorded in the audit log with their parameters; schedule changes are recorded as policy
+  changes. A restart job that is not picked up within its expiry period (at most 24 hours) is
+  abandoned rather than run late.
+* **User messages.** The only messages are the presets listed by `GET /api/v1/user-messages`.
+  There is no free text, so a compromised account or server cannot show users arbitrary
+  content (for example a phishing message that appears to come from IT). The only variable
+  part is the restart time in the *Restart scheduled* message.
+* **Windows Update settings.** Every group is *Not configured* by default, so nothing changes
+  until an administrator configures it. The agent writes only the registry values listed in
+  [architecture.md](architecture.md#windows-update-settings), under
+  `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate`. It never writes the WSUS
+  values (`WUServer`, `WUStatusServer`, `UseWUServer`) and cannot redirect an endpoint to a
+  different update server. It keeps the original values and restores them when the setting is
+  removed, when the agent is uninstalled and when its credential is revoked. When another
+  policy source changes a value, the agent reports a conflict and stops re-applying, instead
+  of overriding domain Group Policy in a loop.
+
+### Tray and local pipe
+
+The tray runs as the signed-in user, unprivileged. It talks to the service (LocalSystem) over
+the named pipe `\\.\pipe\EasyPatchAgent`:
+
+* **Access.** The pipe ACL grants full control to SYSTEM and Administrators and read/write to
+  interactive users, and denies network logons, so remote clients cannot connect. The service
+  creates the pipe with `FirstPipeInstance`, so another process cannot create it first.
+* **Identity.** The service takes the client's session from Windows
+  (`GetNamedPipeClientSessionId`), never from the message, and refuses session 0 (services).
+  The tray checks that the pipe server runs in session 0 before trusting it.
+* **What a tray can do.** Exactly two things: answer the restart request that is currently
+  shown, with *Restart now* or one of the offered postponements. Anything else is ignored,
+  and a malformed or oversized frame (over 16 KB) closes the connection. A local user can
+  therefore at most restart the computer sooner or postpone a restart within the
+  administrator's deadline, which the restart prompt allows anyway. No input from the tray is
+  ever executed, and the tray cannot change the agent's configuration, jobs or credentials.
+
 ## Threat model (STRIDE summary)
 
 | # | Threat | Mitigation |
@@ -157,7 +203,7 @@ protection, and the server holds nothing that would let an attacker impersonate 
 | S1 | Attacker impersonates an agent | Per-device ECDSA keys, signed requests, nonce and timestamp checks, revocation |
 | S2 | Attacker impersonates the server to an agent | The agent uses normal Windows TLS validation of the server certificate (the public CA from Caddy's ACME). TLS validation cannot be turned off. |
 | S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory TOTP |
-| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select WUA updates by GUID or category, never arbitrary binaries. |
+| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select WUA updates by GUID or category, never arbitrary binaries. Restart payloads are a mode and range-checked durations; message payloads are a preset name. |
 | T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |
 | T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |
 | R1 | Admin actions are denied after the fact | `audit_logs` records the user, IP, correlation ID and details of every mutating admin action |
@@ -169,6 +215,8 @@ protection, and the server holds nothing that would let an attacker impersonate 
 | E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability, and update sources are controlled by Windows. Agent self-update is **not implemented**. When it is, it must verify Authenticode against a publisher identity pinned in the agent, not a hash supplied by the server. |
 | E2 | A local non-admin user reads agent secrets | ProgramData ACL (SYSTEM and Administrators), DPAPI, registry ACL on bootstrap values |
 | E3 | Cross-site request forgery or XSS in the admin UI | SameSite=Strict, CSRF header check, a strict CSP from Caddy, and React escaping |
+| E4 | A local user abuses the tray pipe to make the service do something | The pipe accepts only *restart now* or an offered postponement for the current restart request, from interactive sessions; the session comes from Windows. See [Tray and local pipe](#tray-and-local-pipe). |
+| D3 | A compromised admin account or server restarts many computers or weakens Windows Update settings | Requires the Operator role and MFA; every manual restart and policy change is audited. Restarts warn signed-in users according to the chosen mode. Windows Update changes are limited to the listed values (never the WSUS server), are shown per endpoint in the console, and are restored when removed. This is a disruption risk, not code execution. |
 
 ## Server hardening checklist
 

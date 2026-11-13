@@ -25,7 +25,7 @@ The live OpenAPI document is served at `/api/openapi/v1.json`, with Swagger UI a
 |---|---|---|---|
 | POST | `/enroll` | none (token or deployment code in the body) | Register a public key. Returns `Active` (with `endpointId`, `credentialId` = `c_…`, `config`) or `PendingApproval` (with `credentialId` = `r_…`). |
 | POST | `/enrollment/status` | signed with `r_…` | Poll a pending enrollment: `PendingApproval`, `Active` (with the new `c_…` credential), `Rejected` or `Expired`. This is the only route an `r_…` credential may call. |
-| POST | `/check-in` | signed | Combined heartbeat and job poll. Request: agent version, boot time, reboot state and reasons, IDs of jobs the agent holds, current activity. Response: server time, config, jobs to run (at most one newly leased job, plus re-deliveries), IDs of jobs to cancel, `rotateCredential`, latest available agent version. |
+| POST | `/check-in` | signed | Combined heartbeat and job poll. Request: agent version, boot time, reboot state and reasons, IDs of jobs the agent holds, current activity, capabilities, signed-in user and tray counts, and the Windows Update policy status (only when it changed, and at least daily). Response: server time, config (including the tray and notification settings and the effective Windows Update settings), jobs to run (at most one newly leased job, up to five messages, plus re-deliveries), IDs of jobs to cancel, `rotateCredential`, latest available agent version. |
 | POST | `/inventory` | signed | OS and hardware inventory. `204`. |
 | POST | `/updates/scan-results` | signed | Full scan snapshot (missing and installed updates, update source). Idempotent by `scanId`. `204`. |
 | POST | `/updates/history` | signed | Windows Update history entries, deduplicated on the server. `204`. |
@@ -100,7 +100,16 @@ restricted to specific organizations.
 | GET/PUT/DELETE | `/sites/{id}` |
 | POST | `/sites/{id}/archive`, `/sites/{id}/restore` |
 | GET/PUT/DELETE | `/sites/{id}/policy` |
+| GET/PUT/DELETE | `/endpoints/{id}/policy` (an endpoint override; GET returns an empty policy when there is none; `maxConcurrentInstallsPerSite` cannot be set here) |
 | GET/PUT | `/policies/global` |
+
+A policy body has nullable fields; `null` inherits from the level above. Besides the install
+and schedule fields it has `trayIconEnabled`, `installNotificationsEnabled`,
+`restartSchedule` (`{enabled, days[0-6], time "HH:mm", condition, mode, countdownMinutes,
+deadlineMinutes, expiryMinutes}`) and `windowsUpdate`. `windowsUpdate` has one entry per group
+(`automaticUpdates`, `featureUpdates`, `qualityUpdates`, `restartBehavior`), each `null`
+(inherit), `{managed: false}` (*Not configured*) or `{managed: true, value: {…}}`. Invalid
+values return `400 validation_failed`.
 
 ### Endpoints
 
@@ -114,16 +123,22 @@ restricted to specific organizations.
 | GET | `/endpoints/{id}/update-history` | Windows Update history (`?search=&page=&pageSize=`) |
 | GET | `/endpoints/{id}/events` | Agent and server activity (`?severity=&page=&pageSize=`) |
 | GET | `/endpoints/{id}/jobs` | Job history (`?page=&pageSize=`) |
-| GET | `/endpoints/{id}/effective-policy` | Resolved policy and where each value came from |
+| GET | `/endpoints/{id}/effective-policy` | Resolved policy and where each value came from, including the restart schedule, the Windows Update settings per group and the exact registry values the agent will set |
 | GET | `/endpoints/{id}/install-preview` | `?mode=all|selected&updateGuids=<comma-separated>`. What would be installed, what would be skipped and why, total size, reboot implications and warnings. |
 | POST | `/endpoints/{id}/install-updates` | `{mode: "AllEligible"|"Selected", updateGuids?, force}` → `202` with the job. `409 duplicate_job` (with `existingJobId`) unless `force`; `409 nothing_to_install` when none of the selected updates can be installed. |
 | POST | `/endpoints/{id}/scan` | Queue an `UpdateScan` job (`202`) |
 | POST | `/endpoints/{id}/inventory-refresh` | Queue an `InventoryRefresh` job (`202`) |
 | POST | `/endpoints/{id}/exclusions` | `{updateGuid, reason?}`. Exclude an update on this endpoint. |
 | DELETE | `/endpoints/{id}/exclusions/{updateGuid}` | Remove the exclusion |
+| POST | `/endpoints/{id}/restart` | `{mode, condition, countdownMinutes?, deadlineMinutes?, scheduledAt?, expiresAfterMinutes?, force}` → `202` with the job. `mode`: `Immediate`, `Countdown`, `PromptWithDeadline`, `PromptNoDeadline`; `condition`: `Always`, `OnlyIfPending`. `scheduledAt` is at most 31 days ahead; `expiresAfterMinutes` (15 to 1440, default 120) is how long an offline computer may take to pick it up. `409 duplicate_job` while another restart is active, `409 agent_upgrade_required` for agents without restart support. |
+| POST | `/endpoints/{id}/notify` | `{preset, restartAt?}` → `202` with the job. `restartAt` is required for `RestartScheduled`. `409 agent_upgrade_required` for agents without message support. |
 | POST | `/endpoints/bulk/scan`, `/endpoints/bulk/install-updates` | `{endpointIds[], force}`. Returns a per-endpoint outcome. |
+| POST | `/endpoints/bulk/restart` | `{endpointIds[], restart: {…as above}}`. Per-endpoint outcome. |
+| POST | `/endpoints/bulk/notify` | `{endpointIds[], message: {preset, restartAt?}}`. Per-endpoint outcome. |
+| GET | `/user-messages` | Viewer. The preset messages with their title and text (`{time}` marks where the restart time goes) |
 
-All POST, PUT and DELETE routes above are Operator.
+All POST, PUT and DELETE routes above are Operator. Bulk routes accept at most 1000
+endpoints.
 
 ### Fleet updates
 
@@ -139,9 +154,9 @@ creates a `Selected` install job on each affected endpoint, at most 1000).
 
 | Method | Route | Notes |
 |---|---|---|
-| GET | `/jobs` | Filters: `endpointId, organizationId, status, type, trigger, active, from, to, page, pageSize` |
+| GET | `/jobs` | Filters: `endpointId, organizationId, status, type, trigger, active, from, to, page, pageSize`. Types: `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart`, `NotifyUser` |
 | GET | `/jobs/{id}` | Includes per-update results and the job's events |
-| POST | `/jobs/{id}/cancel` | Operator. Immediate when the job is queued, delivered or waiting for a reboot; otherwise the agent is asked to stop after the current update. |
+| POST | `/jobs/{id}/cancel` | Operator. Immediate when the job is queued, delivered or waiting for a reboot; otherwise the agent is asked to stop after the current update. A restart that is waiting for users is cancelled at the agent's next check-in, which also aborts a Windows restart that is still in its warning period. |
 | DELETE | `/jobs/{id}` | Same as `POST /jobs/{id}/cancel` |
 | POST | `/jobs/{id}/retry` | Operator. Creates a new job with the same parameters (`202`); only for finished jobs. |
 

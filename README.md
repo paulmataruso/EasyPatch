@@ -16,17 +16,22 @@ tracks compliance across every customer.
 * **Outbound-only agents.** Endpoints connect to the server over HTTPS (TCP 443). No VPN,
   inbound firewall rule or port forwarding is needed, so agents work behind NAT.
 * **Patching, and nothing else.** The agent has no remote shell and no command execution. It
-  runs exactly three job types: update scan, inventory refresh, and install updates.
-* **No surprise restarts.** EasyPatch reports when a restart is pending and why. It never
+  runs a fixed set of job types: update scan, inventory refresh, install updates, restart, and
+  preset messages to signed-in users.
+* **No surprise restarts.** EasyPatch reports when a restart is pending and why. It restarts a
+  computer only when an administrator asks for it, either once or through a restart schedule
+  the administrator configured, and it warns signed-in users first. Installing updates never
   restarts a computer.
 * **Respects existing configuration.** WSUS, Group Policy and Windows Update for Business
-  settings are detected and reported, never changed.
+  settings are detected and reported. EasyPatch changes Windows Update policy settings only
+  when an administrator configures an override. It never touches the WSUS server settings, and
+  it puts the original values back when the override is removed.
 
 ## Features
 
 * **Multi-tenant hierarchy**: Organization → Site → Endpoint. Policies are inherited, with
-  overrides at organization and site level. Administrators can be restricted to specific
-  organizations.
+  overrides at organization, site and endpoint level. Administrators can be restricted to
+  specific organizations.
 * **Install all missing updates** on one endpoint or on many selected endpoints at once, or
   install chosen updates. A single update can also be rolled out across an organization or a
   site. Installing on a single endpoint first shows exactly which updates will be installed.
@@ -34,6 +39,19 @@ tracks compliance across every customer.
   feature updates.
 * **Optional scheduled installs** inside a per-policy maintenance window (off by default),
   limited per site and globally.
+* **Restarts** of one endpoint or many selected endpoints, now or at a chosen time, or on a
+  recurring restart schedule set in policy (optionally only when Windows needs a restart).
+  Signed-in users see a countdown, or can postpone up to a deadline. A restart job completes
+  only when the computer's boot time shows that it actually restarted.
+* **Tray icon and user messages.** The agent shows an EasyPatch icon in the notification area
+  of every signed-in user, with its status and the time of its last contact with the server.
+  Users are told when updates are being installed (this can be turned off in policy), and
+  administrators can send preset messages. There is no free-text messaging.
+* **Windows Update policy overrides** per organization, site or endpoint: Automatic Updates
+  mode, feature update deferral and target version, quality update deferral and pausing, and
+  restart behaviour with active hours. Each group is *Not configured* by default. The console
+  shows whether each endpoint applied the settings, or whether another policy source such as
+  domain Group Policy overrides them.
 * **Durable job queue** in PostgreSQL. Jobs survive endpoint disconnects and server restarts.
   The agent acknowledges each delivery, and unacknowledged jobs are delivered again. Each job
   records who requested it, its delivery, start and completion times, and per-update results.
@@ -68,7 +86,7 @@ Admin browsers ──HTTPS──┘                                  worker ─�
 | Server API and worker | ASP.NET Core 10, EF Core 10, PostgreSQL 18 |
 | Web console | React 19, TypeScript, Vite, Tailwind CSS (served by Caddy) |
 | Reverse proxy | Caddy 2 with automatic certificates |
-| Agent | .NET 10 Windows service using the Windows Update Agent COM API |
+| Agent | .NET 10 Windows service using the Windows Update Agent COM API, plus a tray icon (Windows Forms) in each user session |
 | Installer | WiX Toolset v5 MSI (x64 and ARM64) |
 | Deployment | Docker Compose: `caddy`, `api`, `worker`, `postgres`, plus a one-shot `migrate` |
 

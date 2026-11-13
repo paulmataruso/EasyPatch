@@ -4,11 +4,16 @@ The EasyPatch agent is a Windows service (`EasyPatchAgent`) that reports Windows
 your EasyPatch server and installs the updates an administrator approves. It uses the Windows
 Update Agent API that Windows itself uses. The agent:
 
-* **never restarts the computer**. It reports when a restart is pending and why;
-* **never changes Windows Update configuration**. WSUS, Group Policy, Windows Update for
-  Business and Intune settings are honored and only reported;
-* cannot run commands. It executes three job types: update scan, inventory refresh and
-  install updates.
+* **restarts the computer only when an administrator asks for it**, once or through a restart
+  schedule set in policy, and warns signed-in users first. Installing updates never restarts
+  the computer. It reports when a restart is pending and why;
+* **changes Windows Update policy only when an administrator configures it** in EasyPatch
+  policy, never the WSUS server settings, and puts the original values back when the setting is
+  removed or the agent is uninstalled. Otherwise WSUS, Group Policy, Windows Update for Business
+  and Intune settings are honored and only reported;
+* shows an EasyPatch icon in the notification area of signed-in users (see [Tray icon](#tray-icon));
+* cannot run commands. It executes five job types: update scan, inventory refresh, install
+  updates, restart, and preset messages to signed-in users.
 
 ## Requirements
 
@@ -193,8 +198,22 @@ you require it.
 * **Install jobs**: one at a time. Each job starts with a fresh scan, so a job that is repeated
   after a crash or restart never reinstalls anything. Servicing stack updates are installed
   first, feature updates last. If Windows needs a restart before it can install more, the job
-  waits (state `WaitingForReboot`) and continues after somebody restarts the computer. If no
-  restart happens within 30 days the job fails with `reboot_not_performed`.
+  waits (state `WaitingForReboot`) and continues after the computer restarts (by a user, an
+  administrator, or an EasyPatch restart job). If no restart happens within 30 days the job
+  fails with `reboot_not_performed`. When install notifications are on (the default), signed-in
+  users are told that updates are being installed, and afterwards whether a restart is needed.
+* **Restart jobs**: run without holding up scans. Depending on the mode chosen by the
+  administrator, signed-in users see a countdown, or a request to restart that they can
+  postpone up to a deadline. If nobody is signed in, the computer restarts at once. The job
+  completes only after the agent sees that the computer actually restarted. See
+  [architecture.md](architecture.md#restart-jobs).
+* **Messages**: preset messages from the console are shown as a notification in every
+  signed-in session with a tray. If nobody can see the message, the job fails with
+  `no_recipients`.
+* **Windows Update settings**: when an administrator configures a group of Windows Update
+  settings, the agent applies it after the next check-in and reports whether it was applied,
+  or whether another policy source (for example domain Group Policy) changed the values. See
+  [architecture.md](architecture.md#windows-update-policy-enforcement).
 * **Maintenance windows**: a scheduled job does not start new updates after the window closes.
   An update that is already installing is never interrupted.
 * **Outages**: reports are written to disk before they are sent and are delivered in order when
@@ -221,6 +240,27 @@ agent's informational events, including:
 | 1003 | Enrollment refused or rejected |
 | 1004 | The server revoked the agent's credential. Re-enroll to resume |
 | 1005 | Credential rotated |
+| 1010 | Restarting the computer for a restart job (warning) |
+| 1011 | Windows Update settings applied, changed or restored |
+| 1012 | Windows Update settings were changed by another policy source; EasyPatch stopped re-applying them (warning) |
+
+## Tray icon
+
+The service starts the tray (`EasyPatch.Agent.exe tray`) as the signed-in user in every
+active session, within about 15 seconds of sign-in. There is nothing to configure on the
+computer and no startup entry: if the tray is closed, the service starts it again after two
+minutes. The tray connects to the service over a local named pipe and exits when the service
+stops.
+
+The icon's menu shows the agent's status, its last contact with the server and whether a
+restart is pending. Notifications show the preset messages. During a restart request a small
+window offers *Restart now* and, where the administrator allowed it, *Postpone*. Users cannot
+change the agent, run anything, or stop it from the tray.
+
+To hide the icon, turn off **Tray icon** in the policy for the organization, site or endpoint.
+The icon then appears only while a message or a restart request is shown. In a session
+without a tray (for example right after sign-in, before the tray has started) messages cannot
+be shown, and restart countdowns use Windows' own shutdown warning instead.
 
 ## Upgrading
 
@@ -252,7 +292,10 @@ need them.
 | `Revoked` (event 1004) | The endpoint was removed or its credential revoked in the console. Re-enroll with `enroll --force` |
 | "Could not reach the EasyPatch server" | DNS, firewall, proxy (`PROXYURL`), or TLS: the server certificate must chain to a root trusted by the computer |
 | Scans fail with `0x8024402C`, `0x80244022` or similar | The Windows Update source (Microsoft or WSUS) is unreachable. The error code and its description are shown in the console |
-| Updates not offered that you expected | WSUS approvals, Windows Update for Business deferrals or a target release version apply. The console shows the detected update source |
+| Updates not offered that you expected | WSUS approvals, Windows Update for Business deferrals or a target release version apply. The console shows the detected update source, and the endpoint's *Policy* tab shows any Windows Update settings EasyPatch applied |
+| No tray icon | The *Tray icon* policy is off, the user signed in less than 15 seconds ago, or the session is a remote session that is disconnected. *Signed-in users* on the endpoint's overview shows how many sessions have a tray |
+| Windows Update settings show *Conflict* | Another policy source (usually domain Group Policy or Intune) set different values. Remove that policy, or change the EasyPatch setting to match; changing the EasyPatch setting applies it again |
+| Restart job failed with `restart_not_performed` | Windows did not restart within 30 minutes of the request, or nobody accepted a prompt without a deadline within 7 days. Check the System event log for shutdowns cancelled by a user or an application |
 
 ## Building from source
 

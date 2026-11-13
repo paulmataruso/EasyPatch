@@ -22,7 +22,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter()][ValidatePattern('^\d{1,3}\.\d{1,3}\.\d{1,5}$')][string]$Version = '1.0.0',
+    [Parameter()][ValidatePattern('^\d{1,3}\.\d{1,3}\.\d{1,5}$')][string]$Version = '1.1.0',
     [Parameter()][ValidateSet('x64', 'arm64')][string]$Architecture = 'x64',
     [Parameter()][ValidateSet('Release', 'Debug')][string]$Configuration = 'Release',
     [Parameter()][string]$OutputDirectory,

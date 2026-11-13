@@ -57,8 +57,8 @@ compliance:
   with the message "Installation was reported as successful, but Windows Update still reports
   the update as missing."
 * After an install job, the agent scans again. If a restart is needed, it scans again after the
-  computer restarts. **EasyPatch never restarts a computer.** An administrator or the customer
-  must restart it.
+  computer restarts. Installing updates never restarts a computer: a user, an administrator
+  (with **Restart…** in the console) or a restart schedule in policy restarts it.
 * `Superseded`, `NotApplicable` and `Excluded` updates never count.
 
 ## Operating system support status
