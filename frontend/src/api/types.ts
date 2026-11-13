@@ -45,7 +45,7 @@ export type OsSupportStatus = (typeof OS_SUPPORT_STATUSES)[number];
 export const ESU_OVERRIDES = ['Auto', 'Enrolled', 'NotEnrolled'] as const;
 export type EsuOverride = (typeof ESU_OVERRIDES)[number];
 
-export const POLICY_SCOPES = ['Global', 'Organization', 'Site'] as const;
+export const POLICY_SCOPES = ['Global', 'Organization', 'Site', 'Endpoint'] as const;
 export type PolicyScope = (typeof POLICY_SCOPES)[number];
 
 export const ENROLLMENT_REQUEST_STATUSES = ['Pending', 'Approved', 'Rejected', 'Expired'] as const;
@@ -78,7 +78,7 @@ export const DEFAULT_INSTALL_CATEGORIES: readonly UpdateCategory[] = [
   'Other',
 ];
 
-export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh'] as const;
+export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh', 'Restart', 'NotifyUser'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const JOB_STATUSES = [
@@ -98,6 +98,141 @@ export const ACTIVE_JOB_STATUSES: readonly JobStatus[] = ['Queued', 'Delivered',
 
 export const JOB_TRIGGERS = ['Manual', 'Scheduled', 'System'] as const;
 export type JobTrigger = (typeof JOB_TRIGGERS)[number];
+
+// Restarts, messages and Windows Update policy (shared/EasyPatch.Contracts/Agent/UserExperience.cs, Policy/WindowsUpdatePolicy.cs)
+
+export const RESTART_MODES = ['PromptWithDeadline', 'Countdown', 'PromptNoDeadline', 'Immediate'] as const;
+export type RestartMode = (typeof RESTART_MODES)[number];
+
+export const RESTART_CONDITIONS = ['Always', 'OnlyIfPending'] as const;
+export type RestartCondition = (typeof RESTART_CONDITIONS)[number];
+
+export const USER_MESSAGE_PRESETS = ['UpdatesInstalling', 'UpdatesInstalled', 'RestartRequired', 'SaveYourWork', 'MaintenanceTonight', 'RestartScheduled'] as const;
+export type UserMessagePreset = (typeof USER_MESSAGE_PRESETS)[number];
+
+/** Agent features; the server only sends restart and message jobs to agents that declare them. */
+export const AGENT_CAPABILITIES = { restart: 'restart', notifyUser: 'notify-user', windowsUpdatePolicy: 'windows-update-policy', tray: 'tray' } as const;
+
+export const WINDOWS_UPDATE_POLICY_GROUPS = ['AutomaticUpdates', 'FeatureUpdates', 'QualityUpdates', 'RestartBehavior'] as const;
+export type WindowsUpdatePolicyGroup = (typeof WINDOWS_UPDATE_POLICY_GROUPS)[number];
+
+export const AUTO_UPDATE_MODES = ['Disabled', 'NotifyDownload', 'AutoDownloadNotifyInstall', 'AutoDownloadScheduleInstall'] as const;
+export type AutoUpdateMode = (typeof AUTO_UPDATE_MODES)[number];
+
+export type WindowsUpdatePolicyState = 'NotManaged' | 'Applied' | 'Conflict' | 'Error';
+
+export interface RestartScheduleDto {
+  /** False at a lower level switches off a schedule inherited from above. */
+  enabled: boolean;
+  /** 0 = Sunday … 6 = Saturday. */
+  days: number[];
+  /** "HH:mm" in the site (or organization) time zone. */
+  time: string;
+  condition: RestartCondition;
+  mode: RestartMode;
+  countdownMinutes: number;
+  deadlineMinutes: number;
+  /** If the endpoint is offline at the scheduled time, the restart is abandoned after this long. */
+  expiryMinutes: number;
+}
+
+export interface AutomaticUpdatesSettings {
+  mode: AutoUpdateMode;
+  /** 0 every day, 1 Sunday … 7 Saturday. */
+  scheduledInstallDay: number;
+  scheduledInstallHour: number;
+}
+
+export interface FeatureUpdateSettings {
+  deferDays: number | null;
+  targetProductVersion: string | null;
+  targetReleaseVersion: string | null;
+}
+
+export interface QualityUpdateSettings {
+  deferDays: number | null;
+  disablePause: boolean;
+}
+
+export interface RestartBehaviorSettings {
+  noAutoRestartWithSignedInUsers: boolean;
+  activeHoursStart: number | null;
+  activeHoursEnd: number | null;
+}
+
+export interface WindowsUpdateGroupSettings {
+  AutomaticUpdates: AutomaticUpdatesSettings;
+  FeatureUpdates: FeatureUpdateSettings;
+  QualityUpdates: QualityUpdateSettings;
+  RestartBehavior: RestartBehaviorSettings;
+}
+
+/** One group at one policy level. `managed: false` explicitly leaves Windows alone even if a higher level manages the group. */
+export interface PolicyGroupSetting<T> {
+  managed: boolean;
+  value: T | null;
+}
+
+/** Windows Update settings at one policy level; a null group inherits. */
+export interface PolicyWindowsUpdate {
+  automaticUpdates: PolicyGroupSetting<AutomaticUpdatesSettings> | null;
+  featureUpdates: PolicyGroupSetting<FeatureUpdateSettings> | null;
+  qualityUpdates: PolicyGroupSetting<QualityUpdateSettings> | null;
+  restartBehavior: PolicyGroupSetting<RestartBehaviorSettings> | null;
+}
+
+/** Effective settings: a null group is not managed. */
+export interface WindowsUpdatePolicySettings {
+  automaticUpdates: AutomaticUpdatesSettings | null;
+  featureUpdates: FeatureUpdateSettings | null;
+  qualityUpdates: QualityUpdateSettings | null;
+  restartBehavior: RestartBehaviorSettings | null;
+}
+
+export interface PolicyRegistryValueDto {
+  group: WindowsUpdatePolicyGroup;
+  path: string;
+  name: string;
+  /** "(not set)" when EasyPatch deletes the value. */
+  value: string;
+}
+
+export interface WindowsUpdatePolicyGroupStatus {
+  group: WindowsUpdatePolicyGroup;
+  state: WindowsUpdatePolicyState;
+  message: string | null;
+  appliedAt: Instant | null;
+  conflictingValues: string[];
+}
+
+export interface WindowsUpdatePolicyReport {
+  groups: WindowsUpdatePolicyGroupStatus[];
+  mdmUpdatePoliciesPresent: boolean;
+}
+
+export interface RestartRequest {
+  mode: RestartMode;
+  condition: RestartCondition;
+  countdownMinutes: number | null;
+  deadlineMinutes: number | null;
+  /** Null restarts now; otherwise the agent receives the job at this time. */
+  scheduledAt: Instant | null;
+  expiresAfterMinutes: number | null;
+  force: boolean;
+}
+
+export interface NotifyRequest {
+  preset: UserMessagePreset;
+  restartAt: Instant | null;
+}
+
+export interface UserMessagePresetDto {
+  preset: UserMessagePreset;
+  title: string;
+  /** For RestartScheduled the body contains "{time}". */
+  body: string;
+  needsRestartTime: boolean;
+}
 
 export const JOB_ITEM_STATUSES = [
   'Pending',
@@ -327,6 +462,11 @@ export interface PolicyValues {
   maintenanceDurationMinutes: number | null;
   scanStaleAfterHours: number | null;
   maxConcurrentInstallsPerSite: number | null;
+  trayIconEnabled: boolean | null;
+  installNotificationsEnabled: boolean | null;
+  /** Replaces the inherited schedule as a whole; null inherits. */
+  restartSchedule: RestartScheduleDto | null;
+  windowsUpdate: PolicyWindowsUpdate | null;
 }
 
 export interface PolicyDto extends PolicyValues {
@@ -334,6 +474,7 @@ export interface PolicyDto extends PolicyValues {
   scope: PolicyScope;
   organizationId: Guid | null;
   siteId: Guid | null;
+  endpointId: Guid | null;
   excludedKbs: string[];
   updatedAt: Instant | null;
 }
@@ -360,6 +501,12 @@ export interface EffectivePolicyDto {
   maxConcurrentInstallsPerSite: number;
   /** Keyed by policy field name (server casing may be PascalCase); value is the scope that supplied it. */
   sources: Record<string, PolicyScope>;
+  trayIconEnabled: boolean;
+  installNotificationsEnabled: boolean;
+  restartSchedule: RestartScheduleDto | null;
+  windowsUpdate: WindowsUpdatePolicySettings | null;
+  /** Registry values EasyPatch sets on the endpoint for the managed groups. */
+  windowsUpdateValues: PolicyRegistryValueDto[] | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -447,6 +594,13 @@ export interface EndpointDetailDto {
   notes: string | null;
   credentials: CredentialDto[];
   activeJob: JobSummaryDto | null;
+  agentCapabilities: string[];
+  /** Signed-in users (counts only) and sessions with the EasyPatch tray, from the latest check-in. */
+  signedInUsers: number | null;
+  trayConnectedSessions: number | null;
+  windowsUpdatePolicy: WindowsUpdatePolicyReport | null;
+  windowsUpdatePolicyReportedAt: Instant | null;
+  hasOwnPolicy: boolean;
 }
 
 export interface UpdateEndpointRequest {

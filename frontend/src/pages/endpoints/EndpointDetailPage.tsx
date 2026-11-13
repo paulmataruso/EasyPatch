@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { Ban, Download, MoreHorizontal, Pencil, Power, RefreshCw, ScanSearch, Trash2, WifiOff } from 'lucide-react';
+import { Ban, Download, MessageSquare, MoreHorizontal, Pencil, Power, RefreshCw, ScanSearch, Trash2, WifiOff } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
 import { useApi, useApiMutation, useSites } from '../../api/hooks';
 import { ESU_OVERRIDES, type EndpointDetailDto, type EsuOverride, type UpdateEndpointRequest } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { ConfirmDialog, Dialog } from '../../components/Dialog';
 import { InstallUpdatesDialog, jobIdOf } from '../../components/InstallDialog';
+import { MessageDialog, RestartDialog } from '../../components/RestartDialogs';
 import { ComplianceBadge, EndpointStatusBadge, JobStatusBadge, OnlineBadge, OsSupportBadge } from '../../components/StatusBadges';
 import { useToast } from '../../components/Toast';
 import {
@@ -34,6 +35,7 @@ export function EndpointDetailPage() {
   const tab = url.get('tab', 'overview');
   const { canOperate } = useAuth();
   const [install, setInstall] = useState<{ mode: 'AllEligible' | 'Selected'; guids?: string[] } | null>(null);
+  const [restartOpen, setRestartOpen] = useState(false);
   const endpoint = useApi<EndpointDetailDto>(`/endpoints/${id}`, undefined, {
     // Poll quickly while a job is active so progress is live.
     refetchInterval: (data) => (data?.activeJob ? 5_000 : 30_000),
@@ -73,7 +75,7 @@ export function EndpointDetailPage() {
             {s.currentActivity && <span className="text-accent">{s.currentActivity}</span>}
           </span>
         }
-        actions={canOperate && managed && <EndpointActions endpoint={e} onInstallAll={() => setInstall({ mode: 'AllEligible' })} />}
+        actions={canOperate && managed && <EndpointActions endpoint={e} onInstallAll={() => setInstall({ mode: 'AllEligible' })} onRestart={() => setRestartOpen(true)} />}
       />
 
       <div className="mb-4 flex flex-col gap-3">
@@ -90,8 +92,13 @@ export function EndpointDetailPage() {
             </p>
             <p className="mt-1">
               <Power className="mr-1 inline size-3.5" aria-hidden />
-              EasyPatch never restarts endpoints. Restart this machine through your own change process; the agent reports the new state after it comes back.
+              EasyPatch restarts an endpoint only when you ask it to, or on a restart schedule set in policy. The agent reports the new state after the restart.
             </p>
+            {canOperate && managed && (
+              <Button size="sm" className="mt-2" icon={<Power className="size-3.5" aria-hidden />} onClick={() => setRestartOpen(true)}>
+                Restart…
+              </Button>
+            )}
           </Alert>
         )}
         {managed && !s.isOnline && (
@@ -122,7 +129,7 @@ export function EndpointDetailPage() {
           { id: 'history', label: 'Update history' },
           { id: 'jobs', label: 'Jobs' },
           { id: 'activity', label: 'Activity' },
-          { id: 'policy', label: 'Effective policy' },
+          { id: 'policy', label: e.hasOwnPolicy ? 'Policy (endpoint override)' : 'Policy' },
         ]}
       />
       {tab === 'overview' && <OverviewTab endpoint={e} />}
@@ -131,7 +138,7 @@ export function EndpointDetailPage() {
       {tab === 'history' && <HistoryTab endpointId={e.summary.id} />}
       {tab === 'jobs' && <JobsTab endpointId={e.summary.id} />}
       {tab === 'activity' && <ActivityTab endpointId={e.summary.id} />}
-      {tab === 'policy' && <EffectivePolicyTab endpointId={e.summary.id} />}
+      {tab === 'policy' && <EffectivePolicyTab endpoint={e} />}
 
       <InstallUpdatesDialog
         endpointId={s.id}
@@ -141,6 +148,7 @@ export function EndpointDetailPage() {
         open={install !== null}
         onClose={() => setInstall(null)}
       />
+      <RestartDialog target={restartOpen ? { kind: 'endpoint', endpoint: e } : null} onClose={() => setRestartOpen(false)} />
     </>
   );
 }
@@ -180,12 +188,12 @@ function ActiveJobCard({ job }: { job: NonNullable<EndpointDetailDto['activeJob'
   );
 }
 
-function EndpointActions({ endpoint, onInstallAll }: { endpoint: EndpointDetailDto; onInstallAll: () => void }) {
+function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: EndpointDetailDto; onInstallAll: () => void; onRestart: () => void }) {
   const s = endpoint.summary;
   const toast = useToast();
   const navigate = useNavigate();
   const [menu, setMenu] = useState(false);
-  const [dialog, setDialog] = useState<'edit' | 'revoke' | 'delete' | null>(null);
+  const [dialog, setDialog] = useState<'edit' | 'revoke' | 'delete' | 'message' | null>(null);
 
   const queueJob = useApiMutation((kind: 'scan' | 'inventory-refresh') => api.post<unknown>(`/endpoints/${s.id}/${kind}`), {
     invalidate: [`/endpoints/${s.id}`, '/jobs'],
@@ -248,6 +256,12 @@ function EndpointActions({ endpoint, onInstallAll }: { endpoint: EndpointDetailD
             <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} aria-hidden />
             <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-line bg-surface py-1 shadow-lg"
               onKeyDown={(e) => e.key === 'Escape' && setMenu(false)}>
+              <MenuItem icon={<Power className="size-4" aria-hidden />} onClick={() => { setMenu(false); onRestart(); }}>
+                Restart…
+              </MenuItem>
+              <MenuItem icon={<MessageSquare className="size-4" aria-hidden />} onClick={() => { setMenu(false); setDialog('message'); }}>
+                Send message to users…
+              </MenuItem>
               <MenuItem icon={<RefreshCw className="size-4" aria-hidden />} onClick={() => { setMenu(false); queueJob.mutate('inventory-refresh'); }}>
                 Refresh inventory
               </MenuItem>
@@ -265,6 +279,7 @@ function EndpointActions({ endpoint, onInstallAll }: { endpoint: EndpointDetailD
         )}
       </div>
       <EditEndpointDialog endpoint={endpoint} open={dialog === 'edit'} onClose={() => setDialog(null)} />
+      <MessageDialog target={dialog === 'message' ? { kind: 'endpoint', endpoint } : null} onClose={() => setDialog(null)} />
       <ConfirmDialog
         open={dialog === 'revoke'}
         onClose={() => setDialog(null)}

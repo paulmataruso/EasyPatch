@@ -265,7 +265,7 @@ function FleetInstallDialog({ open, onClose, guid, title, selectedIds, defaultOr
           </>
         )}
         <Alert tone="info" title="No automatic restarts">
-          Endpoints are never restarted by EasyPatch. Endpoints where this update is excluded are skipped. Because you are choosing this update explicitly, it installs even if its category is not in the policy’s automatic-install categories.
+          Installing does not restart endpoints (use Restart… or a restart schedule). Endpoints where this update is excluded are skipped. Because you are choosing this update explicitly, it installs even if its category is not in the policy’s automatic-install categories.
         </Alert>
         <InlineError error={install.error} />
       </div>

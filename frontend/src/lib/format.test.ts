@@ -55,6 +55,9 @@ describe('formatting', () => {
     expect(formatDuration(180)).toBe('3 h');
     expect(formatDuration(90)).toBe('1 h 30 min');
     expect(formatDuration(45)).toBe('45 min');
+    expect(formatDuration(1440)).toBe('1 day');
+    expect(formatDuration(10080)).toBe('7 days');
+    expect(formatDuration(1500)).toBe('25 h');
   });
   it('humanizes enum values', () => {
     expect(humanize('WaitingForReboot')).toBe('Waiting for restart');

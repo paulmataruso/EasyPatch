@@ -1,12 +1,16 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { Ban, CheckCircle2, Download, ExternalLink, EyeOff, ShieldCheck } from 'lucide-react';
+import { Ban, CheckCircle2, Download, ExternalLink, EyeOff, Pencil, ShieldCheck } from 'lucide-react';
 import { api } from '../../api/client';
-import { useApi, useApiMutation, useList } from '../../api/hooks';
+import { useApi, useApiMutation, useList, usePolicy } from '../../api/hooks';
 import {
+  AGENT_CAPABILITIES,
   ENDPOINT_UPDATE_STATES,
   UPDATE_CATEGORIES,
+  WINDOWS_UPDATE_POLICY_GROUPS,
   type EffectivePolicyDto,
+  type PolicyRequest,
+  type WindowsUpdatePolicyState,
   type EndpointDetailDto,
   type EndpointEventDto,
   type EndpointUpdateDto,
@@ -19,6 +23,9 @@ import { useAuth } from '../../auth/AuthContext';
 import { Dialog } from '../../components/Dialog';
 import { EnumSelect } from '../../components/Filters';
 import { JobTable } from '../../components/JobTable';
+import { PolicyEditor, resolveInherited } from '../../components/PolicyEditor';
+import { describeRestartSchedule, describeWindowsUpdateGroup, WU_GROUPS } from '../../components/PolicySections';
+import { SessionSummary } from '../../components/RestartDialogs';
 import { CategoryBadge, EventSeverityDot, JobItemStatusBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
 import { useToast } from '../../components/Toast';
 import {
@@ -107,7 +114,8 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
           )}
           {e.wufbPoliciesConfigured && (
             <Alert tone="warn" title="Windows Update for Business policies detected">
-              Deferral or release-targeting policies apply. Installing through EasyPatch can install updates before the deferral period ends.
+              Deferral or release-targeting policies apply (from EasyPatch policy or another source). Installing through EasyPatch can install updates before the
+              deferral period ends.
             </Alert>
           )}
           {auOff && <Alert tone="danger" title="Windows Update service disabled">Scans and installations fail until the service start mode is restored.</Alert>}
@@ -146,6 +154,7 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
             ['Agent installed', formatDateTime(e.agentInstalledAt)],
             ['Enrolled', formatDateTime(e.enrolledAt)],
             ['Last check-in', s.lastCheckInAt ? `${formatDateTime(s.lastCheckInAt)} (${formatRelative(s.lastCheckInAt)})` : 'Never'],
+            ['Signed-in users', <SessionSummary endpoint={e} />],
             ['Compliance evaluated', formatDateTime(e.complianceEvaluatedAt)],
             ['Notes', e.notes ? <span className="whitespace-pre-wrap">{e.notes}</span> : null],
           ]}
@@ -574,10 +583,20 @@ function sourceOf(sources: Record<string, PolicyScope>, field: string): PolicySc
 
 function ScopeBadge({ scope }: { scope: PolicyScope | undefined }) {
   if (!scope) return null;
-  return <Badge tone={scope === 'Site' ? 'accent' : scope === 'Organization' ? 'info' : 'neutral'}>{scope}</Badge>;
+  return <Badge tone={scope === 'Endpoint' ? 'warn' : scope === 'Site' ? 'accent' : scope === 'Organization' ? 'info' : 'neutral'}>{scope}</Badge>;
 }
 
-export function EffectivePolicyTab({ endpointId }: { endpointId: string }) {
+const WU_STATE_TONE: Record<WindowsUpdatePolicyState, 'ok' | 'warn' | 'danger' | 'neutral'> = {
+  Applied: 'ok',
+  Conflict: 'warn',
+  Error: 'danger',
+  NotManaged: 'neutral',
+};
+
+export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }) {
+  const endpointId = endpoint.summary.id;
+  const { canOperate } = useAuth();
+  const [editing, setEditing] = useState(false);
   const policy = useApi<EffectivePolicyDto>(`/endpoints/${endpointId}/effective-policy`);
   if (policy.isPending) return <Spinner />;
   if (policy.isError) return <ErrorState error={policy.error} onRetry={() => void policy.refetch()} />;
@@ -589,39 +608,197 @@ export function EffectivePolicyTab({ endpointId }: { endpointId: string }) {
       <ScopeBadge scope={sourceOf(p.sources, field)} />
     </span>,
   ];
+  const report = endpoint.windowsUpdatePolicy;
+  const supportsWu = endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.windowsUpdatePolicy);
+  const anyManaged = WINDOWS_UPDATE_POLICY_GROUPS.some((g) => p.windowsUpdate?.[WU_GROUPS[g].key]);
   return (
-    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-      <Card title="Installation">
-        <KeyValueList
-          items={[
-            row('Allowed categories', 'allowedCategories', p.allowedCategories.map(humanize).join(', ')),
-            row('Include optional updates', 'includeOptional', p.includeOptional ? 'Yes' : 'No'),
-            row('Accept license agreements', 'acceptEulas', p.acceptEulas ? 'Yes' : 'No'),
-            row('Excluded KBs', 'excludedKbs', p.excludedKbs.length ? <span className="font-mono text-xs">{p.excludedKbs.join(', ')}</span> : 'None'),
-            row('Automatic installation', 'autoInstallEnabled', p.autoInstallEnabled ? 'On (inside maintenance window, never restarts)' : 'Off'),
-            row(
-              'Maintenance window',
-              'maintenanceWindow',
-              p.maintenanceDays && p.maintenanceDays.length > 0
-                ? `${formatDays(p.maintenanceDays)} at ${p.maintenanceStart?.slice(0, 5) ?? '—'} for ${formatDuration(p.maintenanceDurationMinutes)} (${p.timeZone})`
-                : 'None',
-            ),
-          ]}
-        />
+    <div className="flex flex-col gap-5">
+      <Card>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="flex-1 text-sm">
+            {endpoint.hasOwnPolicy
+              ? 'This endpoint has its own policy layer, which overrides the site, organization and global policy for the values it sets.'
+              : 'This endpoint uses the site, organization and global policy. You can override individual values for this endpoint only.'}
+          </p>
+          {canOperate && endpoint.summary.status === 'Active' && (
+            <Button icon={<Pencil className="size-4" aria-hidden />} onClick={() => setEditing(true)}>
+              {endpoint.hasOwnPolicy ? 'Edit endpoint overrides' : 'Override for this endpoint'}
+            </Button>
+          )}
+        </div>
       </Card>
-      <Card title="Agent schedule and compliance">
-        <KeyValueList
-          items={[
-            row('Check-in interval', 'checkInIntervalSeconds', `${p.checkInIntervalSeconds} s`),
-            row('Scan interval', 'scanIntervalMinutes', formatDuration(p.scanIntervalMinutes)),
-            row('Inventory interval', 'inventoryIntervalMinutes', formatDuration(p.inventoryIntervalMinutes)),
-            row('Jitter', 'jitterPercent', `${p.jitterPercent}%`),
-            row('Scan stale after', 'scanStaleAfterHours', `${p.scanStaleAfterHours} h`),
-            row('Max concurrent installs per site', 'maxConcurrentInstallsPerSite', p.maxConcurrentInstallsPerSite),
-          ]}
-        />
-        <p className="mt-4 text-xs text-muted">The badge shows which policy layer supplied each value (Global, Organization or Site).</p>
-      </Card>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <Card title="Installation">
+          <KeyValueList
+            items={[
+              row('Allowed categories', 'allowedCategories', p.allowedCategories.map(humanize).join(', ')),
+              row('Include optional updates', 'includeOptional', p.includeOptional ? 'Yes' : 'No'),
+              row('Accept license agreements', 'acceptEulas', p.acceptEulas ? 'Yes' : 'No'),
+              row('Excluded KBs', 'excludedKbs', p.excludedKbs.length ? <span className="font-mono text-xs">{p.excludedKbs.join(', ')}</span> : 'None'),
+              row('Automatic installation', 'autoInstallEnabled', p.autoInstallEnabled ? 'On (inside maintenance window; installing never restarts)' : 'Off'),
+              row(
+                'Maintenance window',
+                'maintenanceWindow',
+                p.maintenanceDays && p.maintenanceDays.length > 0
+                  ? `${formatDays(p.maintenanceDays)} at ${p.maintenanceStart?.slice(0, 5) ?? '—'} for ${formatDuration(p.maintenanceDurationMinutes)} (${p.timeZone})`
+                  : 'None',
+              ),
+            ]}
+          />
+        </Card>
+        <Card title="Restarts and users">
+          <KeyValueList
+            items={[
+              row('Restart schedule', 'restartSchedule', p.restartSchedule ? `${describeRestartSchedule(p.restartSchedule)} (${p.timeZone})` : 'None'),
+              row('EasyPatch icon', 'trayIconEnabled', p.trayIconEnabled ? 'Shown' : 'Hidden (shown only with a message or restart request)'),
+              row('Installation notifications', 'installNotificationsEnabled', p.installNotificationsEnabled ? 'On' : 'Off'),
+              ['Signed-in users', <SessionSummary endpoint={endpoint} />],
+              [
+                'Agent features',
+                endpoint.agentCapabilities.length > 0 ? (
+                  endpoint.agentCapabilities.map(humanize).join(', ')
+                ) : (
+                  <span className="text-warn">None: restarts, messages and Windows Update settings need agent 1.1.0 or later</span>
+                ),
+              ],
+            ]}
+          />
+        </Card>
+        <Card title="Windows Update settings" className="xl:col-span-2">
+          {!supportsWu && anyManaged && (
+            <Alert tone="warn" className="mb-4">
+              This agent does not apply Windows Update settings. Install EasyPatch agent 1.1.0 or later.
+            </Alert>
+          )}
+          {report?.mdmUpdatePoliciesPresent && (
+            <Alert tone="info" className="mb-4">
+              MDM (for example Intune) update policies are present on this endpoint. Windows may apply those instead of the values below.
+            </Alert>
+          )}
+          <TableWrap>
+            <table className="table-base">
+              <thead>
+                <tr>
+                  <th>Group</th>
+                  <th>Effective setting</th>
+                  <th>On the endpoint</th>
+                </tr>
+              </thead>
+              <tbody>
+                {WINDOWS_UPDATE_POLICY_GROUPS.map((group) => {
+                  const status = report?.groups.find((g) => g.group === group);
+                  const value = p.windowsUpdate?.[WU_GROUPS[group].key] ?? null;
+                  return (
+                    <tr key={group}>
+                      <td className="font-medium whitespace-nowrap">{WU_GROUPS[group].label}</td>
+                      <td>
+                        <span className="flex flex-wrap items-center gap-2">
+                          {describeWindowsUpdateGroup(group, value)}
+                          <ScopeBadge scope={sourceOf(p.sources, `WindowsUpdate.${group}`)} />
+                        </span>
+                      </td>
+                      <td>
+                        {status ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="flex flex-wrap items-center gap-2">
+                              <Badge tone={WU_STATE_TONE[status.state]}>{humanize(status.state)}</Badge>
+                              {status.appliedAt && <span className="text-xs text-muted">since {formatDateTime(status.appliedAt)}</span>}
+                            </span>
+                            {status.message && <span className="text-xs text-muted">{status.message}</span>}
+                            {status.conflictingValues.length > 0 && (
+                              <span className="font-mono text-xs text-warn">{status.conflictingValues.join('; ')}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted">{supportsWu ? 'Not reported yet' : '—'}</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TableWrap>
+          {p.windowsUpdateValues && p.windowsUpdateValues.length > 0 && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm font-medium">Registry values EasyPatch sets</summary>
+              <ul className="mt-2 flex flex-col gap-1 font-mono text-xs">
+                {p.windowsUpdateValues.map((v) => (
+                  <li key={`${v.path}\\${v.name}`}>
+                    {v.path}\<strong>{v.name}</strong> = {v.value}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {endpoint.windowsUpdatePolicyReportedAt && (
+            <p className="mt-3 text-xs text-muted">Last reported by the agent {formatRelative(endpoint.windowsUpdatePolicyReportedAt)}.</p>
+          )}
+        </Card>
+        <Card title="Agent schedule and compliance" className="xl:col-span-2">
+          <KeyValueList
+            items={[
+              row('Check-in interval', 'checkInIntervalSeconds', `${p.checkInIntervalSeconds} s`),
+              row('Scan interval', 'scanIntervalMinutes', formatDuration(p.scanIntervalMinutes)),
+              row('Inventory interval', 'inventoryIntervalMinutes', formatDuration(p.inventoryIntervalMinutes)),
+              row('Jitter', 'jitterPercent', `${p.jitterPercent}%`),
+              row('Scan stale after', 'scanStaleAfterHours', `${p.scanStaleAfterHours} h`),
+              row('Max concurrent installs per site', 'maxConcurrentInstallsPerSite', p.maxConcurrentInstallsPerSite),
+            ]}
+          />
+          <p className="mt-4 text-xs text-muted">The badge shows which policy layer supplied each value (Global, Organization, Site or Endpoint).</p>
+        </Card>
+      </div>
+      <EndpointPolicyDialog endpoint={endpoint} open={editing} onClose={() => setEditing(false)} />
     </div>
+  );
+}
+
+function EndpointPolicyDialog({ endpoint, open, onClose }: { endpoint: EndpointDetailDto; open: boolean; onClose: () => void }) {
+  const s = endpoint.summary;
+  const toast = useToast();
+  const path = `/endpoints/${s.id}/policy`;
+  const global = usePolicy(open ? '/policies/global' : null);
+  const org = usePolicy(open ? `/organizations/${s.organizationId}/policy` : null);
+  const site = usePolicy(open && s.siteId ? `/sites/${s.siteId}/policy` : null);
+  const policy = usePolicy(open ? path : null);
+  const save = useApiMutation((req: PolicyRequest) => api.put(path, req), {
+    invalidate: [path, `/endpoints/${s.id}`],
+    onSuccess: () => {
+      toast.success('Endpoint policy saved. The agent picks up the change at its next check-in.');
+      onClose();
+    },
+  });
+  const reset = useApiMutation(() => api.del(path), {
+    invalidate: [path, `/endpoints/${s.id}`],
+    onSuccess: () => {
+      toast.success('Endpoint overrides removed. Every value is inherited again.');
+      onClose();
+    },
+  });
+  const loading = policy.isPending || global.isPending || org.isPending || (!!s.siteId && site.isPending);
+
+  return (
+    <Dialog open={open} onClose={onClose} title={`Policy for ${s.hostname}`} size="xl" description="Overrides the site, organization and global policy for this endpoint only.">
+      {open &&
+        (loading ? (
+          <Spinner />
+        ) : policy.isError ? (
+          <ErrorState error={policy.error} />
+        ) : (
+          <PolicyEditor
+            scope="Endpoint"
+            policy={policy.data ?? null}
+            inherited={resolveInherited([global.data, org.data, site.data])}
+            readOnly={false}
+            saving={save.isPending}
+            deleting={reset.isPending}
+            error={save.error ?? reset.error}
+            onSave={(req) => save.mutate(req)}
+            onReset={() => reset.mutate(undefined)}
+          />
+        ))}
+    </Dialog>
   );
 }

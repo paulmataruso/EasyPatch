@@ -133,10 +133,10 @@ export function InstallUpdatesDialog({
               </Alert>
             )}
 
-            <Alert tone="info" title="EasyPatch will not restart this endpoint">
+            <Alert tone="info" title="Installing does not restart this endpoint">
               <span className="inline-flex items-start gap-1">
                 <Power className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                Updates that need a restart are reported as “Pending restart”. Restart the machine through your own process when appropriate.
+                Updates that need a restart are reported as “Pending restart”. Restart the endpoint afterwards with Restart… (or a restart schedule in policy).
               </span>
             </Alert>
 

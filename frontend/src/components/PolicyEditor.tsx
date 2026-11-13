@@ -2,6 +2,15 @@ import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } f
 import { Plus, RotateCcw, Save, X } from 'lucide-react';
 import { DEFAULT_INSTALL_CATEGORIES, UPDATE_CATEGORIES, type PolicyDto, type PolicyRequest, type PolicyScope, type UpdateCategory } from '../api/types';
 import { DAY_LABELS, formatDays, formatDuration, humanize, isValidTime, normalizeKb } from '../lib/format';
+import {
+  DEFAULT_RESTART_SCHEDULE,
+  describeRestartSchedule,
+  mergeWindowsUpdate,
+  RestartScheduleFields,
+  validateRestartSchedule,
+  validateWindowsUpdate,
+  WindowsUpdateSection,
+} from './PolicySections';
 import { Alert, Badge, Button, Card, cx, InlineError, Input, Select } from './ui';
 
 /** Values a lower scope inherits (already resolved from the parent scopes), used for "inherited" hints. */
@@ -22,6 +31,10 @@ const EMPTY: PolicyRequest = {
   maintenanceDurationMinutes: null,
   scanStaleAfterHours: null,
   maxConcurrentInstallsPerSite: null,
+  trayIconEnabled: null,
+  installNotificationsEnabled: null,
+  restartSchedule: null,
+  windowsUpdate: null,
 };
 
 export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
@@ -41,6 +54,10 @@ export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
     maintenanceDurationMinutes: policy.maintenanceDurationMinutes,
     scanStaleAfterHours: policy.scanStaleAfterHours,
     maxConcurrentInstallsPerSite: policy.maxConcurrentInstallsPerSite,
+    trayIconEnabled: policy.trayIconEnabled ?? null,
+    installNotificationsEnabled: policy.installNotificationsEnabled ?? null,
+    restartSchedule: policy.restartSchedule ? { ...policy.restartSchedule, time: policy.restartSchedule.time.slice(0, 5) } : null,
+    windowsUpdate: policy.windowsUpdate ?? null,
   };
 }
 
@@ -52,7 +69,7 @@ export function resolveInherited(layers: (PolicyDto | null | undefined)[]): Inhe
     if (!layer) continue;
     const r = toRequest(layer);
     for (const key of Object.keys(r) as (keyof PolicyRequest)[]) {
-      if (key === 'excludedKbs' || key === 'maintenanceDays' || key === 'maintenanceStart' || key === 'maintenanceDurationMinutes') continue;
+      if (key === 'excludedKbs' || key === 'maintenanceDays' || key === 'maintenanceStart' || key === 'maintenanceDurationMinutes' || key === 'windowsUpdate') continue;
       const v = r[key];
       if (v !== null && v !== undefined) (out as unknown as Record<string, unknown>)[key] = v;
     }
@@ -64,6 +81,7 @@ export function resolveInherited(layers: (PolicyDto | null | undefined)[]): Inhe
     for (const kb of r.excludedKbs ?? []) kbs.add(kb.toUpperCase());
   }
   out.excludedKbs = [...kbs];
+  out.windowsUpdate = mergeWindowsUpdate(layers.map((l) => l?.windowsUpdate));
   return out;
 }
 
@@ -110,6 +128,7 @@ export function PolicyEditor({
   timeZone?: string;
 }) {
   const isGlobal = scope === 'Global';
+  const isEndpoint = scope === 'Endpoint';
   const initial = useMemo(() => toRequest(policy), [policy]);
   const [form, setForm] = useState<PolicyRequest>(initial);
   const [kbInput, setKbInput] = useState('');
@@ -149,8 +168,9 @@ export function PolicyEditor({
     <form onSubmit={submit} className="flex flex-col gap-4">
       {!isGlobal && (
         <Alert tone="info">
-          Fields set to <strong>Inherit</strong> use the value from the {scope === 'Site' ? 'organization or global' : 'global'} policy. Excluded KBs are added
-          to the inherited exclusions; the maintenance window is inherited or overridden as a whole.
+          Fields set to <strong>Inherit</strong> use the value from the{' '}
+          {scope === 'Endpoint' ? 'site, organization or global' : scope === 'Site' ? 'organization or global' : 'global'} policy. Excluded KBs are added to the
+          inherited exclusions; the maintenance window and the restart schedule are inherited or overridden as a whole.
         </Alert>
       )}
 
@@ -273,7 +293,7 @@ export function PolicyEditor({
         <div className="flex flex-col gap-5">
           <Alert tone="info">
             When automatic installation is on, EasyPatch queues “Install all missing updates” jobs <strong>only while the maintenance window is open</strong>, using the
-            categories above. It never restarts endpoints: restarts remain an administrator decision.
+            categories above. Installing never restarts an endpoint; use a restart schedule (below) or restart endpoints from the console.
           </Alert>
           <BoolRow
             label="Automatic installation"
@@ -310,9 +330,81 @@ export function PolicyEditor({
         </div>
       </Card>
 
+      <Card title="Scheduled restarts">
+        <Row
+          label="Restart schedule"
+          hint={
+            <>
+              EasyPatch restarts endpoints only on this schedule or when an administrator requests a restart. Times are in the{' '}
+              {timeZone ? `${timeZone} ` : ''}time zone of the site (or organization). If nobody is signed in, the endpoint restarts at once. Agents older than 1.1.0
+              ignore this schedule.
+            </>
+          }
+          inheritable={!isGlobal}
+          explicit={isGlobal || form.restartSchedule !== null}
+          readOnly={readOnly}
+          inheritedText={describeRestartSchedule(inherited?.restartSchedule ?? null)}
+          onToggle={(explicit) =>
+            update('restartSchedule', explicit ? { ...(inherited?.restartSchedule ?? DEFAULT_RESTART_SCHEDULE), enabled: true } : null)
+          }
+        >
+          {isGlobal && form.restartSchedule === null ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm text-muted">No restart schedule.</span>
+              {!readOnly && (
+                <Button size="sm" onClick={() => update('restartSchedule', { ...DEFAULT_RESTART_SCHEDULE })}>
+                  Add a schedule
+                </Button>
+              )}
+            </div>
+          ) : (
+            form.restartSchedule && (
+              <RestartScheduleFields value={form.restartSchedule} disabled={readOnly} onChange={(v) => update('restartSchedule', v)} />
+            )
+          )}
+        </Row>
+      </Card>
+
+      <Card title="User experience">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          <BoolRow
+            label="EasyPatch icon in the notification area"
+            hint="When hidden, the icon appears only while a message or a restart request is shown."
+            value={form.trayIconEnabled}
+            inherited={isGlobal ? true : (inherited?.trayIconEnabled ?? true)}
+            isGlobal={isGlobal}
+            readOnly={readOnly}
+            onChange={(v) => update('trayIconEnabled', v)}
+            onLabel="Show"
+            offLabel="Hide"
+          />
+          <BoolRow
+            label="Installation notifications"
+            hint="Tell signed-in users when updates start installing and when they have finished (or need a restart)."
+            value={form.installNotificationsEnabled}
+            inherited={isGlobal ? true : (inherited?.installNotificationsEnabled ?? true)}
+            isGlobal={isGlobal}
+            readOnly={readOnly}
+            onChange={(v) => update('installNotificationsEnabled', v)}
+            onLabel="On"
+            offLabel="Off"
+          />
+        </div>
+      </Card>
+
+      <Card title="Windows Update settings">
+        <WindowsUpdateSection
+          value={form.windowsUpdate}
+          inherited={inherited?.windowsUpdate ?? null}
+          isGlobal={isGlobal}
+          readOnly={readOnly}
+          onChange={(v) => update('windowsUpdate', v)}
+        />
+      </Card>
+
       <Card title="Compliance and limits">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {NUMBER_FIELDS.filter((f) => f.key === 'scanStaleAfterHours' || f.key === 'maxConcurrentInstallsPerSite').map((f) => (
+          {NUMBER_FIELDS.filter((f) => f.key === 'scanStaleAfterHours' || (f.key === 'maxConcurrentInstallsPerSite' && !isEndpoint)).map((f) => (
             <NumberRow key={f.key} spec={f} value={form[f.key]} inherited={inherited?.[f.key] ?? null} isGlobal={isGlobal} readOnly={readOnly} onChange={(v) => update(f.key, v)} />
           ))}
         </div>
@@ -363,7 +455,7 @@ export function validatePolicy(form: PolicyRequest, isGlobal: boolean): string |
   if (form.autoInstallEnabled === true && form.maintenanceDays !== null && form.maintenanceDays.length === 0) {
     return 'Automatic installation needs at least one maintenance day.';
   }
-  return null;
+  return validateRestartSchedule(form.restartSchedule) ?? validateWindowsUpdate(form.windowsUpdate);
 }
 
 function Row({ label, hint, inheritable, explicit, readOnly, inheritedText, onToggle, children }: {

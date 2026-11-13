@@ -71,6 +71,7 @@ export function formatNumber(value: number | null | undefined): string {
 
 export function formatDuration(minutes: number | null | undefined): string {
   if (minutes === null || minutes === undefined) return '—';
+  if (minutes >= 1440 && minutes % 1440 === 0) return minutes === 1440 ? '1 day' : `${minutes / 1440} days`;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   if (h === 0) return `${m} min`;
@@ -86,6 +87,15 @@ export function humanize(value: string | null | undefined): string {
     UpdateScan: 'Update scan',
     InstallUpdates: 'Install updates',
     InventoryRefresh: 'Inventory refresh',
+    NotifyUser: 'Message to users',
+    PromptWithDeadline: 'Ask users, with a deadline',
+    PromptNoDeadline: 'Ask users, no deadline',
+    OnlyIfPending: 'Only if a restart is pending',
+    AutoDownloadNotifyInstall: 'Download automatically, notify to install',
+    AutoDownloadScheduleInstall: 'Download and install on a schedule',
+    NotifyDownload: 'Notify before downloading',
+    NotManaged: 'Not managed',
+    WaitingForUser: 'Waiting for user',
     AllEligible: 'All eligible',
     WaitingForReboot: 'Waiting for restart',
     PendingReboot: 'Pending restart',

@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Download, Monitor, Power, RefreshCw } from 'lucide-react';
+import { Download, MessageSquare, Monitor, Power, RefreshCw } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApiMutation, useList } from '../../api/hooks';
 import { COMPLIANCE_STATUSES, type BulkResultDto, type EndpointSummaryDto } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { Dialog } from '../../components/Dialog';
 import { EnumSelect, OrganizationSelect, SearchInput, SiteSelect } from '../../components/Filters';
+import { MessageDialog, RestartDialog } from '../../components/RestartDialogs';
 import { ComplianceBadge, EndpointStatusBadge, OnlineBadge, OsSupportBadge } from '../../components/StatusBadges';
 import { useToast } from '../../components/Toast';
 import {
@@ -64,6 +65,7 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmInstall, setConfirmInstall] = useState(false);
   const [result, setResult] = useState<{ title: string; data: BulkResultDto } | null>(null);
+  const [bulkDialog, setBulkDialog] = useState<'restart' | 'message' | null>(null);
   const items = list.page.items;
   const selectable = useMemo(() => items.filter((e) => e.status === 'Active'), [items]);
   const allSelected = selectable.length > 0 && selectable.every((e) => selected.has(e.id));
@@ -143,6 +145,12 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
           </Button>
           <Button size="sm" variant="primary" icon={<Download className="size-3.5" aria-hidden />} onClick={() => setConfirmInstall(true)}>
             Install all missing updates
+          </Button>
+          <Button size="sm" icon={<Power className="size-3.5" aria-hidden />} onClick={() => setBulkDialog('restart')}>
+            Restart…
+          </Button>
+          <Button size="sm" icon={<MessageSquare className="size-3.5" aria-hidden />} onClick={() => setBulkDialog('message')}>
+            Send message…
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
             Clear selection
@@ -265,6 +273,16 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
         onClose={() => setConfirmInstall(false)}
         onConfirm={(force) => bulkInstall.mutate({ ids: [...selected], force })}
       />
+      <RestartDialog
+        target={bulkDialog === 'restart' ? { kind: 'bulk', ids: [...selected] } : null}
+        onClose={() => setBulkDialog(null)}
+        onBulkResult={(title, data) => setResult({ title, data })}
+      />
+      <MessageDialog
+        target={bulkDialog === 'message' ? { kind: 'bulk', ids: [...selected] } : null}
+        onClose={() => setBulkDialog(null)}
+        onBulkResult={(title, data) => setResult({ title, data })}
+      />
       <BulkResultDialog
         result={result}
         onClose={() => {
@@ -306,8 +324,9 @@ function BulkInstallDialog({ open, count, loading, error, onClose, onConfirm }: 
           Each endpoint receives an <strong>Install all missing updates</strong> job. The agent performs a fresh Windows Update scan and installs every update its
           policy allows (allowed categories, optional updates and exclusions).
         </p>
-        <Alert tone="warn" title="Endpoints are never restarted automatically">
-          Updates that need a restart are reported as <em>Pending restart</em>. Restart those machines through your own process.
+        <Alert tone="warn" title="Installing does not restart endpoints">
+          Updates that need a restart are reported as <em>Pending restart</em>. Restart those endpoints with <strong>Restart…</strong> or a restart schedule in
+          policy.
         </Alert>
         <p className="text-muted">
           Offline endpoints keep their job queued until they check in or the job expires. Global and per-site concurrency limits apply. To review the exact list for

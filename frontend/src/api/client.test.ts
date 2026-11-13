@@ -150,6 +150,16 @@ describe('policy editor rules', () => {
     maintenanceDurationMinutes: null,
     scanStaleAfterHours: 48,
     maxConcurrentInstallsPerSite: 10,
+    endpointId: null,
+    trayIconEnabled: true,
+    installNotificationsEnabled: true,
+    restartSchedule: null,
+    windowsUpdate: {
+      automaticUpdates: { managed: true, value: { mode: 'AutoDownloadNotifyInstall', scheduledInstallDay: 0, scheduledInstallHour: 3 } },
+      featureUpdates: null,
+      qualityUpdates: { managed: true, value: { deferDays: 7, disablePause: false } },
+      restartBehavior: null,
+    },
   };
   const org: PolicyDto = {
     ...global,
@@ -170,6 +180,15 @@ describe('policy editor rules', () => {
     maintenanceDurationMinutes: 120,
     scanStaleAfterHours: null,
     maxConcurrentInstallsPerSite: 3,
+    trayIconEnabled: false,
+    installNotificationsEnabled: null,
+    restartSchedule: { enabled: true, days: [6], time: '04:00', condition: 'OnlyIfPending', mode: 'Countdown', countdownMinutes: 10, deadlineMinutes: 240, expiryMinutes: 120 },
+    windowsUpdate: {
+      automaticUpdates: { managed: false, value: null },
+      featureUpdates: { managed: true, value: { deferDays: 90, targetProductVersion: 'Windows 11', targetReleaseVersion: '24H2' } },
+      qualityUpdates: null,
+      restartBehavior: null,
+    },
   };
 
   it('resolves inherited values layer by layer and unions exclusions', () => {
@@ -180,6 +199,42 @@ describe('policy editor rules', () => {
     expect(r.maintenanceDays).toEqual([6]);
     expect(r.maintenanceStart).toBe('01:00');
     expect(r.excludedKbs.sort()).toEqual(['KB1', 'KB2']);
+    expect(r.trayIconEnabled).toBe(false);
+    expect(r.installNotificationsEnabled).toBe(true);
+    expect(r.restartSchedule?.mode).toBe('Countdown');
+  });
+
+  it('merges Windows Update settings group by group', () => {
+    const wu = resolveInherited([global, org]).windowsUpdate!;
+    // The organization explicitly stops managing Automatic Updates...
+    expect(wu.automaticUpdates).toEqual({ managed: false, value: null });
+    // ...adds feature updates, and inherits the global quality updates.
+    expect(wu.featureUpdates?.value?.targetReleaseVersion).toBe('24H2');
+    expect(wu.qualityUpdates?.value?.deferDays).toBe(7);
+    expect(wu.restartBehavior).toBeNull();
+  });
+
+  it('validates restart schedules and Windows Update settings like the server', () => {
+    const base: PolicyRequest = { ...global };
+    const schedule = org.restartSchedule!;
+    expect(validatePolicy({ ...base, restartSchedule: { ...schedule, days: [] } }, true)).toMatch(/at least one day/);
+    expect(validatePolicy({ ...base, restartSchedule: { ...schedule, expiryMinutes: 5 } }, true)).toMatch(/15 minutes to 24 hours/);
+    expect(validatePolicy({ ...base, restartSchedule: { ...schedule, enabled: false, days: [] } }, true)).toBeNull();
+    const pin = (version: string | null) => ({
+      ...base,
+      windowsUpdate: { ...base.windowsUpdate!, featureUpdates: { managed: true, value: { deferDays: null, targetProductVersion: 'Windows 11', targetReleaseVersion: version } } },
+    });
+    expect(validatePolicy(pin('24H2'), true)).toBeNull();
+    expect(validatePolicy(pin('2024'), true)).toMatch(/24H2/);
+    expect(validatePolicy(pin(null), true)).toMatch(/both/);
+    const hours = (start: number, end: number) => ({
+      ...base,
+      windowsUpdate: { ...base.windowsUpdate!, restartBehavior: { managed: true, value: { noAutoRestartWithSignedInUsers: true, activeHoursStart: start, activeHoursEnd: end } } },
+    });
+    expect(validatePolicy(hours(8, 18), true)).toBeNull();
+    expect(validatePolicy(hours(22, 6), true)).toBeNull();
+    expect(validatePolicy(hours(6, 1), true)).toMatch(/1 to 18 hours/);
+    expect(validatePolicy({ ...base, windowsUpdate: { ...base.windowsUpdate!, qualityUpdates: { managed: true, value: null } } }, true)).toMatch(/choose the settings/);
   });
 
   it('validates ranges like the server', () => {
