@@ -97,7 +97,7 @@ erDiagram
 |---|---|
 | `users` | username, email, Argon2id `password_hash`, `role` (SuperAdmin, Admin, ReadOnly), MFA secret (protected with ASP.NET Data Protection), recovery code hashes, lockout counters, `security_stamp` |
 | `user_sessions` | SHA-256 of the session token, MFA-completed flag, idle and absolute expiry, `revoked_at` |
-| `user_organization_access` | When a non-SuperAdmin user has rows here, they can only see those organizations. Enforced now; the UI to manage it can come later. |
+| `user_organization_access` | When a non-SuperAdmin user has rows here, they can only see those organizations. No rows means all organizations. Managed under Settings → Users. |
 | `password_reset_tokens` | Hashed, single-use, expiring tokens issued by an administrator |
 | `organizations`, `sites` | `is_active` and `archived_at`. Archiving is preferred to deleting; hard delete is only allowed when no endpoints exist. |
 | `endpoints` | Identity, OS and hardware inventory, agent version, check-in, scan and inventory timestamps, reboot state and reasons, update source, OS support status, and denormalized compliance counters |
@@ -195,6 +195,10 @@ Queued ──lease──► Delivered ──ack──► Acknowledged ──► 
    │                 └──► Queued (redelivery, max 5)      ├─────► Cancelled
    ├──► Cancelled (admin)                                 └─────► WaitingForReboot ──(after reboot)──► Running
    └──► Expired (not delivered before expires_at)
+
+Delivered / Acknowledged ──► Expired (the agent received it after its deadline)
+Delivered / Acknowledged / Running / WaitingForReboot ──► Cancelled (admin)
+Failed (timed out) ──► any final status (a late genuine report from the agent)
 ```
 
 * **Persistence.** All job state lives in PostgreSQL, and nothing is held only in memory.
@@ -203,7 +207,9 @@ Queued ──lease──► Delivered ──ack──► Acknowledged ──► 
   transaction. Two API instances can never deliver the same job. A delivered job that is not
   acknowledged within 10 minutes goes back to `Queued`.
 * **One job at a time per endpoint.** A new job is only delivered when the endpoint has no
-  job that is delivered, acknowledged or running.
+  job that is delivered, acknowledged or running. While an install job is parked in
+  `WaitingForReboot`, scans and inventory jobs are still delivered (the agent runs them while
+  it waits), but further install jobs stay queued until the restart has been handled.
 * **Concurrency limits.** Install jobs are only delivered while the global limit and the
   per-site limit allow it. This check runs under a transaction-scoped advisory lock.
 * **Deduplication.** A partial unique index on (`endpoint_id`, `dedupe_key`) covering active
@@ -291,5 +297,5 @@ Queued ──lease──► Delivered ──ack──► Acknowledged ──► 
   * Postgres: `pg_isready`.
 * **Restart policy.** `unless-stopped` for everything except `migrate`.
 * **Logs.** JSON to stdout, with a correlation ID on every request.
-* **Development.** `docker-compose.dev.yml` uses Caddy's internal CA (`tls internal`) for
-  `localhost`.
+* **Development.** `docker-compose.dev.yml` switches Caddy to its internal CA
+  (`local_certs`) and publishes HTTPS only on `127.0.0.1:8443`.

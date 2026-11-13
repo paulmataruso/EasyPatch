@@ -1,0 +1,19 @@
+# Keep build contexts small and free of secrets and local state.
+**/bin/
+**/obj/
+**/node_modules/
+frontend/dist/
+artifacts/
+agent/
+.git/
+.github/
+.vs/
+.idea/
+secrets/
+data/
+backups/
+.env
+*.pfx
+*.pem
+*.key
+**/TestResults/

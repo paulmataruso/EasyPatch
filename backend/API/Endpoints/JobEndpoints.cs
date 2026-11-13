@@ -242,7 +242,7 @@ public static class FleetUpdateEndpoints
                 query = query.Where(x => ids.Contains(x.EndpointId));
             }
 
-            var targets = await query.Join(db.Endpoints, x => x.EndpointId, e => e.Id, (x, e) => new { e.Id, e.Hostname }).Distinct().Take(1000).ToListAsync(ct);
+            var targets = await query.Join(db.Endpoints, x => x.EndpointId, e => e.Id, (x, e) => new { e.Id, e.Hostname }).Distinct().OrderBy(t => t.Hostname).Take(1000).ToListAsync(ct);
             var results = new List<BulkItemResult>();
             foreach (var target in targets)
             {

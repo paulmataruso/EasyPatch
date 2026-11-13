@@ -42,8 +42,31 @@ public static class MaintenanceExecutor
     }
 }
 
+/// <summary>Records when each maintenance loop last completed an iteration (ran, or skipped because another worker
+/// holds the lock). The worker's health endpoint reports unhealthy when a loop stops making progress.</summary>
+public sealed class MaintenanceHeartbeat(TimeProvider clock)
+{
+    private readonly DateTimeOffset startedAt = clock.GetUtcNow();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (TimeSpan Interval, DateTimeOffset? LastBeat)> loops = new();
+
+    public void Register(string name, TimeSpan interval) => loops.TryAdd(name, (interval, null));
+
+    public void Beat(string name, TimeSpan interval) => loops[name] = (interval, clock.GetUtcNow());
+
+    /// <summary>Loops whose last successful iteration is older than three intervals plus two minutes of slack.</summary>
+    public IReadOnlyList<string> Stalled()
+    {
+        var now = clock.GetUtcNow();
+        return loops.Where(l => now - (l.Value.LastBeat ?? startedAt) > l.Value.Interval * 3 + TimeSpan.FromMinutes(2))
+            .Select(l => l.Key).Order(StringComparer.Ordinal).ToList();
+    }
+
+    public IReadOnlyDictionary<string, DateTimeOffset?> Snapshot() => loops.ToDictionary(l => l.Key, l => l.Value.LastBeat);
+}
+
 /// <summary>Hosted loop for one maintenance task type.</summary>
-public sealed class MaintenanceLoop<TTask>(IServiceProvider services, TimeProvider clock, ILogger<MaintenanceLoop<TTask>> logger) : BackgroundService
+public sealed class MaintenanceLoop<TTask>(IServiceProvider services, TimeProvider clock, MaintenanceHeartbeat heartbeat, ILogger<MaintenanceLoop<TTask>> logger)
+    : BackgroundService
     where TTask : class, IMaintenanceTask
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -57,6 +80,8 @@ public sealed class MaintenanceLoop<TTask>(IServiceProvider services, TimeProvid
             name = task.Name;
         }
 
+        heartbeat.Register(name, interval);
+
         // Stagger start-up so tasks do not all hit the database at once.
         await Task.Delay(TimeSpan.FromSeconds(Random.Shared.Next(2, 15)), clock, stoppingToken).ConfigureAwait(false);
         while (!stoppingToken.IsCancellationRequested)
@@ -65,6 +90,7 @@ public sealed class MaintenanceLoop<TTask>(IServiceProvider services, TimeProvid
             try
             {
                 var ran = await MaintenanceExecutor.RunExclusiveAsync<TTask>(services, stoppingToken);
+                heartbeat.Beat(name, interval);
                 if (!ran)
                 {
                     logger.LogDebug("Maintenance task {Task} skipped: another instance holds the lock", name);

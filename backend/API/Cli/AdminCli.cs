@@ -10,7 +10,7 @@ namespace EasyPatch.Api.Cli;
 
 /// <summary>
 /// Operational commands run with the API image, for example <c>docker compose run --rm migrate</c> or
-/// <c>docker compose exec api ./EasyPatch.Api create-admin --username admin --email admin@example.com</c>.
+/// <c>docker compose run --rm api create-admin --username admin --email admin@example.com</c>.
 /// Generated passwords are printed to the console once and are never logged.
 /// </summary>
 public static class AdminCli

@@ -66,6 +66,7 @@ public static class DependencyInjection
         services.AddScoped<ScheduledInstallTask>();
         services.AddScoped<ComplianceSnapshotTask>();
         services.AddScoped<RetentionTask>();
+        services.AddSingleton<MaintenanceHeartbeat>();
         services.AddHostedService<MaintenanceLoop<JobMaintenanceTask>>();
         services.AddHostedService<MaintenanceLoop<PresenceMonitorTask>>();
         services.AddHostedService<MaintenanceLoop<ScheduledInstallTask>>();
@@ -91,6 +92,9 @@ public static class DatabaseConnection
             builder.Port = int.TryParse(section["Port"], out var port) ? port : 5432;
             builder.Database = section["Name"] ?? "easypatch";
             builder.Username = section["User"] ?? "easypatch";
+            // The database is on an internal Docker network with password (SCRAM) authentication. Do not probe for
+            // Kerberos/GSS encryption: the runtime image has no GSSAPI library and the probe only produces log noise.
+            builder.GssEncryptionMode = Npgsql.GssEncryptionMode.Disable;
         }
 
         var passwordFile = section["PasswordFile"];

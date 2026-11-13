@@ -33,7 +33,7 @@ public sealed class JobMaintenanceTask(EasyPatchDbContext db, SettingsService se
 
         // 1. Expire queued jobs past their deadline.
         var expiredQueued = await db.Jobs.Include(j => j.Updates).Include(j => j.Endpoint)
-            .Where(j => j.Status == JobStatus.Queued && j.ExpiresAt <= now).Take(500).ToListAsync(ct);
+            .Where(j => j.Status == JobStatus.Queued && j.ExpiresAt <= now).OrderBy(j => j.Id).Take(500).ToListAsync(ct);
         foreach (var job in expiredQueued)
         {
             JobService.Finish(job, JobStatus.Expired, now, "The endpoint did not pick up the job before it expired.");
@@ -43,7 +43,7 @@ public sealed class JobMaintenanceTask(EasyPatchDbContext db, SettingsService se
 
         // 2. Delivered but never acknowledged: return to the queue (or fail after too many attempts).
         var staleLeases = await db.Jobs.Include(j => j.Updates)
-            .Where(j => j.Status == JobStatus.Delivered && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now).Take(500).ToListAsync(ct);
+            .Where(j => j.Status == JobStatus.Delivered && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now).OrderBy(j => j.Id).Take(500).ToListAsync(ct);
         foreach (var job in staleLeases)
         {
             if (job.DeliveryCount >= settings.MaxDeliveryAttempts)
@@ -67,7 +67,7 @@ public sealed class JobMaintenanceTask(EasyPatchDbContext db, SettingsService se
         var stuck = await db.Jobs.Include(j => j.Updates).Include(j => j.Endpoint)
             .Where(j => (j.Status == JobStatus.Running || j.Status == JobStatus.Acknowledged) &&
                         (j.LastProgressAt ?? j.AcknowledgedAt ?? j.DeliveredAt) <= runningCutoff)
-            .Take(500).ToListAsync(ct);
+            .OrderBy(j => j.Id).Take(500).ToListAsync(ct);
         foreach (var job in stuck)
         {
             JobService.Finish(job, JobStatus.Failed, now,
@@ -79,7 +79,7 @@ public sealed class JobMaintenanceTask(EasyPatchDbContext db, SettingsService se
         // 4. Waiting for a reboot that never happens.
         var rebootCutoff = now.AddDays(-settings.WaitingForRebootExpiryDays);
         var parked = await db.Jobs.Include(j => j.Updates)
-            .Where(j => j.Status == JobStatus.WaitingForReboot && (j.LastProgressAt ?? j.CreatedAt) <= rebootCutoff).Take(500).ToListAsync(ct);
+            .Where(j => j.Status == JobStatus.WaitingForReboot && (j.LastProgressAt ?? j.CreatedAt) <= rebootCutoff).OrderBy(j => j.Id).Take(500).ToListAsync(ct);
         foreach (var job in parked)
         {
             JobService.Finish(job, JobStatus.Expired, now, $"The endpoint was not restarted within {settings.WaitingForRebootExpiryDays} days.");

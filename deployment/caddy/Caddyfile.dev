@@ -1,0 +1,15 @@
+# Development / lab: certificates from Caddy's internal CA (browsers will warn; agents will not trust it unless the
+# Caddy root certificate is installed in the Windows machine store). Never use this on the internet.
+{
+	local_certs
+	admin off
+	servers {
+		protocols h1 h2
+	}
+}
+
+import /etc/caddy/easypatch.caddy
+
+{$EASYPATCH_DOMAIN:localhost} {
+	import easypatch
+}

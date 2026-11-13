@@ -151,7 +151,7 @@ public static class InstallScriptBuilder
             finally {
                 Remove-Item -Path $work -Recurse -Force -ErrorAction SilentlyContinue
             }
-            $agent = Join-Path $env:ProgramFiles 'EasyPatch\Agent\EasyPatch.Agent.exe'
+            $agent = Join-Path $env:ProgramFiles 'EasyPatch Agent\EasyPatch.Agent.exe'
             for ($i = 0; $i -lt 12; $i++) {
                 Start-Sleep -Seconds 5
                 if (Test-Path $agent) {

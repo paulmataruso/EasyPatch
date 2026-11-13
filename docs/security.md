@@ -25,11 +25,13 @@ There is no shell, no script execution, no file push and no automatic reboot.
 
 ## Admin authentication
 
-* **Passwords.** Minimum length is 12 characters. The password must not contain the username.
-  There are no composition rules, following NIST SP 800-63B.
-* **Rate limits and lockout.** Login is limited to 10 attempts per minute per IP. Five
-  consecutive failures lock the account, starting at 15 minutes and doubling, capped at
-  24 hours.
+* **Passwords.** 12 to 256 characters, at least 4 distinct characters, and the username must
+  not appear in the password. There are no composition rules, following NIST SP 800-63B.
+* **Rate limits and lockout.** Login, MFA verification and the password routes share a
+  limit of 20 requests per minute per IP. Five consecutive failures lock the account,
+  starting at 15 minutes and doubling with each lockout, capped at 24 hours. A locked account
+  gets the same "invalid username or password" answer as a wrong password, and unknown
+  usernames get it too. `unlock` (CLI) clears a lockout.
 * **Multi-factor authentication (MFA).** TOTP (RFC 6238, SHA-1, 6 digits, 30 s step, ±1 step
   tolerance). A time step can only be used once.
   * MFA is **required by default** (`RequireMfa` in server settings). Users without MFA can
@@ -40,8 +42,9 @@ There is no shell, no script execution, no file push and no automatic reboot.
   * Changing your password revokes all your other sessions.
   * Defaults: 30-minute idle timeout, 12-hour absolute lifetime.
 * **CSRF.** Session cookies use `SameSite=Strict`. In addition, every unsafe method must send
-  an `X-XSRF-TOKEN` header that matches an HMAC of the session ID. That value is delivered in
-  a JavaScript-readable `XSRF-TOKEN` cookie.
+  an `X-XSRF-TOKEN` header carrying the session ID protected with ASP.NET Data Protection
+  (purpose `EasyPatch.Csrf.v1`). The server unprotects it and compares it with the session of
+  the request. The value is delivered in a JavaScript-readable `XSRF-TOKEN` cookie.
 * **Bootstrap and recovery.** No first-run web page exists. The first Super Administrator is
   created with `docker compose run --rm api create-admin`. Password resets are either
   administrator-issued one-time links (valid 60 minutes) or the `reset-password` CLI command.
@@ -53,8 +56,10 @@ There is no shell, no script execution, no file push and no automatic reboot.
   | Admin | Organizations, sites, endpoints, jobs, policies, enrollment |
   | ReadOnly | View only |
 
-  The `user_organization_access` table restricts a non-SuperAdmin user to specific
-  organizations. Every admin query goes through one tenant-scope service.
+  A SuperAdmin can restrict an Admin or ReadOnly user to specific organizations
+  (`user_organization_access`; no rows means all organizations). Every admin query goes
+  through one tenant-scope service, and anything outside the user's organizations answers
+  `404`. Only unrestricted users can create organizations.
 
 ## Agent enrollment
 
@@ -63,16 +68,17 @@ There are two ways to enroll an agent.
 1. **Enrollment token** (`msiexec … ENROLLMENTTOKEN=…`). A token is valid for one organization
    (and optionally one site). It expires (default 24 h, maximum 30 days) and is limited to a
    number of uses (default 1). Administrators can revoke it. Enrollment is rate-limited to
-   10 requests per minute per IP.
+   30 requests per minute per IP.
 2. **Deployment code with approval** (the tokenless PowerShell/RMM install).
    * The deployment code is a non-secret routing identifier. On its own it grants nothing.
    * The agent enrolls with its public key, which creates a **pending request**. The agent
      then polls a signed status endpoint. No endpoint or credential exists until an
      administrator approves the request in the GUI.
    * The administrator sees the hostname, serial number, manufacturer and model, OS, agent
-     version, source IP and the **key fingerprint**. The agent also writes the fingerprint to
-     its install log and the Application event log, so an RMM script can display it for
-     comparison.
+     version, source IP and the **key fingerprint**. On the endpoint, the fingerprint is
+     written to the agent log and the Application event log, `EasyPatch.Agent.exe status`
+     prints it, and the generated install script displays it, so the RMM output can be
+     compared with the approval queue.
    * Limits:
      * Pending requests per code are capped (default 500).
      * Requests expire after 7 days.
@@ -163,9 +169,13 @@ protection, and the server holds nothing that would let an attacker impersonate 
 * Security headers: CSP, `X-Content-Type-Options`, `X-Frame-Options: DENY`,
   `Referrer-Policy`, `Permissions-Policy`.
 * CORS: none. The SPA is served from the same origin, so no cross-origin access is allowed.
-* Containers run as non-root, with a read-only root filesystem, `no-new-privileges` and
-  pinned images.
-* OpenAPI and Swagger UI are only available to signed-in administrators.
+* The .NET containers run as a non-root user with a read-only root filesystem, all
+  capabilities dropped and `no-new-privileges`. Caddy keeps only `NET_BIND_SERVICE`. All
+  images are pinned to exact versions.
+* PostgreSQL has no published port and sits on an internal Docker network without egress.
+* OpenAPI and Swagger UI are only available to signed-in users. Swagger UI is the one page
+  served with a relaxed CSP (it needs inline scripts); the console itself has no inline
+  scripts or styles.
 * Dependency scanning: `scripts/audit-dependencies.sh` runs `dotnet list package --vulnerable`
   and `npm audit`.
 
@@ -179,3 +189,6 @@ protection, and the server holds nothing that would let an attacker impersonate 
 * The server cannot verify the Authenticode signatures of agent MSIs it hosts. The generated
   PowerShell installer verifies the SHA-256 and, optionally, the Authenticode signature on
   the endpoint.
+* The Data Protection key ring (`dpkeys` volume) is stored unencrypted on the Docker host, as
+  is the database volume. Anyone with root on the host can read MFA secrets. Protect the
+  host, and encrypt backups (`scripts/backup.sh` output includes the key ring).

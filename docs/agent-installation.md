@@ -25,7 +25,7 @@ Update Agent API that Windows itself uses. The agent:
 | Method | Use it for | Secret? | Approval |
 |---|---|---|---|
 | **Enrollment token** (`ENROLLMENTTOKEN`) | Hands-on installs, GPO/Intune deployments where the token is protected | Yes: limited-use, expiring | No, the agent is active immediately |
-| **Deployment code** (`DEPLOYMENTCODE`) | RMM scripts and other tokenless mass deployment | No | Yes: each computer appears under *Pending enrollments* until an administrator approves it |
+| **Deployment code** (`DEPLOYMENTCODE`) | RMM scripts and other tokenless mass deployment | No | Yes: each computer appears under *Agent Management → Pending approvals* until an administrator approves it |
 
 Both are created in the EasyPatch console. The console can also generate the complete
 `msiexec` command (tokens) or a PowerShell install script (deployment codes).
@@ -45,7 +45,7 @@ msiexec /i EasyPatchAgent-1.0.0-x64.msi /qn /norestart `
 ```powershell
 msiexec /i EasyPatchAgent-1.0.0-x64.msi /qn /norestart `
   SERVERURL=https://patch.example.com `
-  DEPLOYMENTCODE=EP-7Q4K-PZ2M
+  DEPLOYMENTCODE=EPD-7Q4KPZ2MXR8T3HWN
 ```
 
 The agent submits an enrollment request with its public key and polls until an administrator
@@ -158,11 +158,11 @@ Exit codes:
 $ErrorActionPreference = 'Stop'
 $server = 'https://patch.example.com'
 $msi    = "$env:TEMP\EasyPatchAgent.msi"
-Invoke-WebRequest "$server/api/v1/downloads/agent/EasyPatchAgent-1.0.0-x64.msi" -OutFile $msi -UseBasicParsing
+Invoke-WebRequest "$server/downloads/agent/EasyPatchAgent-1.0.0-x64.msi" -OutFile $msi -UseBasicParsing
 $expected = '<sha256 from the console>'
 if ((Get-FileHash $msi -Algorithm SHA256).Hash -ne $expected) { throw 'MSI hash mismatch' }
 $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart',
-     "SERVERURL=$server", 'DEPLOYMENTCODE=EP-7Q4K-PZ2M', '/l*v', "`"$env:TEMP\EasyPatchAgent-install.log`"")
+     "SERVERURL=$server", 'DEPLOYMENTCODE=EPD-7Q4KPZ2MXR8T3HWN', '/l*v', "`"$env:TEMP\EasyPatchAgent-install.log`"")
 if ($p.ExitCode -notin 0, 3010) { throw "msiexec failed with $($p.ExitCode)" }
 Start-Sleep -Seconds 20
 & "$env:ProgramFiles\EasyPatch Agent\EasyPatch.Agent.exe" status
@@ -240,7 +240,7 @@ need them.
 |---|---|
 | `status` shows `NotEnrolled` and the log says no token or deployment code | Install was done without `ENROLLMENTTOKEN`/`DEPLOYMENTCODE`, or the token was already consumed. Run `enroll` |
 | Enrollment rejected (exit code 4, event 1003) | Token expired, revoked or used up, deployment code revoked, or the request was rejected by an administrator. Create a new token or code |
-| Stays at `PendingApproval` | Approve the request in the console (*Pending enrollments*). Requests expire after 7 days; the agent then submits a new one |
+| Stays at `PendingApproval` | Approve the request in the console (*Agent Management → Pending approvals*). Requests expire after 7 days; the agent then submits a new one |
 | `Revoked` (event 1004) | The endpoint was removed or its credential revoked in the console. Re-enroll with `enroll --force` |
 | "Could not reach the EasyPatch server" | DNS, firewall, proxy (`PROXYURL`), or TLS: the server certificate must chain to a root trusted by the computer |
 | Scans fail with `0x8024402C`, `0x80244022` or similar | The Windows Update source (Microsoft or WSUS) is unreachable. The error code and its description are shown in the console |
@@ -254,5 +254,6 @@ need them.
 Signing is optional and is configured through environment variables, never through files in
 the repository. See `agent/Installer/build-installer.ps1` for `EASYPATCH_SIGN_CERT_THUMBPRINT`,
 `EASYPATCH_SIGN_PFX_PATH`/`EASYPATCH_SIGN_PFX_PASSWORD` and `EASYPATCH_SIGN_TIMESTAMP_URL`. Each
-MSI is written to `artifacts/installer` together with a `.sha256` file. Put both in
-`data/agent-packages` on the server to offer them for download.
+MSI is written to `artifacts/installer` together with a `.sha256` file. Copy the MSI to
+`data/agent-packages` on the server to offer it for download. The server computes the SHA-256
+itself; the `.sha256` file is for your own verification.
