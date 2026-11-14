@@ -145,6 +145,45 @@ public sealed class LinuxParserTests
     }
 
     [Fact]
+    public void Dnf5_advisory_json_lists_advisories_with_severity()
+    {
+        // Shape of `dnf advisory list --updates --json` on Fedora 45 (dnf5 5.4).
+        const string output = """
+            [
+              {"name":"FEDORA-2026-f2ecc7c470","type":"security","severity":"Important","nevra":"curl-8.21.0-9.fc45.x86_64","buildtime":1793840322},
+              {"name":"FEDORA-2026-53dfac8ed7","type":"bugfix","severity":"None","nevra":"vim-data-2:9.2.1302-2.fc45.noarch","buildtime":1793840322},
+              {"name":"FEDORA-2026-0000000000","type":"security","severity":"None","nevra":"not a nevra"},
+              {"name":"FEDORA-2026-1111111111","type":"security"}
+            ]
+            """;
+
+        var advisories = DnfParsers.ParseAdvisoryJson(output);
+
+        Assert.Equal(2, advisories.Count);
+        Assert.True(advisories[0].IsSecurity);
+        Assert.Equal("Important", advisories[0].Severity);
+        Assert.Equal(("curl", "x86_64", "8.21.0-9.fc45"), (advisories[0].Name, advisories[0].Architecture, advisories[0].Version));
+        Assert.False(advisories[1].IsSecurity);
+        Assert.Null(advisories[1].Severity);
+        Assert.Equal("2:9.2.1302-2.fc45", advisories[1].Version);
+        Assert.Empty(DnfParsers.ParseAdvisoryJson(""));
+        Assert.Empty(DnfParsers.ParseAdvisoryJson("[]"));
+        Assert.Throws<System.Text.Json.JsonException>(() => DnfParsers.ParseAdvisoryJson("{\"advisories\": []}"));
+    }
+
+    [Theory]
+    [InlineData("  Upgrading        : curl-8.12.1-4.el10_2.8.x86_64_v2                         3/8", "curl")]
+    [InlineData("  Installing       : kernel-core-6.12.0-55.el10.x86_64                         1/9", "kernel-core")]
+    [InlineData("  Cleanup          : curl-8.12.1-4.el10_2.7.x86_64_v2                         7/8", null)]
+    [InlineData("[3/8] Upgrading libnghttp3-0:1.19.0-1.f 100% |   5.0 MiB/s | 164.8 KiB |  00m00s", "libnghttp3")]
+    [InlineData("[ 4/12] Upgrading python3-libdnf5-0:5.4. 100% |  52.9 MiB/s |   1.1 MiB |  00m00s", "python3-libdnf5")]
+    [InlineData("[5/8] Upgrading a-very-long-package-name-th 100% |   5.1 MiB/s | 490.6 KiB |  00m00s", null)]
+    [InlineData("[6/8] Removing curl-0:8.21.0-8.fc45.x86 100% | 620.0   B/s |  18.0   B |  00m00s", null)]
+    [InlineData("[1/3] curl-0:8.21.0-9.fc45.x86_64       100% |   0.0   B/s |   0.0   B |  00m00s", null)]
+    public void Dnf_transaction_progress_names_the_package_for_dnf4_and_dnf5(string line, string? expected) =>
+        Assert.Equal(expected, DnfParsers.ParseProgressPackage(line));
+
+    [Fact]
     public void Rpm_query_keeps_the_newest_install_only_kernel_and_drops_zero_epochs()
     {
         var installed = DnfParsers.ParseInstalled("kernel\tx86_64\t0:5.14.0-427.el9\nkernel\tx86_64\t0:5.14.0-503.14.1.el9_5\nopenssl-libs\tx86_64\t1:3.0.7-27.el9\n");
@@ -468,6 +507,73 @@ public sealed class LinuxPackageUpdateTests : IDisposable
 }
 
 /// <summary>/etc/easypatch/agent.conf handling.</summary>
+public sealed class TransientUnitTests
+{
+    private static readonly CommandResult Running = Show("active", "running", "success", "0");
+    private static readonly CommandResult Finished = Show("active", "exited", "success", "0");
+    private static readonly CommandResult NoBus = new(1, string.Empty, "Failed to connect to bus: Connection refused");
+
+    [Fact]
+    public async Task A_unit_is_not_considered_finished_while_systemd_cannot_report_its_state()
+    {
+        // systemd re-executes itself when glibc or systemd is upgraded, in the middle of the transaction.
+        var systemctl = new FakeSystemctl(Running, NoBus, NoBus, Running, Finished);
+        var units = new TransientUnitRunner(systemctl, NullLogger.Instance) { PollInterval = TimeSpan.Zero };
+
+        var exitCode = await units.WaitAsync("easypatch-packages", "/nonexistent/transaction.log", TimeSpan.FromMinutes(5), null, CancellationToken.None);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(5, systemctl.ShowCalls - 1); // the last show is the reset's
+    }
+
+    [Fact]
+    public async Task Waiting_gives_up_when_systemd_does_not_report_the_state_for_too_long()
+    {
+        var systemctl = new FakeSystemctl(Running, NoBus, NoBus, NoBus);
+        var units = new TransientUnitRunner(systemctl, NullLogger.Instance) { PollInterval = TimeSpan.Zero, UnavailableLimit = TimeSpan.Zero };
+
+        var ex = await Assert.ThrowsAsync<CommandException>(() =>
+            units.WaitAsync("easypatch-packages", "/var/lib/easypatch/packages/transaction.log", TimeSpan.FromMinutes(5), null, CancellationToken.None));
+
+        Assert.Contains("did not report the state of easypatch-packages", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("may still be running", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_unit_whose_state_cannot_be_read_counts_as_busy_and_is_not_reset()
+    {
+        var units = new TransientUnitRunner(new FakeSystemctl(NoBus), NullLogger.Instance);
+
+        Assert.True((await units.GetStatusAsync("easypatch-packages", CancellationToken.None)).IsRunning);
+        await Assert.ThrowsAsync<CommandException>(() => units.ResetAsync("easypatch-packages", CancellationToken.None));
+    }
+
+    private static CommandResult Show(string active, string sub, string result, string exit) =>
+        new(0, $"ActiveState={active}\nSubState={sub}\nResult={result}\nExecMainStatus={exit}\nLoadState=loaded\n", string.Empty);
+
+    /// <summary>Answers <c>systemctl show</c> from a script (the last answer repeats) and accepts stop/reset-failed.</summary>
+    private sealed class FakeSystemctl(params CommandResult[] shows) : ICommandRunner
+    {
+        public int ShowCalls { get; private set; }
+
+        public string? Find(string program) => "/usr/bin/" + program;
+
+        public Task<CommandResult> RunAsync(string program, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken,
+            IReadOnlyDictionary<string, string>? environment = null, byte[]? standardInput = null)
+        {
+            if (program == "systemctl" && arguments[0] == "show")
+            {
+                return Task.FromResult(shows[Math.Min(ShowCalls++, shows.Length - 1)]);
+            }
+
+            return Task.FromResult(new CommandResult(0, string.Empty, string.Empty));
+        }
+
+        public Task<(int ExitCode, byte[] Output, string Error)> RunBinaryAsync(string program, IReadOnlyList<string> arguments, byte[] standardInput,
+            TimeSpan timeout, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+}
+
 public sealed class LinuxBootstrapTests : IDisposable
 {
     private readonly TempDirectory _directory = new();

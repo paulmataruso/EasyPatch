@@ -258,7 +258,7 @@ public sealed class LinuxUpdateSourceDetector : IUpdateSourceDetector
 
             if (_family == PackageFamily.RedHat)
             {
-                var result = Run("systemctl", ["is-enabled", "dnf-automatic.timer", "dnf-automatic-install.timer"]);
+                var result = Run("systemctl", ["is-enabled", "dnf-automatic.timer", "dnf-automatic-install.timer", "dnf5-automatic.timer"]);
                 return result.StandardOutput.Split('\n').Any(l => l.Trim() == "enabled") ? "Enabled (dnf-automatic)" : "Disabled (dnf-automatic)";
             }
         }

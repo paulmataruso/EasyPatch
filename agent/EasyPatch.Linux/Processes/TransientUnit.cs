@@ -8,10 +8,18 @@ namespace EasyPatch.Linux.Processes;
 /// <summary>State of a transient unit as systemd reports it.</summary>
 public sealed record UnitStatus(string ActiveState, string SubState, string Result, int? ExitStatus)
 {
+    /// <summary>The unit is not loaded.</summary>
     public static UnitStatus Unknown { get; } = new("inactive", "dead", "success", null);
 
-    /// <summary>The command is still running.</summary>
-    public bool IsRunning => ActiveState is "activating" or "deactivating" or "reloading" ||
+    /// <summary>systemctl could not report the state, for example while systemd re-executes itself after a glibc or systemd
+    /// upgrade (which happens in the middle of such a transaction). Counted as running, so nothing concludes that a
+    /// transaction has finished, or starts another one, while its state is unknown.</summary>
+    public static UnitStatus Unavailable { get; } = new("unavailable", "unavailable", "unavailable", null);
+
+    public bool IsUnavailable => ActiveState == "unavailable";
+
+    /// <summary>The command is still running (or its state cannot be read at the moment).</summary>
+    public bool IsRunning => IsUnavailable || ActiveState is "activating" or "deactivating" or "reloading" ||
                              (ActiveState == "active" && SubState is "running" or "start" or "start-pre" or "start-post");
 
     /// <summary>The unit ran and finished (it stays loaded because it is started with RemainAfterExit=yes).</summary>
@@ -39,17 +47,31 @@ public sealed partial class TransientUnitRunner
     /// <summary>How often a running unit is checked.</summary>
     public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(2);
 
+    /// <summary>How long systemctl may fail to report a unit's state before waiting for it gives up.</summary>
+    public TimeSpan UnavailableLimit { get; init; } = TimeSpan.FromMinutes(5);
+
     [GeneratedRegex("^[a-z][a-z0-9-]{1,60}$", RegexOptions.CultureInvariant)]
     private static partial Regex UnitNameRegex();
 
     public async Task<UnitStatus> GetStatusAsync(string unit, CancellationToken cancellationToken)
     {
         RequireName(unit);
-        var result = await _commands.RunAsync("systemctl",
-            ["show", unit + ".service", "--property=ActiveState,SubState,Result,ExecMainStatus,LoadState"], CommandTimeout, cancellationToken);
+        CommandResult result;
+        try
+        {
+            result = await _commands.RunAsync("systemctl",
+                ["show", unit + ".service", "--property=ActiveState,SubState,Result,ExecMainStatus,LoadState"], CommandTimeout, cancellationToken);
+        }
+        catch (CommandException ex)
+        {
+            _logger.LogDebug("systemctl show {Unit} failed: {Message}", unit, ex.Message);
+            return UnitStatus.Unavailable;
+        }
+
         if (!result.Succeeded)
         {
-            return UnitStatus.Unknown;
+            _logger.LogDebug("systemctl show {Unit} exited with {ExitCode}: {Output}", unit, result.ExitCode, result.Combined.Trim());
+            return UnitStatus.Unavailable;
         }
 
         var values = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -57,6 +79,11 @@ public sealed partial class TransientUnitRunner
         if (values.GetValueOrDefault("LoadState") == "not-found")
         {
             return UnitStatus.Unknown;
+        }
+
+        if (!values.ContainsKey("ActiveState"))
+        {
+            return UnitStatus.Unavailable;
         }
 
         int? exit = int.TryParse(values.GetValueOrDefault("ExecMainStatus"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var code) ? code : null;
@@ -70,9 +97,12 @@ public sealed partial class TransientUnitRunner
     {
         var deadline = DateTime.UtcNow + timeout;
         var waited = false;
-        while ((await GetStatusAsync(unit, cancellationToken)).IsRunning)
+        var unavailable = new UnavailableTracker(this, unit);
+        UnitStatus status;
+        while ((status = await GetStatusAsync(unit, cancellationToken)).IsRunning)
         {
-            if (!waited)
+            unavailable.Check(status, null);
+            if (!waited && !status.IsUnavailable)
             {
                 _logger.LogInformation("Waiting for {Unit} (started earlier) to finish.", unit);
                 waited = true;
@@ -145,10 +175,12 @@ public sealed partial class TransientUnitRunner
         var deadline = DateTime.UtcNow + timeout;
         long offset = 0;
         var partial = new StringBuilder();
+        var unavailable = new UnavailableTracker(this, unit);
         while (true)
         {
             var status = await GetStatusAsync(unit, cancellationToken);
             offset = Tail(logPath, offset, partial, onOutput);
+            unavailable.Check(status, logPath);
             if (!status.IsRunning)
             {
                 offset = Tail(logPath, offset, partial, onOutput);
@@ -179,13 +211,45 @@ public sealed partial class TransientUnitRunner
         return await WaitAsync(unit, logPath, timeout, onOutput, cancellationToken);
     }
 
+    /// <summary>Tolerates systemctl failing to report a unit's state for up to <see cref="UnavailableLimit"/>.</summary>
+    private sealed class UnavailableTracker(TransientUnitRunner runner, string unit)
+    {
+        private DateTime? _since;
+
+        public void Check(UnitStatus status, string? logPath)
+        {
+            if (!status.IsUnavailable)
+            {
+                if (_since is not null)
+                {
+                    runner._logger.LogInformation("systemd reports the state of {Unit} again.", unit);
+                }
+
+                _since = null;
+                return;
+            }
+
+            if (_since is null)
+            {
+                _since = DateTime.UtcNow;
+                runner._logger.LogInformation(
+                    "systemd did not report the state of {Unit} (it may be re-executing after an upgrade); still waiting for it.", unit);
+            }
+            else if (DateTime.UtcNow - _since > runner.UnavailableLimit)
+            {
+                throw new CommandException($"systemd did not report the state of {unit} for {runner.UnavailableLimit.TotalMinutes:0} minutes" +
+                    (logPath is null ? "." : $"; it may still be running, check {logPath}."));
+            }
+        }
+    }
+
     /// <summary>Unloads a finished unit so its name can be used again.</summary>
     public async Task ResetAsync(string unit, CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(unit, cancellationToken);
         if (status.IsRunning)
         {
-            throw new CommandException($"{unit} is still running.");
+            throw new CommandException(status.IsUnavailable ? $"systemd did not report the state of {unit}." : $"{unit} is still running.");
         }
 
         if (status.ActiveState == "active")

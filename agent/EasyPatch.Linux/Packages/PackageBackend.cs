@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using EasyPatch.Linux.Platform;
 using EasyPatch.Linux.Processes;
@@ -334,7 +335,7 @@ public sealed partial class AptBackend : PackageBackend
 }
 
 /// <summary>Red Hat Enterprise Linux 8+ and rebuilds: dnf (4) and rpm.</summary>
-public sealed partial class DnfBackend : PackageBackend
+public sealed class DnfBackend : PackageBackend
 {
     private static readonly IReadOnlyDictionary<string, string> NoEnvironment = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -383,8 +384,7 @@ public sealed partial class DnfBackend : PackageBackend
         }
 
         var installed = await GetInstalledAsync(cancellationToken);
-        var advisories = DnfParsers.ParseUpdateInfo(
-            (await QueryAsync("dnf", ["-q", "-C", "updateinfo", "list", "--updates"], QueryTimeout, cancellationToken)).StandardOutput);
+        var advisories = await GetAdvisoriesAsync(cancellationToken);
         var byPackage = advisories.ToLookup(a => a.Name + ":" + a.Architecture, StringComparer.Ordinal);
 
         var result = new List<PackageUpgrade>(upgrades.Count);
@@ -407,6 +407,35 @@ public sealed partial class DnfBackend : PackageBackend
         return result;
     }
 
+    /// <summary>The advisories (errata) for the available upgrades. dnf4 (RHEL 8 to 10) prints a fixed text format; dnf5 (Fedora 41
+    /// and later) prints a different table, so its JSON output is used instead.</summary>
+    private async Task<IReadOnlyList<DnfParsers.Advisory>> GetAdvisoriesAsync(CancellationToken cancellationToken)
+    {
+        if (!await IsDnf5Async(cancellationToken))
+        {
+            return DnfParsers.ParseUpdateInfo(
+                (await QueryAsync("dnf", ["-q", "-C", "updateinfo", "list", "--updates"], QueryTimeout, cancellationToken)).StandardOutput);
+        }
+
+        var output = (await QueryAsync("dnf", ["-q", "-C", "advisory", "list", "--updates", "--json"], QueryTimeout, cancellationToken)).StandardOutput;
+        try
+        {
+            return DnfParsers.ParseAdvisoryJson(output);
+        }
+        catch (JsonException ex)
+        {
+            // Without advisories every upgrade is classified as Other; the upgrades themselves are still reported.
+            Logger.LogWarning("Could not read the dnf5 advisory list, so no update is classified as a security update: {Message}", ex.Message);
+            return [];
+        }
+    }
+
+    private async Task<bool> IsDnf5Async(CancellationToken cancellationToken)
+    {
+        var version = await QueryAsync("dnf", ["--version"], QueryTimeout, cancellationToken);
+        return version.StandardOutput.TrimStart().StartsWith("dnf5", StringComparison.Ordinal);
+    }
+
     public override async Task<IReadOnlyDictionary<string, string>> GetInstalledAsync(CancellationToken cancellationToken)
     {
         var result = await QueryAsync("rpm", ["-qa", "--qf", "%{NAME}\\t%{ARCH}\\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\\n"], QueryTimeout, cancellationToken);
@@ -426,10 +455,9 @@ public sealed partial class DnfBackend : PackageBackend
         var names = upgrades.Select(u => u.Name).ToHashSet(StringComparer.Ordinal);
         return RunTransactionAsync("dnf", args, NoEnvironment, "EasyPatch package installation (dnf)", line =>
         {
-            var match = StepRegex().Match(line);
-            if (match.Success && DnfParsers.ParseNevra(match.Groups["nevra"].Value) is { } nevra && names.Contains(nevra.Name))
+            if (DnfParsers.ParseProgressPackage(line) is { } name && names.Contains(name))
             {
-                onStarted?.Invoke(nevra.Name);
+                onStarted?.Invoke(name);
             }
         }, cancellationToken);
     }
@@ -437,7 +465,4 @@ public sealed partial class DnfBackend : PackageBackend
     /// <summary><c>name-[epoch:]version-release.arch</c>: the exact version that was scanned (and approved).</summary>
     internal static IEnumerable<string> Specs(IEnumerable<PackageUpgrade> upgrades) =>
         upgrades.Select(u => $"{u.Name}-{u.Version}.{u.Architecture}");
-
-    [GeneratedRegex(@"^\s+(?:Upgrading|Installing)\s+:\s+(?<nevra>\S+)\s+\d+/\d+", RegexOptions.CultureInvariant)]
-    private static partial Regex StepRegex();
 }

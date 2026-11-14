@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace EasyPatch.Linux.Packages;
@@ -266,6 +267,68 @@ public static partial class DnfParsers
 
         return list;
     }
+
+    /// <summary>Parses dnf5 <c>advisory list --updates --json</c>: an array of objects with <c>name</c>, <c>type</c>,
+    /// <c>severity</c> and <c>nevra</c> (dnf5 no longer prints the dnf4 "Important/Sec." column). Entries with a missing or
+    /// malformed field are skipped; a document that is not a JSON array throws <see cref="JsonException"/>.</summary>
+    public static IReadOnlyList<Advisory> ParseAdvisoryJson(string output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        var list = new List<Advisory>();
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return list;
+        }
+
+        using var document = JsonDocument.Parse(output);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("Expected a JSON array of advisories.");
+        }
+
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                Text(item, "name") is not { } id ||
+                Text(item, "type") is not { } kind ||
+                Text(item, "nevra") is not { } text ||
+                ParseNevra(text) is not { } nevra)
+            {
+                continue;
+            }
+
+            var type = kind.ToLowerInvariant();
+            list.Add(new Advisory(id, type, type == "security" ? NormalizeSeverity(Text(item, "severity")) : null, nevra.Name, nevra.Architecture,
+                nevra.Version));
+        }
+
+        return list;
+
+        static string? Text(JsonElement item, string property) =>
+            item.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { Length: > 0 } s ? s : null;
+    }
+
+    /// <summary>The package a dnf transaction line starts working on, or null. dnf4 prints
+    /// "  Upgrading        : curl-8.12.1-4.el10.x86_64      3/8"; dnf5 prints "[3/8] Upgrading curl-0:8.21.0-9.fc45.x86_64 100% | …"
+    /// and cuts long package specifications to the column width, so only the name (always followed by "-epoch:") is used.</summary>
+    public static string? ParseProgressPackage(string line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        var dnf4 = Dnf4StepRegex().Match(line);
+        if (dnf4.Success)
+        {
+            return ParseNevra(dnf4.Groups["nevra"].Value)?.Name;
+        }
+
+        var dnf5 = Dnf5StepRegex().Match(line);
+        return dnf5.Success ? dnf5.Groups["name"].Value : null;
+    }
+
+    [GeneratedRegex(@"^\s+(?:Upgrading|Installing)\s+:\s+(?<nevra>\S+)\s+\d+/\d+", RegexOptions.CultureInvariant)]
+    private static partial Regex Dnf4StepRegex();
+
+    [GeneratedRegex(@"^\[\s*\d+/\d+\]\s+(?:Upgrading|Installing)\s+(?<name>[^\s:]+?)-\d+:", RegexOptions.CultureInvariant)]
+    private static partial Regex Dnf5StepRegex();
 
     /// <summary>Splits <c>name-[epoch:]version-release.arch</c>.</summary>
     public static (string Name, string Version, string Architecture)? ParseNevra(string nevra)
