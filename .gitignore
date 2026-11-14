@@ -23,6 +23,8 @@ data/
 backups/
 *.pfx
 *.pem
+# The release PUBLIC key is committed so release builds embed it; private keys stay ignored.
+!keys/easypatch-release-key.pub.pem
 *.key
 appsettings.Local.json
 

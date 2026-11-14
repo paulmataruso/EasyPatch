@@ -12,17 +12,24 @@ installation, first sign-in, agent packages, upgrades, backup and restore.
 | Host | 64-bit Linux with Docker Engine and the Docker Compose plugin. The development override (`docker-compose.dev.yml`) uses the `!override` tag, which needs Compose 2.24.4 or later |
 | DNS | A public DNS name (A or AAAA record) pointing at the host, for example `patch.example.com` |
 | Inbound | TCP 443 from administrators and from every managed endpoint. TCP 80 from the internet, for ACME certificate validation and the HTTP to HTTPS redirect |
-| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. Building the images also needs access to `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` |
+| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. Pulling the images needs `ghcr.io` and Docker Hub (PostgreSQL). Building them yourself needs `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` instead of `ghcr.io` |
 
 Nothing else is published. PostgreSQL is attached only to an internal Docker network and has no
 host port.
 
-## 1. Get the source
+## 1. Get the deployment files
+
+The server runs from the release images on GitHub Container Registry
+(`ghcr.io/paulmataruso/easypatch-server` and `ghcr.io/paulmataruso/easypatch-proxy`, for x64 and
+ARM64). You need the repository for `docker-compose.yml`, the Caddy configuration and the
+scripts. Check out the release tag you want to run:
 
 ```bash
-git clone <repository-url> easypatch
+git clone --branch v1.4.0 https://github.com/paulmataruso/EasyPatch.git easypatch
 cd easypatch
 ```
+
+To build the images yourself instead, see [Building the images from source](#building-the-images-from-source).
 
 ## 2. Prepare secrets and configuration
 
@@ -44,16 +51,16 @@ Edit `.env`:
 |---|---|---|
 | `EASYPATCH_DOMAIN` | yes | The public DNS name. Browsers and agents connect to `https://<EASYPATCH_DOMAIN>` |
 | `ACME_EMAIL` | yes | Contact address given to the certificate authority |
-| `EASYPATCH_VERSION` | no | Tag for the locally built images (default `1.0.0`) |
+| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.4.0`). Images you build yourself get this tag too |
 | `EASYPATCH_PUBLIC_URL` | no | Overrides the URL used in install commands, reset links and scripts. Defaults to `https://<EASYPATCH_DOMAIN>` |
 | `EASYPATCH_EDGE_SUBNET` | no | Subnet of the network between Caddy and the API (default `172.30.0.0/24`). Change it only if it collides with an existing network. The API trusts `X-Forwarded-For` only from this subnet |
 
 `.env` holds no passwords. `secrets/`, `data/`, `backups/` and `.env` are ignored by git.
 
-## 3. Build and start
+## 3. Start
 
 ```bash
-docker compose build
+docker compose pull
 docker compose up -d
 docker compose ps
 ```
@@ -101,15 +108,27 @@ Then:
 
 ## 6. Offer agent packages
 
-Build the agent MSI (see [agent-installation.md](agent-installation.md#building-from-source))
-and the Linux `.deb` and `.rpm` packages (see [linux-agent.md](linux-agent.md#building-from-source)),
-and copy them, each with its `.sig` release signature, to `data/agent-packages/`:
+Download the agent packages of the same release from
+[GitHub Releases](https://github.com/paulmataruso/EasyPatch/releases), check them, and copy them,
+each with its `.sig` release signature, to `data/agent-packages/`:
 
 ```bash
-cp EasyPatchAgent-1.4.0-x64.msi EasyPatchAgent-1.4.0-x64.msi.sig data/agent-packages/
-cp artifacts/linux/EasyPatchAgent-1.4.0-*.deb* artifacts/linux/EasyPatchAgent-1.4.0-*.rpm* data/agent-packages/
+mkdir -p /tmp/easypatch-v1.4.0
+gh release download v1.4.0 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.4.0 \
+  --pattern 'EasyPatchAgent-*' --pattern SHA256SUMS
+# or download the same files from the release page in a browser
+(cd /tmp/easypatch-v1.4.0 && sha256sum --check --ignore-missing SHA256SUMS)
+cp /tmp/easypatch-v1.4.0/EasyPatchAgent-1.4.0-* data/agent-packages/
 chmod 644 data/agent-packages/*
 ```
+
+Each release has MSIs (x64, ARM64) for Windows and `.deb` and `.rpm` packages (x64, ARM64) for
+Linux, each with a `.sig` file. Copy only the packages you need. The `.sig` files are what let
+agents update themselves; agents verify them against the release public key built into them, so
+`SHA256SUMS` is only a check of the download. The MSIs are not Authenticode-signed, so Windows
+SmartScreen may warn when an MSI is opened by hand. To build the packages yourself, see
+[agent-installation.md](agent-installation.md#building-from-source) and
+[linux-agent.md](linux-agent.md#building-from-source).
 
 * File names must match `EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm>` (version
   `MAJOR.MINOR.BUILD`, optionally with a fourth part). Other files starting with `EasyPatchAgent-`
@@ -138,14 +157,20 @@ Agent installation and enrollment are described in [agent-installation.md](agent
 
 ## Upgrading
 
-Back up first, then rebuild and restart:
+Back up first, then switch to the new release and restart:
 
 ```bash
 ./scripts/backup.sh
-git pull
-docker compose build
+git fetch --tags && git checkout v1.4.1      # the new release's docker-compose.yml and scripts
+$EDITOR .env                                 # EASYPATCH_VERSION=1.4.1
+docker compose pull
 docker compose up -d
 ```
+
+Then download the new release's agent packages into `data/agent-packages/` (see
+[Offer agent packages](#6-offer-agent-packages)). With the default *Automatic* agent updates
+policy, agents then update themselves. If you build the images yourself, run
+`docker compose build` instead of `docker compose pull`.
 
 `migrate` runs again on `up -d` and applies any new migrations before `api` and `worker` start.
 Agents keep working through the restart. Each agent stores its unsent reports in an outbox and
@@ -257,6 +282,19 @@ issues a certificate for the IP address. Anyone who can reach that address can r
 page, so do this only on a trusted network. Agents only connect to a server
 whose certificate chains to a root trusted by Windows. A lab agent therefore needs Caddy's root
 certificate in the computer's Trusted Root store. Do not use this mode in production.
+
+## Building the images from source
+
+`docker-compose.yml` names the release images but also says how to build them, so you can run
+your own build of any commit:
+
+```bash
+docker compose build        # tags the images with EASYPATCH_VERSION from .env
+docker compose up -d
+```
+
+Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.4.0-local`) so that
+`docker compose pull` never replaces your images with the release images.
 
 ## Building and testing from source
 

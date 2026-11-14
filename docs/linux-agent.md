@@ -293,6 +293,13 @@ sudo rm -rf /etc/easypatch /var/lib/easypatch
 
 ## Building from source
 
+The `.deb` and `.rpm` packages attached to
+[GitHub Releases](https://github.com/paulmataruso/EasyPatch/releases) are built and signed by the
+project's `release` workflow; most installations should use those (see
+[installation.md](installation.md#6-offer-agent-packages)). An agent you build with your own
+release key accepts only packages signed with that key, so it does not update to official
+releases (see [security.md](security.md#agent-release-signing)).
+
 ```sh
 scripts/build-linux-packages.sh --version 1.4.0 --arch all
 ```

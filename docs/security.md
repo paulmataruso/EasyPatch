@@ -233,14 +233,26 @@ Windows agents 1.2.0 and newer and all Linux agents can update themselves. The E
 what code runs on endpoints: it only relays agent packages and their signatures, and the agent
 checks them against a key that was built into it.
 
-**The release key.** An ECDSA P-256 key pair, created once on the machine that builds the agent
-with `dotnet run --project tools/EasyPatch.ReleaseSigner -- generate-key`. The private key
-(`~/.easypatch/easypatch-release-key.pem`, mode 600) stays on that machine and is never copied
-to the EasyPatch server or into source control. Set `EASYPATCH_RELEASE_KEY_PASSWORD` to store it
-encrypted (PKCS#8, AES-256-CBC, PBKDF2-SHA256 with 600,000 iterations). The public key
+**The release key.** An ECDSA P-256 key pair, created once with
+`dotnet run --project tools/EasyPatch.ReleaseSigner -- generate-key`. The private key is never
+copied to the EasyPatch server or into source control. The public key
 (`easypatch-release-key.pub.pem`) is built into the agent executable by the build scripts.
 An agent built without it reports that it cannot update itself and must be upgraded by
 installing a newer package.
+
+* **Official releases** (the packages attached to GitHub Releases) are built and signed by the
+  `release` GitHub Actions workflow when a version tag is pushed. The private key is stored as an
+  encrypted secret of the `release` environment, which only workflow runs for `v*` tags can
+  use. The job writes it to the runner's temporary directory, signs, verifies the signatures
+  against the committed public key [`keys/easypatch-release-key.pub.pem`](../keys/easypatch-release-key.pub.pem)
+  and deletes the file. Agents from official releases accept only packages signed with this key.
+* **Your own builds.** The build scripts read the key from `~/.easypatch/easypatch-release-key.pem`
+  (mode 600) or `EASYPATCH_RELEASE_KEY`, and the public key from
+  `~/.easypatch/easypatch-release-key.pub.pem` or `EASYPATCH_RELEASE_PUBLIC_KEY`. Set
+  `EASYPATCH_RELEASE_KEY_PASSWORD` to store the private key encrypted (PKCS#8, AES-256-CBC,
+  PBKDF2-SHA256 with 600,000 iterations). Agents built with your own key accept only packages
+  signed with your key, so they do not update to official releases, and official agents do not
+  update to your builds.
 
 **What is signed.** The build scripts write `<package>.sig` next to each MSI, `.deb` and `.rpm`
 package. It signs the file name, version, architecture, size and SHA-256 of the package, prefixed with a fixed domain

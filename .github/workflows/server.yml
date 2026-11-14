@@ -87,7 +87,7 @@ jobs:
           rm -f secrets/db_password
       - name: Check images contain no secrets or source-control metadata
         run: |
-          for image in easypatch-server:1.0.0 easypatch-proxy:1.0.0; do
+          for image in $(docker compose config --images | grep easypatch-); do
             if docker run --rm --entrypoint sh "$image" -c 'find / -xdev \( -name ".env" -o -name "db_password" -o -name "*.pfx" -o -name ".git" \) -not -path "/proc/*" 2>/dev/null' | grep .; then
               echo "unexpected file in $image" >&2
               exit 1
