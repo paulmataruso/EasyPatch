@@ -8,6 +8,10 @@ services:
     environment:
       EasyPatch__PublicUrl: https://${EASYPATCH_DOMAIN:-localhost}:${EASYPATCH_HTTPS_PORT:-8443}
 
+  worker:
+    environment:
+      EasyPatch__PublicUrl: https://${EASYPATCH_DOMAIN:-localhost}:${EASYPATCH_HTTPS_PORT:-8443} # links in notifications
+
   caddy:
     command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile.dev", "--adapter", "caddyfile"]
     environment:

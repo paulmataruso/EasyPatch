@@ -285,6 +285,49 @@ Release signatures are separate from Authenticode. They work without a code-sign
 certificate; when Authenticode signing is configured, it is applied first, and the release
 signature covers the signed file.
 
+## Notifications and webhooks
+
+Alert notifications are the only feature that makes the server open outbound connections
+(apart from ACME in Caddy). They are configured by super administrators only, under
+*Settings → Alert rules* and *Settings → Notifications*, and every change is audited
+(`notifications.*`, `alert_rule.*`, `alert.acknowledge`) without the secrets.
+
+* **Secrets at rest.** The SMTP password, webhook URLs (Slack and Teams URLs contain their own
+  access token) and webhook signing keys are encrypted with ASP.NET Data Protection, with keys
+  on the `dpkeys` volume. The API never returns them. The SMTP password is write-only, a webhook
+  URL is shown only as its host name, and a signing key is shown once, when it is created or
+  rotated. The keys on `dpkeys` are not encrypted themselves: protect the volume and its backups
+  like the database. If the keys are lost, enter the secrets again.
+* **Only the worker connects out.** The `worker` container is the only one on the `egress`
+  network. It mounts `dpkeys` read-only. The API and PostgreSQL stay without egress.
+* **Webhook egress guard (SSRF).**
+  * A webhook URL must be `https://`, without user name or password, at most 2048 characters.
+  * Requests do not follow redirects (a 3xx counts as a failure), use no proxy and send no cookies.
+  * The handler resolves the host name itself and checks **every address it connects to**, so a
+    DNS answer that changes between validation and connection (DNS rebinding) does not get
+    through.
+  * Always refused: loopback, link-local (including cloud metadata at 169.254.169.254),
+    multicast, reserved and documentation ranges, unspecified addresses, and the server's own
+    interface networks. IPv4-mapped, NAT64 and 6to4 IPv6 addresses are checked as the IPv4
+    address they contain.
+  * Private ranges (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) are refused unless a
+    super administrator turns on *Allow webhooks to private network addresses* (for an
+    on-premises PSA or chat server).
+* **Logs and errors.** The webhook HTTP client has request logging turned off, so URLs do not
+  reach the logs. Delivery errors are reduced to a message without URLs, tokens or passwords
+  (for example `hooks.example.com answered HTTP 403`), which is what the delivery log and the
+  worker log show.
+* **Signed generic webhooks.** Generic webhooks carry
+  `X-EasyPatch-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(key, "<t>.<body>")>`. Receivers
+  should compare the HMAC in constant time and reject old timestamps (for example older than
+  five minutes) to stop replays.
+* **What a notification contains.** Host names, organization names, alert titles and details,
+  and links to the console. No credentials or update payloads. Email and chat services see this
+  content; choose channels accordingly.
+* **Email transport.** STARTTLS or TLS-on-connect with the system's certificate validation
+  (which cannot be turned off). *None* sends the password and messages unencrypted and is
+  meant only for a relay on a trusted network.
+
 ## Threat model (STRIDE summary)
 
 | # | Threat | Mitigation |
@@ -299,6 +342,7 @@ signature covers the signed file.
 | I1 | Tenant data leaks between organizations | One tenant-scope service, organization-filtered queries and integration tests for isolation |
 | I2 | Secrets appear in logs | The server and agent never log tokens or keys. The MSI token property is hidden and registry values are not echoed to MSI logs (see above for limits). Structured logs leave out request bodies. |
 | I3 | Database exposure | No published port, internal Docker network, Compose secret for the password |
+| I4 | A notification channel is used to reach internal services (SSRF) or leak secrets | Super administrator only; https only; no redirects or proxy; every connected address is checked against blocked ranges (private ranges only when explicitly allowed); secrets encrypted at rest and never returned; sanitized errors. See [Notifications and webhooks](#notifications-and-webhooks). |
 | D1 | Check-in floods | Per-credential and per-IP rate limits, request size limits, jitter |
 | D2 | Enrollment queue spam | A deployment code is required, pending requests are capped and expire, per-IP rate limit |
 | E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability. Windows updates come from the sources Windows is configured for, and Linux packages from the repositories the computer is configured for. Agent updates install only packages whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |

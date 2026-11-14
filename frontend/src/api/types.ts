@@ -1280,3 +1280,193 @@ export interface ServerInfoDto {
   publicUrl: string;
   serverTime: Instant;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Alerts and notifications (backend/API/Contracts/NotificationDtos.cs)
+// ---------------------------------------------------------------------------------------------
+
+export const ALERT_RULE_TYPES = [
+  'EndpointOffline',
+  'InstallFailed',
+  'SecurityUpdateMissing',
+  'ScanStale',
+  'RestartPending',
+  'EnrollmentPending',
+  'OsUnsupported',
+] as const;
+export type AlertRuleType = (typeof ALERT_RULE_TYPES)[number];
+
+export const ALERT_RULE_TYPE_LABELS: Record<AlertRuleType, string> = {
+  EndpointOffline: 'Endpoint offline',
+  InstallFailed: 'Update installation failed',
+  SecurityUpdateMissing: 'Security update missing',
+  ScanStale: 'Scan stale',
+  RestartPending: 'Restart pending',
+  EnrollmentPending: 'Enrollment waiting for approval',
+  OsUnsupported: 'Operating system unsupported',
+};
+
+export const ALERT_SEVERITIES = ['Critical', 'Warning', 'Info'] as const;
+export type AlertSeverity = (typeof ALERT_SEVERITIES)[number];
+
+export const ALERT_STATUSES = ['Open', 'Acknowledged', 'Resolved'] as const;
+export type AlertStatus = (typeof ALERT_STATUSES)[number];
+
+/** Values of the alerts list "status" filter. */
+export const ALERT_STATUS_FILTERS = ['unresolved', 'open', 'acknowledged', 'resolved', 'all'] as const;
+export type AlertStatusFilter = (typeof ALERT_STATUS_FILTERS)[number];
+
+export type NotificationChannelType = 'Email' | 'Webhook';
+export const WEBHOOK_FORMATS = ['Generic', 'Slack', 'Teams'] as const;
+export type WebhookFormat = (typeof WEBHOOK_FORMATS)[number];
+export const SMTP_SECURITY = ['StartTls', 'SslOnConnect', 'None'] as const;
+export type SmtpSecurity = (typeof SMTP_SECURITY)[number];
+export type NotificationKind = 'AlertsOpened' | 'AlertsResolved' | 'AlertsReminder' | 'Test';
+export const DELIVERY_STATUSES = ['Pending', 'Sent', 'Failed'] as const;
+export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
+
+export interface AlertDto {
+  id: Guid;
+  ruleId: Guid | null;
+  ruleName: string | null;
+  ruleType: AlertRuleType;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  title: string;
+  details: string | null;
+  organizationId: Guid;
+  organizationName: string;
+  endpointId: Guid | null;
+  hostname: string | null;
+  openedAt: Instant;
+  lastSeenAt: Instant;
+  resolvedAt: Instant | null;
+  acknowledgedAt: Instant | null;
+  acknowledgedBy: string | null;
+}
+
+/** Unresolved alerts the user can see; `open` excludes acknowledged alerts. */
+export interface AlertSummaryDto {
+  open: number;
+  acknowledged: number;
+  critical: number;
+  warning: number;
+  info: number;
+}
+
+export interface AcknowledgeAlertsResult {
+  acknowledged: number;
+}
+
+export interface NotificationSettingsDto {
+  smtpHost: string | null;
+  smtpPort: number;
+  smtpSecurity: SmtpSecurity;
+  smtpUsername: string | null;
+  smtpPasswordConfigured: boolean;
+  fromAddress: string | null;
+  fromName: string | null;
+  allowPrivateNetworkWebhooks: boolean;
+  updatedAt: Instant;
+}
+
+/** `smtpPassword`: null keeps the stored password, "" removes it. */
+export interface NotificationSettingsRequest {
+  smtpHost: string | null;
+  smtpPort: number;
+  smtpSecurity: SmtpSecurity;
+  smtpUsername: string | null;
+  smtpPassword: string | null;
+  fromAddress: string | null;
+  fromName: string | null;
+  allowPrivateNetworkWebhooks: boolean;
+}
+
+export interface DeliverySummaryDto {
+  status: DeliveryStatus;
+  createdAt: Instant;
+  lastError: string | null;
+}
+
+export interface NotificationChannelDto {
+  id: Guid;
+  name: string;
+  type: NotificationChannelType;
+  enabled: boolean;
+  emailRecipients: string[];
+  webhookFormat: WebhookFormat | null;
+  webhookHost: string | null;
+  hasSigningSecret: boolean;
+  createdAt: Instant;
+  updatedAt: Instant;
+  lastDelivery: DeliverySummaryDto | null;
+}
+
+/** `webhookUrl`: required when creating a webhook channel; null on update keeps the stored URL. */
+export interface NotificationChannelRequest {
+  name: string;
+  type: NotificationChannelType;
+  enabled: boolean;
+  emailRecipients: string[] | null;
+  webhookFormat: WebhookFormat | null;
+  webhookUrl: string | null;
+}
+
+/** `signingSecret` (generic webhooks) is returned only when it is created or rotated. */
+export interface NotificationChannelSavedDto {
+  channel: NotificationChannelDto;
+  signingSecret: string | null;
+}
+
+export interface NotificationDeliveryDto {
+  id: Guid;
+  channelId: Guid;
+  channelName: string;
+  kind: NotificationKind;
+  subject: string;
+  status: DeliveryStatus;
+  attempts: number;
+  lastError: string | null;
+  createdAt: Instant;
+  nextAttemptAt: Instant;
+  sentAt: Instant | null;
+}
+
+export interface AlertRuleDto {
+  id: Guid;
+  name: string;
+  type: AlertRuleType;
+  enabled: boolean;
+  severity: AlertSeverity;
+  threshold: number | null;
+  thresholdUnit: string | null;
+  organizationId: Guid | null;
+  tagId: Guid | null;
+  channelIds: Guid[];
+  notifyOnResolve: boolean;
+  renotifyHours: number;
+  unresolvedAlerts: number;
+  updatedAt: Instant;
+}
+
+export interface AlertRuleRequest {
+  name: string;
+  type: AlertRuleType;
+  enabled: boolean;
+  severity: AlertSeverity;
+  threshold: number | null;
+  organizationId: Guid | null;
+  tagId: Guid | null;
+  channelIds: Guid[] | null;
+  notifyOnResolve: boolean;
+  renotifyHours: number;
+}
+
+export interface AlertRuleTypeDto {
+  type: AlertRuleType;
+  thresholdUnit: string | null;
+  thresholdMin: number | null;
+  thresholdMax: number | null;
+  thresholdDefault: number | null;
+  supportsTag: boolean;
+}

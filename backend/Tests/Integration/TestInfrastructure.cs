@@ -13,6 +13,7 @@ using EasyPatch.Contracts.Security;
 using EasyPatch.Core.Entities;
 using EasyPatch.Infrastructure.Data;
 using EasyPatch.Infrastructure.Maintenance;
+using EasyPatch.Infrastructure.Notifications;
 using EasyPatch.Infrastructure.Security;
 using EasyPatch.Infrastructure.Services;
 using Microsoft.AspNetCore.Hosting;
@@ -88,6 +89,9 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
     public string PackagesPath { get; } = Directory.CreateTempSubdirectory("easypatch-packages-").FullName;
     public const string PublicUrl = "https://easypatch.test";
 
+    /// <summary>Records email and webhook sends instead of performing them.</summary>
+    public CapturingTransport Transport { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -119,6 +123,9 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
             services.AddScoped<AgentUpdateTask>();
             services.AddScoped<ComplianceSnapshotTask>();
             services.AddScoped<RetentionTask>();
+            services.AddScoped<AlertEvaluationTask>();
+            services.AddScoped<NotificationDeliveryTask>();
+            services.AddSingleton<INotificationTransport>(Transport);
         });
     }
 
@@ -466,5 +473,40 @@ public abstract class IntegrationTest(PostgresFixture postgres) : IAsyncLifetime
         agent.CredentialId = enrolled.CredentialId;
         agent.EndpointId = enrolled.EndpointId!.Value;
         return agent;
+    }
+}
+
+/// <summary>Fake notification transport: records what would have been sent; can be told to fail.</summary>
+public sealed class CapturingTransport : INotificationTransport
+{
+    public sealed record Email(IReadOnlyList<string> Recipients, string Subject, string Text, string Html, string? Password, NotificationSettingsRow Smtp);
+
+    public sealed record Webhook(Uri Url, string Body, IReadOnlyDictionary<string, string> Headers, bool AllowPrivate);
+
+    public System.Collections.Concurrent.ConcurrentQueue<Email> Emails { get; } = new();
+    public System.Collections.Concurrent.ConcurrentQueue<Webhook> Webhooks { get; } = new();
+    public string? FailWith { get; set; }
+
+    public Task SendEmailAsync(NotificationSettingsRow smtp, string? password, IReadOnlyList<string> recipients, string subject, string text, string html,
+        CancellationToken ct)
+    {
+        if (FailWith is not null)
+        {
+            throw new NotificationException(FailWith);
+        }
+
+        Emails.Enqueue(new Email(recipients, subject, text, html, password, smtp));
+        return Task.CompletedTask;
+    }
+
+    public Task PostWebhookAsync(Uri url, string body, IReadOnlyDictionary<string, string> headers, bool allowPrivateNetworks, CancellationToken ct)
+    {
+        if (FailWith is not null)
+        {
+            throw new NotificationException(FailWith);
+        }
+
+        Webhooks.Enqueue(new Webhook(url, body, headers, allowPrivateNetworks));
+        return Task.CompletedTask;
     }
 }

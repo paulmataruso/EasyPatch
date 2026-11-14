@@ -1,5 +1,6 @@
 using EasyPatch.Infrastructure.Data;
 using EasyPatch.Infrastructure.Maintenance;
+using EasyPatch.Infrastructure.Notifications;
 using EasyPatch.Infrastructure.Security;
 using EasyPatch.Infrastructure.Services;
 using Microsoft.AspNetCore.DataProtection;
@@ -41,18 +42,37 @@ public static class DependencyInjection
         services.AddSingleton<NonceStore>();
         services.AddSingleton<PresenceTracker>();
         services.AddSingleton<AgentPackageService>();
+
+        services.AddScoped<NotificationSecrets>();
+        services.AddScoped<AlertEngine>();
+        services.AddScoped<NotificationDispatcher>();
+        services.AddSingleton<INotificationTransport, NotificationTransport>();
+        var version = typeof(DependencyInjection).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+        services.AddHttpClient(NotificationTransport.WebhookClient, c =>
+            {
+                c.Timeout = TimeSpan.FromSeconds(30);
+                c.DefaultRequestHeaders.UserAgent.ParseAdd($"EasyPatch/{version}");
+            })
+            .ConfigurePrimaryHttpMessageHandler(WebhookHttp.CreateHandler)
+            .RemoveAllLoggers(); // request logging would write webhook URLs (which contain secrets) to the log
         return services;
     }
 
-    /// <summary>Data protection keys encrypt TOTP secrets at rest. They are stored on a volume separate from the
-    /// database so that a database dump alone does not expose MFA secrets.</summary>
-    public static IServiceCollection AddEasyPatchDataProtection(this IServiceCollection services, IConfiguration configuration)
+    /// <summary>Data protection keys encrypt TOTP secrets and notification secrets (SMTP password, webhook URLs) at rest.
+    /// They are stored on a volume separate from the database so that a database dump alone does not expose them.
+    /// The worker reads the same key ring (<paramref name="generateKeys"/> false: only the API creates keys).</summary>
+    public static IServiceCollection AddEasyPatchDataProtection(this IServiceCollection services, IConfiguration configuration, bool generateKeys = true)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         var keysPath = configuration["EasyPatch:DataProtectionKeysPath"] ?? "/app/keys";
-        services.AddDataProtection()
+        var builder = services.AddDataProtection()
             .SetApplicationName("EasyPatch")
             .PersistKeysToFileSystem(new DirectoryInfo(keysPath));
+        if (!generateKeys)
+        {
+            builder.DisableAutomaticKeyGeneration();
+        }
+
         return services;
     }
 
@@ -69,6 +89,8 @@ public static class DependencyInjection
         services.AddScoped<ComplianceSnapshotTask>();
         services.AddScoped<RetentionTask>();
         services.AddScoped<DeferralExpiryTask>();
+        services.AddScoped<AlertEvaluationTask>();
+        services.AddScoped<NotificationDeliveryTask>();
         services.AddSingleton<MaintenanceHeartbeat>();
         services.AddHostedService<MaintenanceLoop<JobMaintenanceTask>>();
         services.AddHostedService<MaintenanceLoop<PresenceMonitorTask>>();
@@ -78,6 +100,8 @@ public static class DependencyInjection
         services.AddHostedService<MaintenanceLoop<ComplianceSnapshotTask>>();
         services.AddHostedService<MaintenanceLoop<RetentionTask>>();
         services.AddHostedService<MaintenanceLoop<DeferralExpiryTask>>();
+        services.AddHostedService<MaintenanceLoop<AlertEvaluationTask>>();
+        services.AddHostedService<MaintenanceLoop<NotificationDeliveryTask>>();
         return services;
     }
 }

@@ -62,6 +62,12 @@ on one computer, a site, or a whole customer, and tracks compliance across every
   records who requested it, its delivery, start and completion times, and per-update results.
 * **Verified results.** An update counts as installed only after a Windows Update scan confirms
   it. Updates waiting for a restart are tracked as such.
+* **Alerts and notifications.** Built-in rules (endpoint offline, failed installs, security
+  updates missing too long, stale scans, pending restarts, enrollment requests, unsupported OS)
+  open alerts that resolve by themselves when the condition clears. Notifications go to email,
+  Slack, Microsoft Teams or a signed JSON webhook for PSA and ticketing systems, grouped per
+  channel and retried. Webhooks are restricted to public HTTPS addresses unless private ones
+  are allowed. See [docs/alerts.md](docs/alerts.md).
 * **Compliance reporting**: per-endpoint status, organization trends from daily snapshots, OS
   support status (including Windows 10 ESU), and CSV exports. See
   [docs/compliance.md](docs/compliance.md).
@@ -142,6 +148,7 @@ The full guides are [docs/installation.md](docs/installation.md),
 | [linux-agent.md](docs/linux-agent.md) | Linux agent: supported distributions, install script and token enrollment, how packages are scanned and installed, self-update, building the packages |
 | [architecture.md](docs/architecture.md) | Components, data model, update state model, policy, job system, agent lifecycle, deployment design |
 | [compliance.md](docs/compliance.md) | Compliance statuses and rules, required updates, OS support status, reports |
+| [alerts.md](docs/alerts.md) | Alert rules, notification channels (email, Slack, Teams, signed webhooks), delivery and troubleshooting |
 | [security.md](docs/security.md) | Security model, threat model, hardening checklist, known limitations |
 | [api.md](docs/api.md) | REST API (admin and agent protocol). The live OpenAPI document is served at `/api/docs` to signed-in administrators |
 | [troubleshooting.md](docs/troubleshooting.md) | Diagnosing server, sign-in, agent and job problems |

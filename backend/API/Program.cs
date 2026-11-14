@@ -125,6 +125,7 @@ app.MapUserEndpoints();
 app.MapOrganizationEndpoints();
 app.MapEndpointEndpoints();
 app.MapTagEndpoints();
+app.MapNotificationEndpoints();
 app.MapJobEndpoints();
 app.MapFleetUpdateEndpoints();
 app.MapAgentManagementEndpoints();

@@ -34,7 +34,7 @@ administrator configured in policy.
 |---|---|---|
 | `caddy` | `easypatch-proxy` (Caddy plus the built SPA) | Terminates TLS with automatic ACME certificates, enforces TLS 1.2+, adds security headers, serves the React SPA and reverse-proxies `/api/*` and `/downloads/*` to the API. |
 | `api` | `easypatch-server` | ASP.NET Core 10 Web API. Handles admin auth, the admin REST API, the agent protocol and OpenAPI. |
-| `worker` | `easypatch-server` (different entrypoint) | Background processing: job expiry and lease recovery, online/offline detection, scheduled installs, the end of rollout delays, scheduled restarts, compliance snapshots, retention. |
+| `worker` | `easypatch-server` (different entrypoint) | Background processing: job expiry and lease recovery, online/offline detection, scheduled installs, the end of rollout delays, scheduled restarts, compliance snapshots, alert evaluation and notification delivery (email, webhooks), retention. The only container with outbound access (`egress` network), used for SMTP and webhooks. |
 | `postgres` | `postgres:18.6-alpine3.24` | System of record, including the durable job queue. Attached only to the internal `data` network. |
 | `migrate` | `easypatch-server` | One-shot container that applies EF Core migrations before `api` and `worker` start. |
 
@@ -480,11 +480,15 @@ update policies are present, because those can take precedence over the registry
 ## 6. Docker deployment design
 
 * **Networks.** `edge` connects Caddy and the API. `data` is internal (no egress) and connects
-  the API, worker, migrate and PostgreSQL. PostgreSQL publishes no ports.
+  the API, worker, migrate and PostgreSQL. PostgreSQL publishes no ports. `egress` gives the
+  worker outbound connections for notifications (SMTP and webhooks); nothing is published on it.
+  The diagram above omits it.
 * **Volumes.**
   * `pgdata`: the database.
   * `caddy_data` and `caddy_config`: certificates.
-  * `dpkeys`: ASP.NET Data Protection keys, which protect MFA secrets.
+  * `dpkeys`: ASP.NET Data Protection keys, which protect MFA secrets and notification secrets
+    (SMTP password, webhook URLs, webhook signing keys). The API creates and rotates the keys;
+    the worker mounts the volume read-only to decrypt notification secrets.
   * `./data/agent-packages`, mounted read-only: agent MSIs offered for download.
 * **Secrets.** The database password is a Compose secret file (`secrets/db_password`, created
   by `scripts/init-secrets.sh`). No secrets live in images or in source control.
@@ -501,3 +505,26 @@ update policies are present, because those can take precedence over the registry
 * **Logs.** JSON to stdout, with a correlation ID on every request.
 * **Development.** `docker-compose.dev.yml` switches Caddy to its internal CA
   (`local_certs`) and publishes HTTPS only on `127.0.0.1:8443`.
+
+## 7. Alerts and notifications
+
+The worker evaluates alert rules every two minutes (task `alerts`) and sends queued
+notifications every 30 seconds (task `notifications`). Both run under PostgreSQL advisory locks
+like the other worker tasks.
+
+* **Tables.** `alert_rules` (seven default rules, seeded by the migration, with no channels);
+  `alerts` (a partial unique index on `dedupe_key` for unresolved alerts: one open alert per rule
+  and endpoint, or per rule and organization for enrollment requests); `notification_channels`;
+  `notification_settings` (one row: SMTP); `notification_deliveries` (the outbox).
+* **Lifecycle.** An alert opens when a subject matches an enabled rule and resolves after two
+  consecutive evaluations without a match. A subject that matches again within an hour of
+  resolving reopens the same alert without a new notification. Offline endpoints raise only the
+  offline alert. Alerts of disabled or deleted rules, archived organizations and removed endpoints
+  close without notifications.
+* **Outbox.** Each evaluation writes at most one delivery per channel and kind (opened, resolved,
+  reminder), listing up to 25 alerts. The dispatcher retries failures after 1, 2, 4… minutes (at
+  most an hour apart) and gives up after 24 hours (tests: after 3 attempts).
+* **Webhook egress guard.** Webhook requests go through a handler that resolves the host name,
+  checks every address and connects only to allowed ones (see [security.md](security.md#notifications-and-webhooks)).
+
+See [alerts.md](alerts.md) for the rules and the channel formats.

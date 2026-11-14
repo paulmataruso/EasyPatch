@@ -38,6 +38,11 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
     public DbSet<UpdateHistoryEntry> UpdateHistoryEntries => Set<UpdateHistoryEntry>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<JobUpdate> JobUpdates => Set<JobUpdate>();
+    public DbSet<NotificationSettingsRow> NotificationSettings => Set<NotificationSettingsRow>();
+    public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
+    public DbSet<AlertRule> AlertRules => Set<AlertRule>();
+    public DbSet<Alert> Alerts => Set<Alert>();
+    public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
 
     /// <summary>SQL list of statuses covered by the duplicate-job guard (used in a partial unique index).</summary>
     internal static readonly string DedupeStatusSql =
@@ -62,6 +67,14 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
         configurationBuilder.Properties<JobTrigger>().HaveConversion<string>().HaveMaxLength(32);
         configurationBuilder.Properties<JobItemStatus>().HaveConversion<string>().HaveMaxLength(32);
         configurationBuilder.Properties<ScanTrigger>().HaveConversion<string>().HaveMaxLength(32);
+        configurationBuilder.Properties<AlertRuleType>().HaveConversion<string>().HaveMaxLength(32);
+        configurationBuilder.Properties<AlertSeverity>().HaveConversion<string>().HaveMaxLength(32);
+        configurationBuilder.Properties<AlertStatus>().HaveConversion<string>().HaveMaxLength(32);
+        configurationBuilder.Properties<NotificationChannelType>().HaveConversion<string>().HaveMaxLength(32);
+        configurationBuilder.Properties<WebhookFormat>().HaveConversion<string>().HaveMaxLength(32);
+        configurationBuilder.Properties<SmtpSecurity>().HaveConversion<string>().HaveMaxLength(32);
+        configurationBuilder.Properties<NotificationKind>().HaveConversion<string>().HaveMaxLength(32);
+        configurationBuilder.Properties<DeliveryStatus>().HaveConversion<string>().HaveMaxLength(32);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -71,6 +84,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
         ConfigureEndpoints(modelBuilder);
         ConfigureUpdates(modelBuilder);
         ConfigureJobs(modelBuilder);
+        ConfigureNotifications(modelBuilder);
         Seed(modelBuilder);
         ApplySnakeCaseNames(modelBuilder);
     }
@@ -427,11 +441,69 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
                 v => v == null ? null : JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(v, ContractJson.Options), ContractJson.Options)));
     }
 
+    private static void ConfigureNotifications(ModelBuilder b)
+    {
+        b.Entity<NotificationSettingsRow>(e =>
+        {
+            e.ToTable("notification_settings");
+            e.Property(x => x.Id).ValueGeneratedNever();
+            e.Property(x => x.SmtpHost).HasMaxLength(253);
+            e.Property(x => x.SmtpUsername).HasMaxLength(256);
+            e.Property(x => x.FromAddress).HasMaxLength(254);
+            e.Property(x => x.FromName).HasMaxLength(100);
+        });
+        b.Entity<NotificationChannel>(e =>
+        {
+            e.ToTable("notification_channels");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.WebhookHost).HasMaxLength(253);
+            e.Property(x => x.EmailRecipients).HasDefaultValueSql("'{}'::text[]");
+        });
+        b.Entity<AlertRule>(e =>
+        {
+            e.ToTable("alert_rules");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.ChannelIds).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<Alert>(e =>
+        {
+            e.ToTable("alerts");
+            e.Property(x => x.DedupeKey).HasMaxLength(128);
+            e.Property(x => x.Title).HasMaxLength(300);
+            e.Property(x => x.Details).HasMaxLength(2000);
+            e.Property(x => x.AcknowledgedBy).HasMaxLength(64);
+            // At most one unresolved alert per subject.
+            e.HasIndex(x => x.DedupeKey).IsUnique().HasFilter("status <> 'Resolved'").HasDatabaseName("ix_alerts_dedupe_key_unresolved");
+            e.HasIndex(x => new { x.Status, x.OrganizationId });
+            e.HasIndex(x => x.EndpointId);
+            e.HasIndex(x => x.ResolvedAt);
+            e.HasOne<AlertRule>().WithMany().HasForeignKey(x => x.RuleId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Endpoint>().WithMany().HasForeignKey(x => x.EndpointId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<NotificationDelivery>(e =>
+        {
+            e.ToTable("notification_deliveries");
+            e.Property(x => x.Subject).HasMaxLength(300);
+            e.Property(x => x.Payload).HasColumnType("jsonb");
+            e.Property(x => x.LastError).HasMaxLength(500);
+            e.Property(x => x.AlertIds).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasIndex(x => new { x.Status, x.NextAttemptAt });
+            e.HasIndex(x => new { x.ChannelId, x.CreatedAt });
+            e.HasOne<NotificationChannel>().WithMany().HasForeignKey(x => x.ChannelId).OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
     private static void Seed(ModelBuilder b)
     {
         var seedTime = new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero);
         b.Entity<ServerSettingsRow>().HasData(new ServerSettingsRow { Id = 1, Data = "{}", UpdatedAt = seedTime });
         b.Entity<OsLifecycleEntry>().HasData(LifecycleEvaluator.SeedEntries());
+        b.Entity<NotificationSettingsRow>().HasData(new NotificationSettingsRow { Id = 1, UpdatedAt = seedTime });
+        // Default alert rules are inserted by the AlertsAndNotifications migration (SQL): HasData cannot seed list columns
+        // deterministically.
     }
 
     private static void ApplySnakeCaseNames(ModelBuilder modelBuilder)

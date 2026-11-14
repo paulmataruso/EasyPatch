@@ -4,7 +4,8 @@ using EasyPatch.Infrastructure.Maintenance;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 // Background worker: job lease recovery and expiry, presence (online/offline), maintenance-window scheduling,
-// compliance snapshots and retention. Each task runs under a PostgreSQL advisory lock.
+// rollout delays, alerts and notifications, compliance snapshots and retention. Each task runs under a PostgreSQL
+// advisory lock.
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(k => k.AddServerHeader = false);
 if (!builder.Environment.IsDevelopment() && builder.Configuration["Logging:Format"] != "text")
@@ -14,6 +15,7 @@ if (!builder.Environment.IsDevelopment() && builder.Configuration["Logging:Forma
 }
 
 builder.Services.AddEasyPatchCore(builder.Configuration);
+builder.Services.AddEasyPatchDataProtection(builder.Configuration, generateKeys: false); // decrypts notification secrets
 builder.Services.AddEasyPatchMaintenance();
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<EasyPatchDbContext>("database")

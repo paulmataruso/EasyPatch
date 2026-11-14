@@ -12,7 +12,7 @@ installation, first sign-in, agent packages, upgrades, backup and restore.
 | Host | 64-bit Linux with Docker Engine and the Docker Compose plugin. The development override (`docker-compose.dev.yml`) uses the `!override` tag, which needs Compose 2.24.4 or later |
 | DNS | A public DNS name (A or AAAA record) pointing at the host, for example `patch.example.com` |
 | Inbound | TCP 443 from administrators and from every managed endpoint. TCP 80 from the internet, for ACME certificate validation and the HTTP to HTTPS redirect |
-| Outbound | The ACME certificate authority (Caddy's defaults). Building the images also needs access to `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` |
+| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Building the images also needs access to `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` |
 
 Nothing else is published. PostgreSQL is attached only to an internal Docker network and has no
 host port.
@@ -94,6 +94,9 @@ Then:
 * create other users under **Settings → Users** (roles: SuperAdmin, Admin, ReadOnly, optionally
   restricted to specific organizations);
 * review **Settings → Global policy** and **Settings → Server settings**;
+* to receive alerts by email or chat, set up the SMTP server and channels under
+  **Settings → Notifications**, then select the channels in **Settings → Alert rules** (see
+  [alerts.md](alerts.md)). Without channels, alerts are only shown on the **Alerts** page;
 * create an organization and its sites under **Organizations**.
 
 ## 6. Offer agent packages
@@ -148,6 +151,10 @@ docker compose up -d
 Agents keep working through the restart. Each agent stores its unsent reports in an outbox and
 retries them, and jobs stay queued in the database.
 
+Use the `docker-compose.yml` of the new version: it may add networks or volumes. For example,
+the release with alerts gives the `worker` the `dpkeys` volume (read-only) and the outbound
+`egress` network. The upgrade adds seven default alert rules without notification channels.
+
 ## Backup and restore
 
 ```bash
@@ -159,13 +166,13 @@ This writes `backups/<UTC timestamp>/`, created with umask 077, containing:
 | File | Contents |
 |---|---|
 | `easypatch.dump` | `pg_dump` custom-format database dump |
-| `dpkeys.tar` | ASP.NET Data Protection keys. **Without these, MFA secrets in the dump cannot be decrypted and every user must enroll MFA again** |
+| `dpkeys.tar` | ASP.NET Data Protection keys. **Without these, MFA secrets and notification secrets (SMTP password, webhook URLs and signing keys) in the dump cannot be decrypted: every user must enroll MFA again and the secrets must be entered again** |
 | `agent-packages.tar` | The agent MSIs |
 | `SHA256SUMS` | Checksums of the three files |
 
 The stack must be running (the script uses the `postgres` and `api` containers). Copy backups off
 the host and protect them. The dump contains hashed credentials and agent public keys, and
-`dpkeys.tar` decrypts MFA secrets. Keep them in separate locations if you can.
+`dpkeys.tar` decrypts MFA secrets and notification secrets. Keep them in separate locations if you can.
 
 To restore:
 

@@ -112,9 +112,12 @@ services:
     secrets:
       - db_password
     volumes:
+      # Read-only: the worker decrypts notification secrets with the keys the API creates.
+      - dpkeys:/app/keys:ro
       - ./data/agent-packages:/app/agent-packages:ro
     networks:
       - data
+      - egress # outbound only (SMTP, webhooks); nothing is published
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -164,6 +167,7 @@ networks:
         - subnet: ${EASYPATCH_EDGE_SUBNET:-172.30.0.0/24}
   data:
     internal: true
+  egress: {}
 
 volumes:
   pgdata:

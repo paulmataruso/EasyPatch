@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   Activity,
+  Bell,
   Building2,
   ClipboardList,
   FileBarChart,
@@ -20,7 +21,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useApi } from '../api/hooks';
-import type { DashboardSummaryDto } from '../api/types';
+import type { AlertSummaryDto, DashboardSummaryDto } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { applyTheme, getStoredTheme, storeTheme, type Theme } from '../lib/theme';
 import { humanize } from '../lib/format';
@@ -32,6 +33,8 @@ interface NavItem {
   icon: ReactNode;
   end?: boolean;
   badge?: number;
+  badgeTitle?: string;
+  badgeTone?: 'warn' | 'danger';
 }
 
 export function useTheme(): [Theme, () => void] {
@@ -92,6 +95,7 @@ export function AppLayout() {
   const client = useQueryClient();
   const [mobileOpen, setMobileOpen] = useState(false);
   const summary = useApi<DashboardSummaryDto>('/dashboard/summary', undefined, { refetchInterval: 60_000, staleTime: 30_000 });
+  const alerts = useApi<AlertSummaryDto>('/alerts/summary', undefined, { refetchInterval: 60_000, staleTime: 30_000 });
 
   useEffect(() => setMobileOpen(false), [location.pathname]);
 
@@ -101,12 +105,21 @@ export function AppLayout() {
     { to: '/endpoints', label: 'Endpoints', icon: <Monitor className="size-4" aria-hidden /> },
     { to: '/updates', label: 'Update Management', icon: <PackageCheck className="size-4" aria-hidden /> },
     { to: '/jobs', label: 'Jobs', icon: <ListChecks className="size-4" aria-hidden /> },
+    {
+      to: '/alerts',
+      label: 'Alerts',
+      icon: <Bell className="size-4" aria-hidden />,
+      badge: alerts.data?.open ?? 0,
+      badgeTitle: `${alerts.data?.open ?? 0} open alert(s)`,
+      badgeTone: (alerts.data?.critical ?? 0) > 0 ? 'danger' : 'warn',
+    },
     { to: '/reports', label: 'Reports', icon: <FileBarChart className="size-4" aria-hidden /> },
     {
       to: '/agents',
       label: 'Agent Management',
       icon: <Activity className="size-4" aria-hidden />,
       badge: summary.data?.pendingApprovals ?? 0,
+      badgeTitle: `${summary.data?.pendingApprovals ?? 0} pending approval(s)`,
     },
     { to: '/settings', label: 'Settings', icon: <Settings className="size-4" aria-hidden /> },
   ];
@@ -146,7 +159,10 @@ export function AppLayout() {
               {item.icon}
               <span className="flex-1">{item.label}</span>
               {item.badge ? (
-                <span className="rounded-full bg-warn px-1.5 text-xs font-semibold text-[#1f1300]" title={`${item.badge} pending approval(s)`}>
+                <span
+                  className={cx('rounded-full px-1.5 text-xs font-semibold', item.badgeTone === 'danger' ? 'bg-danger text-white' : 'bg-warn text-[#1f1300]')}
+                  title={item.badgeTitle}
+                >
                   {item.badge}
                 </span>
               ) : null}

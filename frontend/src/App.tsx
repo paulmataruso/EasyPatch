@@ -19,6 +19,7 @@ import { EndpointDetailPage } from './pages/endpoints/EndpointDetailPage';
 import { UpdatesPage } from './pages/updates/UpdatesPage';
 import { UpdateDetailPage } from './pages/updates/UpdateDetailPage';
 import { JobsPage } from './pages/jobs/JobsPage';
+import { AlertsPage } from './pages/alerts/AlertsPage';
 import { JobDetailPage } from './pages/jobs/JobDetailPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
 import { AgentManagementPage } from './pages/agents/AgentManagementPage';
@@ -96,6 +97,7 @@ export function App() {
         <Route path="updates/:guid" element={<UpdateDetailPage />} />
         <Route path="jobs" element={<JobsPage />} />
         <Route path="jobs/:id" element={<JobDetailPage />} />
+        <Route path="alerts" element={<AlertsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="agents" element={<AgentManagementPage />} />
         <Route path="settings" element={<SettingsPage />} />

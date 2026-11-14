@@ -1,7 +1,8 @@
 import { Link } from 'react-router';
 import { AlertTriangle, CheckCircle2, Clock, Monitor, Power, ShieldAlert, UserCheck, Wifi, WifiOff } from 'lucide-react';
 import { useApi, useList } from '../api/hooks';
-import type { ComplianceTrendPoint, DashboardSummaryDto, EndpointEventDto } from '../api/types';
+import type { AlertDto, AlertSummaryDto, ComplianceTrendPoint, DashboardSummaryDto, EndpointEventDto } from '../api/types';
+import { AlertSeverityBadge } from './alerts/AlertsPage';
 import { Card, EmptyState, ErrorState, PageHeader, ProgressBar, Spinner, StatTile, TableWrap } from '../components/ui';
 import { EventSeverityDot } from '../components/StatusBadges';
 import { ComplianceTrendChart } from '../components/TrendChart';
@@ -11,6 +12,8 @@ import { aggregateTrend, daysAgo, isoDate } from '../lib/trend';
 export function DashboardPage() {
   const summary = useApi<DashboardSummaryDto>('/dashboard/summary', undefined, { refetchInterval: 30_000 });
   const activity = useList<EndpointEventDto>('/dashboard/activity', { limit: 25 }, { refetchInterval: 30_000 });
+  const alerts = useList<AlertDto>('/alerts', { status: 'open', pageSize: 5 }, { refetchInterval: 30_000 });
+  const alertSummary = useApi<AlertSummaryDto>('/alerts/summary', undefined, { refetchInterval: 30_000 });
   const trend = useApi<ComplianceTrendPoint[]>('/reports/compliance/trend', { from: daysAgo(30), to: isoDate(new Date()) }, { staleTime: 5 * 60_000 });
 
   return (
@@ -59,6 +62,42 @@ export function DashboardPage() {
           )}
         </Card>
       </div>
+
+      <Card
+        title={alertSummary.data ? `Open alerts (${alertSummary.data.open})` : 'Open alerts'}
+        className="mt-5"
+        padded={false}
+        actions={<Link to="/alerts" className="text-xs text-accent hover:underline">View alerts</Link>}
+      >
+        {alerts.isPending ? (
+          <Spinner />
+        ) : alerts.isError ? (
+          <ErrorState error={alerts.error} compact />
+        ) : alerts.page.items.length === 0 ? (
+          <p className="px-4 py-3 text-sm text-muted">No open alerts.</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {alerts.page.items.map((a) => (
+              <li key={a.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                <AlertSeverityBadge severity={a.severity} />
+                {a.endpointId ? (
+                  <Link to={`/endpoints/${a.endpointId}`} className="min-w-0 flex-1 truncate font-medium hover:text-accent">
+                    {a.title}
+                  </Link>
+                ) : (
+                  <Link to="/alerts" className="min-w-0 flex-1 truncate font-medium hover:text-accent">
+                    {a.title}
+                  </Link>
+                )}
+                <span className="hidden truncate text-muted md:inline">{a.organizationName}</span>
+                <span className="whitespace-nowrap text-muted" title={new Date(a.openedAt).toLocaleString()}>
+                  {formatRelative(a.openedAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
       <Card title="Recent activity" className="mt-5" padded={false} actions={<Link to="/jobs" className="text-xs text-accent hover:underline">View jobs</Link>}>
         {activity.isPending ? (

@@ -126,6 +126,23 @@ Invalid values return `400 validation_failed`.
 | POST | `/endpoints/tags/bulk` | `{endpointIds[], addTagIds[]?, removeTagIds[]?}` → `{changed}`. At most 1000 endpoints. Operator without organization restrictions. |
 | GET | `/endpoints/{id}/tag-policies` | Viewer. The tag policies that apply to the endpoint, in resolution order (`{tag, priority, policy}`). |
 
+### Alerts and notifications
+
+| Method | Route | Notes |
+|---|---|---|
+| GET | `/alerts` | Viewer, filtered to the user's organizations. `?status=unresolved` (default) `\|open\|acknowledged\|resolved\|all`, `severity` (`Critical, Warning, Info`), `organizationId`, `endpointId`, `ruleType`, `search` (title), paging. Unresolved first, then by severity and newest. Each item: rule, type, severity, status, title, details, organization, endpoint and host name, opened/last seen/resolved/acknowledged times and who acknowledged. |
+| GET | `/alerts/summary` | Viewer. `{open, acknowledged, critical, warning, info}` over unresolved alerts the user can see (`open` excludes acknowledged ones). |
+| POST | `/alerts/acknowledge` | Operator. `{alertIds[]}` (1-500) → `{acknowledged}`. Only open alerts the user can see are acknowledged; acknowledged alerts get no reminders. |
+| GET | `/alert-rules/types` | SuperAdmin. Per rule type: threshold unit, minimum, maximum, default, and whether a tag filter is allowed. |
+| GET/POST | `/alert-rules` | SuperAdmin. `{name, type, enabled, severity, threshold?, organizationId?, tagId?, channelIds[]?, notifyOnResolve, renotifyHours (0-720)}`. Types and thresholds: `EndpointOffline` (hours, 1-720), `InstallFailed`, `SecurityUpdateMissing` (days after the update became required, 0-365), `ScanStale`, `RestartPending` (days, 1-90), `EnrollmentPending` (no tag), `OsUnsupported` (days before end of support, 0-365). At most 20 channels. GET items add `thresholdUnit` and `unresolvedAlerts`. |
+| PUT/DELETE | `/alert-rules/{id}` | SuperAdmin. Changing the type, threshold, organization or tag, disabling the rule or deleting it closes its unresolved alerts without notifications. |
+| GET/PUT | `/notifications/settings` | SuperAdmin. `{smtpHost, smtpPort, smtpSecurity (StartTls, SslOnConnect, None), smtpUsername, smtpPassword, fromAddress, fromName, allowPrivateNetworkWebhooks}`. `smtpPassword`: `null` keeps the stored password, `""` removes it. GET never returns the password, only `smtpPasswordConfigured`. |
+| GET/POST | `/notifications/channels` | SuperAdmin. `{name, type (Email, Webhook), enabled, emailRecipients[] (1-20 plain addresses), webhookFormat (Generic, Slack, Teams), webhookUrl (https)}`. Responses are `{channel, signingSecret}`; `signingSecret` is set only when a generic webhook is created (shown once). Channels show `webhookHost` and `hasSigningSecret`, never the URL or the secret, plus the last delivery. |
+| PUT/DELETE | `/notifications/channels/{id}` | SuperAdmin. PUT with `webhookUrl: null` keeps the stored URL. DELETE removes the channel from every rule and discards its queued notifications. |
+| POST | `/notifications/channels/{id}/rotate-secret` | SuperAdmin. Generic webhooks: a new signing secret (shown once); the old one stops working. |
+| POST | `/notifications/channels/{id}/test` | SuperAdmin. Queues a test notification → `202` with the delivery. `429 test_rate_limited` within 30 seconds of the previous test of the same channel. |
+| GET | `/notifications/deliveries` | SuperAdmin. `?channelId=&status=` (`Pending, Sent, Failed`), paging. Subject, kind, status, attempts, last error (sanitized), times. |
+
 ### Endpoints
 
 | Method | Route | Notes |

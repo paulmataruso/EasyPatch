@@ -524,9 +524,13 @@ public sealed class RetentionTask(EasyPatchDbContext db, SettingsService setting
             .Where(u => (u.State == EndpointUpdateState.NotApplicable || u.State == EndpointUpdateState.Superseded) && u.StateChangedAt < now.AddDays(-90))
             .ExecuteDeleteAsync(ct);
         var snapshots = await db.ComplianceSnapshots.Where(x => x.Date < DateOnly.FromDateTime(now.UtcDateTime.AddDays(-s.RetentionAuditDays))).ExecuteDeleteAsync(ct);
+        var alerts = await db.Alerts.Where(a => a.Status == AlertStatus.Resolved && a.ResolvedAt < now.AddDays(-s.RetentionEventsDays)).ExecuteDeleteAsync(ct);
+        var deliveries = await db.NotificationDeliveries
+            .Where(d => d.Status != DeliveryStatus.Pending && d.CreatedAt < now.AddDays(-s.RetentionEventsDays)).ExecuteDeleteAsync(ct);
         logger.LogInformation(
             "Retention: deleted {Events} events, {Audit} audit records, {Jobs} jobs, {Scans} scans, {History} history entries, {Sessions} sessions, " +
-            "{Resets} reset tokens, {Old} old enrollment requests, {Obsolete} obsolete update states, {Snapshots} snapshots; expired {Requests} requests",
-            events, auditRows, jobRows, scans, history, sessions, resets, oldRequests, obsolete, snapshots, requests);
+            "{Resets} reset tokens, {Old} old enrollment requests, {Obsolete} obsolete update states, {Snapshots} snapshots, {Alerts} resolved alerts, " +
+            "{Deliveries} notifications; expired {Requests} requests",
+            events, auditRows, jobRows, scans, history, sessions, resets, oldRequests, obsolete, snapshots, alerts, deliveries, requests);
     }
 }

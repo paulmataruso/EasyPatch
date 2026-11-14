@@ -9,8 +9,10 @@ import { useToast } from '../../components/Toast';
 import { Alert, Button, Card, ErrorState, InlineError, Input, KeyValueList, Mono, PageHeader, Spinner, Tabs } from '../../components/ui';
 import { formatDateTime } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
+import { AlertRulesTab } from './AlertRulesTab';
 import { AuditTab } from './AuditTab';
 import { LifecycleTab } from './LifecycleTab';
+import { NotificationsTab } from './NotificationsTab';
 import { TagsTab } from './TagsTab';
 import { UsersTab } from './UsersTab';
 
@@ -20,13 +22,15 @@ export function SettingsPage() {
   const tab = url.get('tab', 'policy');
   return (
     <>
-      <PageHeader title="Settings" subtitle="Global policy, tags, server behavior, users, OS lifecycle data and the audit log." />
+      <PageHeader title="Settings" subtitle="Global policy, tags, alerts and notifications, server behavior, users, OS lifecycle data and the audit log." />
       <Tabs
         active={tab}
         onChange={(t) => url.set({ tab: t === 'policy' ? null : t, action: null, userId: null, from: null, to: null, organizationId: null })}
         tabs={[
           { id: 'policy', label: 'Global policy' },
           { id: 'tags', label: 'Tags' },
+          { id: 'alert-rules', label: 'Alert rules', hidden: !isSuperAdmin },
+          { id: 'notifications', label: 'Notifications', hidden: !isSuperAdmin },
           { id: 'server', label: 'Server settings' },
           { id: 'users', label: 'Users', hidden: !isSuperAdmin },
           { id: 'lifecycle', label: 'OS lifecycle' },
@@ -35,6 +39,8 @@ export function SettingsPage() {
       />
       {tab === 'policy' && <GlobalPolicyTab />}
       {tab === 'tags' && <TagsTab />}
+      {tab === 'alert-rules' && isSuperAdmin && <AlertRulesTab />}
+      {tab === 'notifications' && isSuperAdmin && <NotificationsTab />}
       {tab === 'server' && <ServerSettingsTab />}
       {tab === 'users' && isSuperAdmin && <UsersTab />}
       {tab === 'lifecycle' && <LifecycleTab />}

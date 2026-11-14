@@ -100,3 +100,14 @@ Cancelling a queued job takes effect immediately. Cancelling a running install j
 at its next check-in. The agent then stops before the next update; an update that is already
 downloading or installing is allowed to finish, and the remaining updates are reported as
 cancelled.
+
+## Alerts and notifications
+
+| Symptom | Cause and fix |
+|---|---|
+| No alerts appear | Rules are evaluated every two minutes by the worker. Check that the rule is enabled and its organization and tag scope match, and that the worker is healthy (`docker compose ps worker`). Offline endpoints only raise the offline alert |
+| An alert does not resolve | It resolves after two evaluations (about four minutes) without a match. *Scan stale* clears only after a successful scan, and *Update installation failed* only when the endpoint has no failed updates left (for example after a successful retry) |
+| No email or chat message | The rule needs channels (**Settings → Alert rules**). Then check the channel's *Last delivery* and **Settings → Notifications → Recent deliveries** for the error. See [alerts.md](alerts.md#troubleshooting) for the messages |
+| Deliveries stay `Pending` | The worker sends them every 30 seconds. Retries wait up to an hour between attempts. Check the worker log for `Notification … failed` |
+| `A stored notification secret cannot be decrypted` | The worker does not see the API's Data Protection keys. It must mount the `dpkeys` volume (use the current `docker-compose.yml`). If the keys were lost, enter the SMTP password and webhook URLs again |
+| Webhook `refused: private network addresses are not allowed` | The webhook host resolves to a private address. Turn on **Allow webhooks to private network addresses** if that is intended |
