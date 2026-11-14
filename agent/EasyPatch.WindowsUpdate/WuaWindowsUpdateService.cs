@@ -9,11 +9,11 @@ using Microsoft.Extensions.Logging;
 namespace EasyPatch.WindowsUpdate;
 
 /// <summary>
-/// <see cref="IWindowsUpdateService"/> backed by the Windows Update Agent API (Microsoft.Update.Session).
+/// <see cref="IUpdateService"/> backed by the Windows Update Agent API (Microsoft.Update.Session).
 /// Searches use the default server selection, so WSUS / Group Policy / Windows Update for Business configuration is
 /// honored exactly as Windows itself would. Nothing here reports success that WUA did not report.
 /// </summary>
-public sealed partial class WuaWindowsUpdateService : IWindowsUpdateService
+public sealed partial class WuaWindowsUpdateService : IUpdateService
 {
     public const string ClientApplicationId = "EasyPatch Agent";
     private const string MicrosoftUpdateServiceId = "7971f918-a847-4430-9279-4a52d1efe18d";
@@ -28,7 +28,7 @@ public sealed partial class WuaWindowsUpdateService : IWindowsUpdateService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public Task<WindowsUpdateScanResult> ScanAsync(bool includeInstalled, CancellationToken cancellationToken) =>
+    public Task<UpdateScanResult> ScanAsync(bool includeInstalled, CancellationToken cancellationToken) =>
         RunAsync("search", () =>
         {
             var session = CreateSession();
@@ -53,7 +53,7 @@ public sealed partial class WuaWindowsUpdateService : IWindowsUpdateService
             }
 
             Com.Release(searcher);
-            return new WindowsUpdateScanResult(missing, installed, IsMicrosoftUpdateRegistered());
+            return new UpdateScanResult(missing, installed, IsMicrosoftUpdateRegistered());
         }, cancellationToken);
 
     public Task<bool> IsRebootRequiredBeforeInstallationAsync(CancellationToken cancellationToken) =>

@@ -158,6 +158,7 @@ public sealed class AgentRuntime : IDisposable
             Capabilities = _agentUpdate.CanUpdate ? [.. _platform.Capabilities, AgentCapabilities.SelfUpdate] : _platform.Capabilities,
             AgentArchitecture = _options.PackageArchitecture,
             ReleaseKeyIds = _agentUpdate.TrustedKeyIds,
+            AgentPackageFormat = _platform.AgentInstaller?.PackageFormat,
             Sessions = _platform.UserInteraction is null ? null : SafeSessions(),
             WindowsUpdatePolicy = policyReport,
         };

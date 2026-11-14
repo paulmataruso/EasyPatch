@@ -81,13 +81,13 @@ public sealed class RestartHandler
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(ex, "Restart job {JobId}: could not check whether a restart is pending.", jobId);
-                Finish(jobId, JobStatus.Failed, "Could not check whether Windows needs a restart, so the computer was not restarted.", "reboot_detection_failed");
+                Finish(jobId, JobStatus.Failed, "Could not check whether the computer needs a restart, so it was not restarted.", "reboot_detection_failed");
                 return;
             }
 
             if (!reboot.Pending)
             {
-                Finish(jobId, JobStatus.Completed, "No restart was needed: Windows did not report a pending restart.");
+                Finish(jobId, JobStatus.Completed, "No restart was needed: no restart was pending.");
                 return;
             }
         }
@@ -192,7 +192,7 @@ public sealed class RestartHandler
             else if (p.IssuedAt is { } issued && now - issued > p.GracePeriod + RestartTimeout)
             {
                 Finish(jobId, JobStatus.Failed,
-                    $"Windows did not restart within {(int)(p.GracePeriod + RestartTimeout).TotalMinutes} minutes of the request. A user or an application may have cancelled it.",
+                    $"The computer did not restart within {(int)(p.GracePeriod + RestartTimeout).TotalMinutes} minutes of the request. A user or an application may have cancelled it.",
                     "restart_not_performed");
             }
 
@@ -263,7 +263,7 @@ public sealed class RestartHandler
             if (sessions.TrayConnected == 0)
             {
                 // No tray can show the countdown: let Windows warn the users for the remaining time instead.
-                Issue(jobId, restartAt - now, "The EasyPatch tray is not running, so Windows warned the signed-in users.");
+                Issue(jobId, restartAt - now, "The EasyPatch tray is not running, so the operating system warned the signed-in users.");
                 return null;
             }
         }
@@ -330,8 +330,8 @@ public sealed class RestartHandler
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Restart job {JobId}: Windows refused to restart.", jobId);
-            Finish(jobId, JobStatus.Failed, $"Windows refused to restart: {ex.Message}", "restart_failed");
+            _logger.LogError(ex, "Restart job {JobId}: the restart was refused.", jobId);
+            Finish(jobId, JobStatus.Failed, $"The operating system refused to restart: {ex.Message}", "restart_failed");
         }
     }
 

@@ -144,7 +144,7 @@ public sealed class UserExperienceTests
         await h.RunJobsAndFlushAsync();
 
         Assert.Equal([TimeSpan.FromMinutes(10)], h.SystemRestart.Requests);
-        Assert.Contains("Windows warned the signed-in users", Last(h, job.JobId).Message, StringComparison.Ordinal);
+        Assert.Contains("the operating system warned the signed-in users", Last(h, job.JobId).Message, StringComparison.Ordinal);
     }
 
     [Fact]

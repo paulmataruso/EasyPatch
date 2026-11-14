@@ -19,10 +19,11 @@ namespace EasyPatch.Agent.Core.Jobs;
 /// <item>its release signature verifies against a release key built into this agent (the server cannot supply keys),</item>
 /// <item>it is newer than this agent and for this agent's architecture, and</item>
 /// <item>the downloaded file has exactly the size and SHA-256 the signature covers (checked again just before
-/// Windows Installer starts, with the file held open against changes).</item>
+/// the installer starts, with the file held open against changes).</item>
 /// </list>
-/// Windows Installer upgrades the product, which stops this service and starts the new version. The job completes only
-/// when the new version is running and picks the job up again; if the old version comes back instead, it fails.
+/// The installer (Windows Installer, or apt/dnf in a separate systemd unit on Linux) upgrades the agent, which stops this
+/// service and starts the new version. The job completes only when the new version is running and picks the job up
+/// again; if the old version comes back instead, it fails.
 /// </summary>
 public sealed partial class AgentUpdateHandler
 {
@@ -55,8 +56,8 @@ public sealed partial class AgentUpdateHandler
         _logger = logger;
     }
 
-    /// <summary>True when this agent can install updates: it can run Windows Installer, knows its package architecture
-    /// and was built with at least one release key.</summary>
+    /// <summary>True when this agent can install updates: it has an installer for its package format, knows its package
+    /// architecture and was built with at least one release key.</summary>
     public bool CanUpdate => _platform.AgentInstaller is not null && !_keys.IsEmpty && _options.PackageArchitecture is not null &&
                              AgentRelease.ParseVersion(_options.AgentVersion) is not null;
 
@@ -108,6 +109,12 @@ public sealed partial class AgentUpdateHandler
         if (AgentRelease.Validate(package) is [var invalid, ..])
         {
             return ("update_invalid", invalid);
+        }
+
+        var format = _platform.AgentInstaller?.PackageFormat ?? AgentRelease.FormatMsi;
+        if (AgentRelease.FormatOf(package.FileName) != format)
+        {
+            return ("update_wrong_format", $"{package.FileName} is not a {format} package, which this agent installs updates from.");
         }
 
         if (package.Architecture != _options.PackageArchitecture)
@@ -220,13 +227,13 @@ public sealed partial class AgentUpdateHandler
             {
                 Delete(path);
                 return Fail(jobId, "update_installer_busy",
-                    $"Another Windows Installer installation was still running after {InstallTimeout.TotalMinutes:0} minutes, so the agent was not updated.");
+                    $"Another {installer.DisplayName} installation was still running after {InstallTimeout.TotalMinutes:0} minutes, so the agent was not updated.");
             }
 
             if (!reportedWait)
             {
                 reportedWait = true;
-                _reporter.Report(jobId, JobStatus.Running, "Waiting", 50, "Waiting for another Windows Installer installation to finish.");
+                _reporter.Report(jobId, JobStatus.Running, "Waiting", 50, $"Waiting for another {installer.DisplayName} installation to finish.");
             }
 
             await Task.Delay(_options.InstallerPollInterval, cancellationToken);
@@ -234,8 +241,8 @@ public sealed partial class AgentUpdateHandler
 
         var logPath = Path.Combine(_options.UpdateDirectory, $"install-{package.Version}.log");
 
-        // Hold the package open without write sharing from the last hash check until msiexec has finished with it. The
-        // handle is closed before the package is deleted (Windows cannot delete an open file).
+        // Hold the package open without write sharing from the last hash check until the installer has finished with it.
+        // The handle is closed before the package is deleted (Windows cannot delete an open file).
         int? exitCode = null;
         var changed = false;
         string? startFailure = null;
@@ -258,7 +265,7 @@ public sealed partial class AgentUpdateHandler
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // Windows Installer is stopping this service to replace it. The new version finishes the job.
+                    // The installer is stopping this service to replace it. The new version finishes the job.
                     throw;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -274,17 +281,17 @@ public sealed partial class AgentUpdateHandler
             return Fail(jobId, "update_hash_mismatch", $"{package.FileName} changed on disk after it was verified. It was not installed.");
         }
 
-        // msiexec could not be started, or it finished while this process is still running: the upgrade did not replace it.
+        // The installer could not be started, or it finished while this process is still running: the upgrade did not replace it.
         SuspendTrays(false);
         ClearLaunch(jobId);
         if (exitCode is not { } code)
         {
-            return Fail(jobId, "update_install_failed", $"Windows Installer could not be started: {startFailure}");
+            return Fail(jobId, "update_install_failed", $"{installer.DisplayName} could not be started: {startFailure}");
         }
 
-        return Fail(jobId, "update_install_failed", code is 0 or 1641 or 3010
-            ? $"Windows Installer reported success (exit code {code}) but did not replace the running agent {_options.AgentVersion}. Log: {logPath}"
-            : $"Windows Installer failed with exit code {code}{DescribeInstallerError(code)}. EasyPatch Agent {_options.AgentVersion} is still installed. Log: {logPath}");
+        return Fail(jobId, "update_install_failed", installer.IsSuccess(code)
+            ? $"{installer.DisplayName} reported success (exit code {code}) but did not replace the running agent {_options.AgentVersion}. Log: {logPath}"
+            : $"{installer.DisplayName} failed with exit code {code}{installer.DescribeResult(code)}. EasyPatch Agent {_options.AgentVersion} is still installed. Log: {logPath}");
     }
 
     /// <summary>Records the launch in the job's state (the next version of the agent completes the job from it) and reports it.</summary>
@@ -309,8 +316,8 @@ public sealed partial class AgentUpdateHandler
         _reporter.Report(jobId, JobStatus.Running, "Installing", 60,
             $"Installing EasyPatch Agent {package.Version}. The agent service restarts; the job completes when {package.Version} is running.");
         _logger.LogInformation(AgentEventIds.AgentUpdateStarted,
-            "Installing EasyPatch Agent {Target} (release key verified, SHA-256 {Sha256}); this service ({Current}) will be restarted by Windows Installer.",
-            package.Version, package.Sha256, _options.AgentVersion);
+            "Installing EasyPatch Agent {Target} (release key verified, SHA-256 {Sha256}); this service ({Current}) will be restarted by {Installer}.",
+            package.Version, package.Sha256, _options.AgentVersion, _platform.AgentInstaller?.DisplayName);
     }
 
     private async Task<JobOutcome> CompleteAfterInstallAsync(Guid jobId, AgentUpdateProgress progress, CancellationToken cancellationToken)
@@ -325,24 +332,26 @@ public sealed partial class AgentUpdateHandler
             return JobOutcome.Finished;
         }
 
-        // The previous version is running: the installation is still going on, or it failed and Windows Installer
-        // rolled the product back.
-        while (_platform.AgentInstaller?.IsInstallerBusy() == true)
+        // The previous version is running: the installation is still going on, or it failed (Windows Installer rolled the
+        // product back; apt/dnf left the old package installed).
+        var installer = _platform.AgentInstaller;
+        var name = installer?.DisplayName ?? "The installer";
+        while (installer?.IsInstallerBusy() == true)
         {
             if (_time.GetUtcNow() - progress.LaunchedAt > InstallTimeout)
             {
                 return Fail(jobId, "update_install_timeout",
-                    $"Windows Installer was still running {InstallTimeout.TotalMinutes:0} minutes after the update to {progress.TargetVersion} started. Log: {progress.LogPath}");
+                    $"{name} was still running {InstallTimeout.TotalMinutes:0} minutes after the update to {progress.TargetVersion} started. Log: {progress.LogPath}");
             }
 
             await Task.Delay(_options.InstallerPollInterval, cancellationToken);
         }
 
         Delete(progress.PackagePath);
-        var error = ReadInstallerResult(progress.LogPath);
+        var error = installer?.ReadResult(progress.LogPath);
         return Fail(jobId, "update_install_failed",
             $"EasyPatch Agent {progress.TargetVersion} was not installed" +
-            (error is { } code ? $": Windows Installer error {code}{DescribeInstallerError(code)}" : string.Empty) +
+            (error is { } code && installer is not null && !installer.IsSuccess(code) ? $": {name} error {code}{installer.DescribeResult(code)}" : string.Empty) +
             $". Version {_options.AgentVersion} is still running. Log: {progress.LogPath}");
     }
 
@@ -406,7 +415,7 @@ public sealed partial class AgentUpdateHandler
         foreach (var file in Directory.EnumerateFiles(directory))
         {
             var name = Path.GetFileName(file);
-            var stale = name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".partial", StringComparison.OrdinalIgnoreCase) ||
+            var stale = AgentRelease.FormatOf(name) is not null || name.EndsWith(".partial", StringComparison.OrdinalIgnoreCase) ||
                         (name.EndsWith(".log", StringComparison.OrdinalIgnoreCase) && File.GetLastWriteTimeUtc(file) < cutoff);
             if (stale)
             {

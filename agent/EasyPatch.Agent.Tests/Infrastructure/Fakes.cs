@@ -126,7 +126,7 @@ public sealed class FakeUpdate
 /// Test double for the Windows Update Agent with WUA's observable semantics: an installed update that needs a
 /// restart keeps appearing in "IsInstalled=0" with RebootRequired=true until <see cref="SimulateReboot"/>.
 /// </summary>
-public sealed class FakeWindowsUpdate : IWindowsUpdateService
+public sealed class FakeWindowsUpdate : IUpdateService
 {
     private readonly Lock _lock = new();
 
@@ -186,7 +186,7 @@ public sealed class FakeWindowsUpdate : IWindowsUpdateService
 
     public int InstallCount(Guid guid) => Operations.Count(o => o == $"install:{guid}");
 
-    public Task<WindowsUpdateScanResult> ScanAsync(bool includeInstalled, CancellationToken cancellationToken)
+    public Task<UpdateScanResult> ScanAsync(bool includeInstalled, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_lock)
@@ -203,7 +203,7 @@ public sealed class FakeWindowsUpdate : IWindowsUpdateService
             var installed = includeInstalled
                 ? Updates.Where(u => u.Installed).Select(u => u.Metadata with { IsInstalled = true }).ToList()
                 : [];
-            return Task.FromResult(new WindowsUpdateScanResult(missing, installed, microsoftUpdateRegistered: false));
+            return Task.FromResult(new UpdateScanResult(missing, installed, microsoftUpdateRegistered: false));
         }
     }
 

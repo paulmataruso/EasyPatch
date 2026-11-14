@@ -18,8 +18,9 @@ public enum JobOutcome
 }
 
 /// <summary>
-/// Executes InstallUpdates jobs with the native Windows Update Agent. Idempotent: every run starts with a fresh
-/// scan, so re-running after a crash, service restart or reboot never reinstalls what is already installed.
+/// Executes InstallUpdates jobs with the platform's update service (the Windows Update Agent; apt or dnf on Linux, which
+/// install the whole set in one transaction). Idempotent: every run starts with a fresh scan, so re-running after a
+/// crash, service restart or reboot never reinstalls what is already installed.
 /// </summary>
 public sealed class InstallUpdatesHandler
 {
@@ -67,7 +68,7 @@ public sealed class InstallUpdatesHandler
         var jobId = job.JobId;
         var payload = job.Install ?? throw new InvalidOperationException("The install job has no payload.");
         var previous = record.Items.ToDictionary(i => i.UpdateGuid);
-        var wu = _platform.WindowsUpdate;
+        var wu = _platform.Updates;
 
         try
         {
@@ -97,7 +98,7 @@ public sealed class InstallUpdatesHandler
             }
 
             Activity = "Scanning for updates";
-            _reporter.Report(jobId, JobStatus.Running, "Scanning", 0, "Checking Windows Update for applicable updates.", previous.Values.ToList());
+            _reporter.Report(jobId, JobStatus.Running, "Scanning", 0, $"Checking {wu.Name} for applicable updates.", previous.Values.ToList());
 
             if (await wu.IsRebootRequiredBeforeInstallationAsync(cancellationToken))
             {
@@ -109,6 +110,11 @@ public sealed class InstallUpdatesHandler
             var items = plan.Items;
             _logger.LogInformation("Job {JobId}: {Count} update(s) to install, {Skipped} skipped.",
                 jobId, plan.ToInstall.Count, items.Count(i => i.Status == JobItemStatus.Skipped));
+
+            if (wu is IBatchUpdateService batch && plan.ToInstall.Count > 0)
+            {
+                return await ExecuteBatchAsync(jobId, payload, plan, batch, cancellationToken);
+            }
 
             var cancelled = false;
             for (var index = 0; index < plan.ToInstall.Count; index++)
@@ -200,6 +206,156 @@ public sealed class InstallUpdatesHandler
         }
     }
 
+    /// <summary>Downloads, then installs, every planned update in one package-manager transaction each (apt, dnf).</summary>
+    private async Task<JobOutcome> ExecuteBatchAsync(Guid jobId, InstallUpdatesPayload payload, Plan plan, IBatchUpdateService batch,
+        CancellationToken cancellationToken)
+    {
+        var items = plan.Items;
+        var pending = plan.ToInstall.ToList();
+        var total = pending.Count;
+        var cancelled = false;
+
+        bool StopBeforeNextPhase()
+        {
+            if (IsCancelRequested(jobId))
+            {
+                cancelled = true;
+                MarkRemaining(items, pending, 0, JobItemStatus.Cancelled, SkipReasons.Cancelled);
+                return true;
+            }
+
+            if (payload.NotAfter is { } windowEnd && _time.GetUtcNow() > windowEnd)
+            {
+                MarkRemaining(items, pending, 0, JobItemStatus.Skipped, SkipReasons.MaintenanceWindowClosed);
+                _logger.LogWarning("Job {JobId}: maintenance window closed; {Remaining} update(s) not started.", jobId, pending.Count);
+                return true;
+            }
+
+            return false;
+        }
+
+        var wu = _platform.Updates;
+        if (!StopBeforeNextPhase())
+        {
+            _notifier.InstallStarting(jobId);
+            var startedAt = _time.GetUtcNow();
+
+            // ---- download (one transaction)
+            Activity = $"Downloading {total} update(s)";
+            foreach (var candidate in pending)
+            {
+                Set(items, candidate.Update.UpdateGuid, i => i with { Status = JobItemStatus.Downloading, StartedAt = startedAt, ErrorCode = null, ErrorMessage = null });
+            }
+
+            _reporter.Report(jobId, JobStatus.Running, "Downloading", 5, $"Downloading {total} update(s) with {wu.Name}.", items);
+            var downloads = await RunBatchAsync(() => batch.DownloadAsync(pending.Select(c => c.Handle).ToList(), cancellationToken), pending.Count);
+            var downloaded = new List<UpdateCandidate>();
+            for (var i = 0; i < pending.Count; i++)
+            {
+                var guid = pending[i].Update.UpdateGuid;
+                if (downloads[i].IsSuccess)
+                {
+                    Set(items, guid, item => item with { Status = JobItemStatus.Downloaded, DownloadPercent = 100 });
+                    downloaded.Add(pending[i]);
+                }
+                else
+                {
+                    Fail(items, guid, downloads[i], "Download failed");
+                }
+            }
+
+            pending = downloaded;
+            _reporter.Report(jobId, JobStatus.Running, "Downloading", 30, $"Downloaded {pending.Count} of {total} update(s).", items);
+
+            // ---- install (one transaction; the package manager retries failures one by one and confirms every version)
+            if (pending.Count > 0 && !StopBeforeNextPhase())
+            {
+                Activity = $"Installing {pending.Count} update(s)";
+                foreach (var candidate in pending)
+                {
+                    Set(items, candidate.Update.UpdateGuid, i => i with { Status = JobItemStatus.Installing });
+                }
+
+                _reporter.Report(jobId, JobStatus.Running, "Installing", 35, $"Installing {pending.Count} update(s) with {wu.Name}.", items);
+                var lastReport = _time.GetUtcNow();
+                var progress = new SynchronousProgress<BatchInstallProgress>(p =>
+                {
+                    Activity = $"Installing updates ({p.Completed} of {p.Total})";
+                    var now = _time.GetUtcNow();
+                    if (now - lastReport >= TimeSpan.FromSeconds(15) || p.Completed == p.Total)
+                    {
+                        lastReport = now;
+                        _reporter.Report(jobId, JobStatus.Running, "Installing", 35 + (int)(60.0 * p.Completed / Math.Max(1, p.Total)),
+                            $"Installing updates: {p.Completed} of {p.Total} done{(p.Current is null ? "" : $" ({p.Current})")}.", items);
+                    }
+                });
+                var installs = await RunBatchAsync(() => batch.InstallAsync(pending.Select(c => c.Handle).ToList(), progress, cancellationToken), pending.Count);
+                for (var i = 0; i < pending.Count; i++)
+                {
+                    var guid = pending[i].Update.UpdateGuid;
+                    var result = installs[i];
+                    if (result.IsSuccess)
+                    {
+                        Set(items, guid, item => item with
+                        {
+                            Status = JobItemStatus.Succeeded,
+                            ResultCode = result.ResultCode,
+                            RebootRequired = result.RebootRequired,
+                            ErrorCode = null,
+                            ErrorMessage = null,
+                            CompletedAt = _time.GetUtcNow(),
+                        });
+                    }
+                    else
+                    {
+                        Fail(items, guid, result, "Installation failed");
+                    }
+                }
+
+                _logger.LogInformation("Job {JobId}: {Succeeded} of {Count} update(s) installed with {Name}.",
+                    jobId, installs.Count(r => r.IsSuccess), pending.Count, wu.Name);
+            }
+        }
+
+        Activity = "Verifying installation";
+        _reporter.Report(jobId, JobStatus.Running, "Verifying", 96, "Running a post-installation scan.", items);
+        var verification = await _scans.RunScanAsync(ScanTrigger.PostInstall, jobId, gateHeld: true, cancellationToken);
+        return Finish(jobId, items, total, cancelled, verification?.ScanId);
+    }
+
+    /// <summary>Runs a batch operation; an exception fails every update in it (an exception never means success).</summary>
+    private static async Task<IReadOnlyList<UpdateOperationResult>> RunBatchAsync(Func<Task<IReadOnlyList<UpdateOperationResult>>> operation, int count)
+    {
+        IReadOnlyList<UpdateOperationResult> results;
+        try
+        {
+            results = await operation();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var failed = new UpdateOperationResult(UpdateOperationResult.Failed, ex.HResult, false) { ErrorCode = "package_manager_failed", Message = ex.Message };
+            return Enumerable.Repeat(failed, count).ToList();
+        }
+
+        if (results.Count != count)
+        {
+            var failed = new UpdateOperationResult(UpdateOperationResult.Failed, 0, false)
+            {
+                ErrorCode = "package_manager_failed",
+                Message = "The package manager returned an unexpected number of results.",
+            };
+            return Enumerable.Repeat(failed, count).ToList();
+        }
+
+        return results;
+    }
+
+    /// <summary>Invokes the callback on the reporting thread (unlike <see cref="Progress{T}"/>, which posts to the thread pool).</summary>
+    private sealed class SynchronousProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
+    }
+
     private JobOutcome Finish(Guid jobId, List<JobItemReport> items, int planned, bool cancelled, Guid? scanId)
     {
         var succeeded = items.Count(i => i.Status == JobItemStatus.Succeeded);
@@ -258,7 +414,7 @@ public sealed class InstallUpdatesHandler
         return JobOutcome.WaitingForReboot;
     }
 
-    private static Plan BuildPlan(WindowsUpdateScanResult scan, InstallUpdatesPayload payload, Dictionary<Guid, JobItemReport> previous)
+    private static Plan BuildPlan(UpdateScanResult scan, InstallUpdatesPayload payload, Dictionary<Guid, JobItemReport> previous)
     {
         var items = new List<JobItemReport>();
         var toInstall = new List<UpdateCandidate>();
@@ -380,17 +536,29 @@ public sealed class InstallUpdatesHandler
 
     private void Fail(List<JobItemReport> items, Guid guid, UpdateOperationResult result, string what)
     {
-        var hresult = result.HResult != 0 ? result.HResult : unchecked((int)0x80240FFF);
-        var code = WindowsUpdateErrors.Format(hresult);
+        string code;
+        string description;
+        if (result.ErrorCode is not null || result.Message is not null)
+        {
+            code = result.ErrorCode ?? "install_failed";
+            description = result.Message ?? code;
+        }
+        else
+        {
+            var hresult = result.HResult != 0 ? result.HResult : unchecked((int)0x80240FFF);
+            code = WindowsUpdateErrors.Format(hresult);
+            description = WindowsUpdateErrors.Describe(hresult);
+        }
+
         Set(items, guid, i => i with
         {
             Status = JobItemStatus.Failed,
             ResultCode = result.ResultCode,
-            ErrorCode = code,
-            ErrorMessage = $"{what}: {WindowsUpdateErrors.Describe(hresult)}",
+            ErrorCode = code.Length > 32 ? code[..32] : code,
+            ErrorMessage = $"{what}: {description}",
             CompletedAt = _time.GetUtcNow(),
         });
-        _logger.LogWarning("Update {UpdateGuid}: {What} with {Code} — {Description}", guid, what, code, WindowsUpdateErrors.Describe(hresult));
+        _logger.LogWarning("Update {UpdateGuid}: {What} with {Code} — {Description}", guid, what, code, description);
     }
 
     private static void MarkRemaining(List<JobItemReport> items, List<UpdateCandidate> toInstall, int fromIndex, JobItemStatus status, string reason)

@@ -355,7 +355,7 @@ public sealed class JobRunner
 
     private async Task<JobOutcome> RunScanJobAsync(Guid jobId, CancellationToken cancellationToken)
     {
-        _reporter.Report(jobId, JobStatus.Running, "Scanning", 10, "Scanning Windows Update.");
+        _reporter.Report(jobId, JobStatus.Running, "Scanning", 10, $"Scanning {_platform.Updates.Name}.");
         var report = await _scans.RunScanAsync(ScanTrigger.Job, jobId, gateHeld: true, cancellationToken);
         if (report is { Succeeded: true })
         {
@@ -364,7 +364,7 @@ public sealed class JobRunner
         }
         else
         {
-            _reporter.Report(jobId, JobStatus.Failed, "Failed", 100, "Windows Update scan failed.",
+            _reporter.Report(jobId, JobStatus.Failed, "Failed", 100, $"{_platform.Updates.Name} scan failed.",
                 errorCode: report?.ErrorCode, errorMessage: report?.ErrorMessage ?? "The scan did not run.");
         }
 

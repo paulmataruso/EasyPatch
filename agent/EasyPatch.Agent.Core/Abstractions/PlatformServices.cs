@@ -1,11 +1,12 @@
 using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Updates;
 
 namespace EasyPatch.Agent.Core.Abstractions;
 
 // Platform abstractions. Production implementations live in EasyPatch.WindowsUpdate, EasyPatch.Inventory and
-// EasyPatch.Agent (Windows only). Test doubles live exclusively in test projects.
+// EasyPatch.Agent (Windows), and in EasyPatch.Agent.Linux. Test doubles live exclusively in test projects.
 
-/// <summary>Opaque reference to a WUA update object, valid until disposed.</summary>
+/// <summary>Opaque reference to an update (a WUA update object, or a Linux package upgrade), valid until disposed.</summary>
 public interface IUpdateHandle : IDisposable
 {
 }
@@ -26,10 +27,10 @@ public sealed class UpdateCandidate
     public IUpdateHandle Handle { get; }
 }
 
-/// <summary>Result of a Windows Update search. Disposing releases the underlying COM objects.</summary>
-public sealed class WindowsUpdateScanResult : IDisposable
+/// <summary>Result of an update search. Disposing releases the underlying objects (COM objects on Windows).</summary>
+public sealed class UpdateScanResult : IDisposable
 {
-    public WindowsUpdateScanResult(
+    public UpdateScanResult(
         IReadOnlyList<UpdateCandidate> missing,
         IReadOnlyList<ReportedUpdate> installed,
         bool microsoftUpdateRegistered)
@@ -56,12 +57,18 @@ public sealed class WindowsUpdateScanResult : IDisposable
     }
 }
 
-/// <summary>Outcome of a single WUA download or install.</summary>
-/// <param name="ResultCode">WUA OperationResultCode (2 Succeeded, 3 SucceededWithErrors, 4 Failed, 5 Aborted).</param>
-/// <param name="HResult">HRESULT reported by WUA (0 on success).</param>
+/// <summary>Outcome of a single download or install.</summary>
+/// <param name="ResultCode">WUA OperationResultCode (2 Succeeded, 3 SucceededWithErrors, 4 Failed, 5 Aborted); Linux uses the same values.</param>
+/// <param name="HResult">HRESULT reported by WUA (0 on success; 0 on Linux).</param>
 /// <param name="RebootRequired">True when the update needs a restart to complete.</param>
 public sealed record UpdateOperationResult(int ResultCode, int HResult, bool RebootRequired)
 {
+    /// <summary>Short machine-readable error (Linux, e.g. <c>apt_failed</c>); null means "format <see cref="HResult"/>".</summary>
+    public string? ErrorCode { get; init; }
+
+    /// <summary>Human-readable explanation of a failure (Linux: the package manager's error output).</summary>
+    public string? Message { get; init; }
+
     public const int NotStarted = 0;
     public const int InProgress = 1;
     public const int Succeeded = 2;
@@ -96,11 +103,22 @@ public sealed class WindowsUpdateException : Exception
     }
 }
 
-/// <summary>Native Windows Update operations. Implementations must never report success they did not observe.</summary>
-public interface IWindowsUpdateService
+/// <summary>The operating system's update mechanism (Windows Update; apt or dnf on Linux). Implementations must never report
+/// success they did not observe.</summary>
+public interface IUpdateService
 {
+    /// <summary>Name used in messages, e.g. "Windows Update", "apt", "dnf".</summary>
+    string Name => "Windows Update";
+
+    /// <summary>Error code and message for a failed scan.</summary>
+    (string Code, string Message) DescribeFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return (WindowsUpdateErrors.Format(exception.HResult), $"{WindowsUpdateErrors.Describe(exception.HResult)} {exception.Message}".Trim());
+    }
+
     /// <summary>Searches for applicable, non-hidden, non-installed updates (and installed updates when requested).</summary>
-    Task<WindowsUpdateScanResult> ScanAsync(bool includeInstalled, CancellationToken cancellationToken);
+    Task<UpdateScanResult> ScanAsync(bool includeInstalled, CancellationToken cancellationToken);
 
     /// <summary>True when Windows refuses further installs until the computer restarts.</summary>
     Task<bool> IsRebootRequiredBeforeInstallationAsync(CancellationToken cancellationToken);
@@ -112,6 +130,29 @@ public interface IWindowsUpdateService
 
     /// <summary>Windows Update history newer than <paramref name="since"/> (newest first), at most <paramref name="maxEntries"/>.</summary>
     Task<IReadOnlyList<HistoryEntryReport>> GetHistoryAsync(DateTimeOffset? since, int maxEntries, CancellationToken cancellationToken);
+}
+
+/// <summary>Progress of a batch installation: how many of the updates the package manager has finished.</summary>
+public sealed record BatchInstallProgress(int Completed, int Total, string? Current);
+
+/// <summary>
+/// Implemented by update services whose package manager installs a set of updates in one transaction (apt, dnf), which is
+/// faster and resolves dependencies between the updates. Results are per update, in the order given, and success means
+/// the new version was confirmed installed afterwards.
+/// </summary>
+public interface IBatchUpdateService
+{
+    Task<IReadOnlyList<UpdateOperationResult>> DownloadAsync(IReadOnlyList<IUpdateHandle> updates, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<UpdateOperationResult>> InstallAsync(
+        IReadOnlyList<IUpdateHandle> updates, IProgress<BatchInstallProgress>? progress, CancellationToken cancellationToken);
+}
+
+/// <summary>Counts signed-in users where there is no tray to talk to them (Linux): restarts then warn through the
+/// operating system's own shutdown messages instead of restarting at once.</summary>
+public interface IUserSessionCounter
+{
+    UserSessionInfo GetSessions();
 }
 
 /// <summary>Context passed to the inventory collector.</summary>
@@ -141,12 +182,15 @@ public interface IUpdateSourceDetector
 /// <summary>Protects secrets at rest (DPAPI LocalMachine on Windows).</summary>
 public interface ISecretProtector
 {
+    /// <summary>Reported in inventory: <c>dpapi</c>, <c>systemd-creds-host</c> or <c>file-permissions</c>.</summary>
+    string Kind => "dpapi";
+
     byte[] Protect(byte[] plaintext);
 
     byte[] Unprotect(byte[] protectedData);
 }
 
-/// <summary>Installer-provided bootstrap values (HKLM\SOFTWARE\EasyPatch\Agent on Windows).</summary>
+/// <summary>Installer-provided bootstrap values (HKLM\SOFTWARE\EasyPatch\Agent on Windows, /etc/easypatch/agent.conf on Linux).</summary>
 public sealed record BootstrapConfig(string? ServerUrl, string? EnrollmentToken, string? DeploymentCode, string? ProxyUrl)
 {
     public static BootstrapConfig Empty { get; } = new(null, null, null, null);
@@ -161,6 +205,9 @@ public interface IBootstrapConfigSource
 
     /// <summary>Removes the enrollment token and deployment code once they have been used.</summary>
     void ClearEnrollmentSecrets();
+
+    /// <summary>How an administrator provides the settings (logged when they are missing).</summary>
+    string SetupHint => "Reinstall with SERVERURL and ENROLLMENTTOKEN or DEPLOYMENTCODE, or run 'EasyPatch.Agent.exe enroll'.";
 }
 
 public interface IBootTimeProvider
@@ -209,7 +256,7 @@ public sealed class FixedHttpClientFactory : IAgentHttpClientFactory
 /// <remarks>The optional services enable the matching <see cref="AgentCapabilities"/>; without them the agent only
 /// scans, installs and reports, exactly like an agent built before they existed.</remarks>
 public sealed record AgentPlatform(
-    IWindowsUpdateService WindowsUpdate,
+    IUpdateService Updates,
     IInventoryCollector Inventory,
     IRebootDetector RebootDetector,
     IUpdateSourceDetector UpdateSource,
@@ -230,7 +277,10 @@ public sealed record AgentPlatform(
     /// <see cref="AgentRuntimeOptions.ReleasePublicKeys"/>).</summary>
     public IAgentInstaller? AgentInstaller { get; init; }
 
-    public IUserInteraction Users => UserInteraction ?? NoUserInteraction.Instance;
+    /// <summary>Signed-in users on a platform without a tray (Linux). Ignored when <see cref="UserInteraction"/> is set.</summary>
+    public IUserSessionCounter? SessionCounter { get; init; }
+
+    public IUserInteraction Users => UserInteraction ?? (SessionCounter is { } counter ? new SessionsOnlyInteraction(counter) : NoUserInteraction.Instance);
 
     public IReadOnlyList<string> Capabilities
     {
@@ -255,5 +305,27 @@ public sealed record AgentPlatform(
 
             return list;
         }
+    }
+}
+
+/// <summary>No tray: reports the signed-in users (so restarts warn them through the operating system) and nothing else.</summary>
+internal sealed class SessionsOnlyInteraction(IUserSessionCounter counter) : IUserInteraction
+{
+    public UserSessionInfo GetSessions() => counter.GetSessions() with { TrayConnected = 0 };
+
+    public int Notify(UserNotice notice) => 0;
+
+    public void SetRestartPrompt(RestartPrompt? prompt)
+    {
+    }
+
+    public IReadOnlyList<RestartPromptResponse> TakeResponses() => [];
+
+    public void SetStatus(TrayStatus status)
+    {
+    }
+
+    public void SuspendTrays(bool suspended)
+    {
     }
 }

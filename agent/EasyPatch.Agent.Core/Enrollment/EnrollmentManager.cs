@@ -110,8 +110,8 @@ public sealed class EnrollmentManager
             if (!_notConfiguredLogged)
             {
                 _logger.LogWarning(
-                    "The agent is not enrolled and has no {Missing}. Reinstall with SERVERURL and ENROLLMENTTOKEN or DEPLOYMENTCODE, or run 'EasyPatch.Agent.exe enroll'.",
-                    string.IsNullOrWhiteSpace(bootstrap.ServerUrl) ? "server URL" : "enrollment token or deployment code");
+                    "The agent is not enrolled and has no {Missing}. {Hint}",
+                    string.IsNullOrWhiteSpace(bootstrap.ServerUrl) ? "server URL" : "enrollment token or deployment code", _platform.Bootstrap.SetupHint);
                 _notConfiguredLogged = true;
             }
 
@@ -321,6 +321,9 @@ public sealed class EnrollmentManager
                     ? inventory.OsUbr is { } ubr ? $"{build}.{ubr}" : build.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     : null,
                 Architecture = inventory.Architecture,
+                Platform = inventory.Platform,
+                OsId = inventory.OsId,
+                OsVersion = inventory.OsVersion,
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

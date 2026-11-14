@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace EasyPatch.Agent.Core.Scanning;
 
-/// <summary>Runs Windows Update scans and history syncs and queues the reports in the outbox.</summary>
+/// <summary>Runs update scans (Windows Update, apt or dnf) and history syncs and queues the reports in the outbox.</summary>
 public sealed class ScanService
 {
     private readonly AgentPlatform _platform;
@@ -51,7 +51,7 @@ public sealed class ScanService
             {
                 if (!_gate.TryEnter())
                 {
-                    _logger.LogInformation("Skipping {Trigger} scan: another Windows Update operation is in progress.", trigger);
+                    _logger.LogInformation("Skipping {Trigger} scan: another update operation is in progress.", trigger);
                     return null;
                 }
             }
@@ -78,12 +78,12 @@ public sealed class ScanService
     {
         var startedAt = _time.GetUtcNow();
         _state.Update(s => s.LastScanAttemptAt = startedAt);
-        _logger.LogInformation("Starting {Trigger} Windows Update scan.", trigger);
+        _logger.LogInformation("Starting {Trigger} {Name} scan.", trigger, _platform.Updates.Name);
 
         ScanResultReport report;
         try
         {
-            using var scan = await _platform.WindowsUpdate.ScanAsync(includeInstalled: true, cancellationToken);
+            using var scan = await _platform.Updates.ScanAsync(includeInstalled: true, cancellationToken);
             var completedAt = _time.GetUtcNow();
             report = new ScanResultReport
             {
@@ -104,9 +104,8 @@ public sealed class ScanService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var hresult = ex.HResult;
-            var code = WindowsUpdateErrors.Format(hresult);
-            _logger.LogError(ex, "Windows Update scan failed ({Code}).", code);
+            var (code, message) = _platform.Updates.DescribeFailure(ex);
+            _logger.LogError(ex, "{Name} scan failed ({Code}).", _platform.Updates.Name, code);
             report = new ScanResultReport
             {
                 ScanId = Guid.NewGuid(),
@@ -116,7 +115,7 @@ public sealed class ScanService
                 CompletedAt = _time.GetUtcNow(),
                 Succeeded = false,
                 ErrorCode = code,
-                ErrorMessage = $"{WindowsUpdateErrors.Describe(hresult)} {ex.Message}".Trim(),
+                ErrorMessage = message,
                 Source = DetectSource(microsoftUpdateRegistered: false),
             };
         }
@@ -132,7 +131,7 @@ public sealed class ScanService
         try
         {
             var since = _state.Read(s => s.LastHistoryEntryDate);
-            var entries = await _platform.WindowsUpdate.GetHistoryAsync(since, _options.MaxHistoryEntriesPerSync, cancellationToken);
+            var entries = await _platform.Updates.GetHistoryAsync(since, _options.MaxHistoryEntriesPerSync, cancellationToken);
             var fresh = entries.Where(e => since is null || e.Date > since).OrderBy(e => e.Date).ToList();
             var now = _time.GetUtcNow();
             if (fresh.Count > 0)
@@ -151,7 +150,7 @@ public sealed class ScanService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Windows Update history could not be read.");
+            _logger.LogWarning(ex, "{Name} history could not be read.", _platform.Updates.Name);
         }
     }
 
@@ -227,6 +226,7 @@ public sealed class InventoryService
             AgentInstalledAt = report.AgentInstalledAt ?? installedAt,
             RebootPending = reboot.Pending,
             RebootReasons = reboot.Reasons,
+            KeyProtection = report.KeyProtection ?? _platform.SecretProtector.Kind,
             UpdateSource = report.UpdateSource ?? _scans.DetectSource(microsoftUpdateRegistered: false),
         };
     }
