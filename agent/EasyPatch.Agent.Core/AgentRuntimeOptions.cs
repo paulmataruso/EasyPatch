@@ -1,11 +1,18 @@
 namespace EasyPatch.Agent.Core;
 
-public sealed class AgentRuntimeOptions
+public sealed record AgentRuntimeOptions
 {
     /// <summary>Root data directory (C:\ProgramData\EasyPatch on Windows).</summary>
     public required string DataDirectory { get; init; }
 
     public required string AgentVersion { get; init; }
+
+    /// <summary>Package architecture of this build (<c>x64</c> or <c>arm64</c>); agent updates install the same one.</summary>
+    public string? PackageArchitecture { get; init; }
+
+    /// <summary>PEM text with the release public key(s) built into the agent. Agent updates are installed only when
+    /// their release signature verifies against one of them; without any, the agent cannot update itself.</summary>
+    public string? ReleasePublicKeys { get; init; }
 
     /// <summary>
     /// Reject non-HTTPS server URLs. Production always leaves this on; only in-process tests (TestServer) turn it off.
@@ -37,10 +44,16 @@ public sealed class AgentRuntimeOptions
 
     public TimeSpan BackoffBase { get; init; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>How often an agent update checks whether Windows Installer is still busy.</summary>
+    public TimeSpan InstallerPollInterval { get; init; } = TimeSpan.FromSeconds(10);
+
     public TimeSpan BackoffMax { get; init; } = TimeSpan.FromMinutes(15);
 
     /// <summary>Delay between pending-approval status polls (before jitter).</summary>
     public TimeSpan PendingApprovalPollInterval { get; init; } = TimeSpan.FromSeconds(60);
 
     public string LogDirectory => Path.Combine(DataDirectory, "logs");
+
+    /// <summary>Downloaded agent packages and their installer logs.</summary>
+    public string UpdateDirectory => Path.Combine(DataDirectory, "updates");
 }

@@ -39,6 +39,7 @@ public sealed class AgentHarness : IDisposable
             UserInteraction = Users,
             SystemRestart = SystemRestart,
             PolicyRegistry = PolicyRegistry,
+            AgentInstaller = Installer,
         };
         Runtime = CreateRuntime();
     }
@@ -55,7 +56,8 @@ public sealed class AgentHarness : IDisposable
     public FakeUserInteraction Users { get; } = new();
     public FakeSystemRestart SystemRestart { get; } = new();
     public FakePolicyRegistry PolicyRegistry { get; } = new();
-    public AgentRuntimeOptions Options { get; }
+    public FakeAgentInstaller Installer { get; } = new();
+    public AgentRuntimeOptions Options { get; private set; }
     public AgentPlatform Platform { get; }
     public AgentRuntime Runtime { get; private set; }
 
@@ -65,6 +67,14 @@ public sealed class AgentHarness : IDisposable
         Runtime.Dispose();
         Runtime = CreateRuntime();
         return Runtime;
+    }
+
+    /// <summary>Simulates Windows Installer replacing the service with <paramref name="agentVersion"/> (or putting the
+    /// same version back) and starting it.</summary>
+    public AgentRuntime RestartAs(string agentVersion)
+    {
+        Options = Options with { AgentVersion = agentVersion };
+        return Restart();
     }
 
     /// <summary>Simulates a computer restart: boot time changes and pending-reboot updates complete.</summary>

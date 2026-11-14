@@ -54,6 +54,9 @@ public sealed class FakeAgentServer : HttpMessageHandler
 
     public AgentConfig Config { get; set; } = new();
 
+    /// <summary>Agent packages served at <c>GET downloads/agent/{fileName}</c> (anonymous, like the real server).</summary>
+    public Dictionary<string, byte[]> Packages { get; } = new(StringComparer.Ordinal);
+
     // ------------------------------------------------------------------ observed traffic
 
     public List<string> Requests { get; } = [];
@@ -149,6 +152,13 @@ public sealed class FakeAgentServer : HttpMessageHandler
             if (Override?.Invoke(route, body) is { } overridden)
             {
                 return overridden;
+            }
+
+            if (request.Method == HttpMethod.Get && route.StartsWith("downloads/agent/", StringComparison.Ordinal))
+            {
+                return Packages.TryGetValue(Uri.UnescapeDataString(route["downloads/agent/".Length..]), out var package)
+                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(package) }
+                    : new HttpResponseMessage(HttpStatusCode.NotFound);
             }
 
             if (request.Method != HttpMethod.Post)

@@ -24,7 +24,13 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="EasyPatch.ico" LogicalName="EasyPatch.ico" />
+    <!-- Release public key(s) for agent self-update (PEM, one or more "PUBLIC KEY" blocks). Only the public key is ever
+         built in; the private key stays on the build machine. Without it the agent cannot update itself. -->
+    <EmbeddedResource Include="$(EasyPatchReleasePublicKey)" LogicalName="EasyPatch.ReleaseKeys.pem" Condition="'$(EasyPatchReleasePublicKey)' != ''" />
   </ItemGroup>
+  <Target Name="CheckReleasePublicKey" BeforeTargets="BeforeBuild" Condition="'$(EasyPatchReleasePublicKey)' != ''">
+    <Error Condition="!Exists('$(EasyPatchReleasePublicKey)')" Text="EasyPatchReleasePublicKey '$(EasyPatchReleasePublicKey)' does not exist." />
+  </Target>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />

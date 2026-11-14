@@ -1,8 +1,10 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
 using EasyPatch.Agent.Core;
 using EasyPatch.Agent.Core.Abstractions;
 using EasyPatch.Agent.Core.Runtime;
 using EasyPatch.Agent.Platform;
+using EasyPatch.Contracts.Agent;
 using EasyPatch.Inventory;
 using EasyPatch.WindowsUpdate;
 using Microsoft.Extensions.Logging;
@@ -16,6 +18,9 @@ internal static class AgentComposition
     public const string ServiceName = "EasyPatchAgent";
     public const string EventLogSource = "EasyPatch Agent";
 
+    /// <summary>Manifest name of the release public key(s) embedded at build time (see EasyPatchReleasePublicKey in the csproj).</summary>
+    private const string ReleaseKeysResource = "EasyPatch.ReleaseKeys.pem";
+
     public static string AgentVersion { get; } = ReadVersion();
 
     public static string DataDirectory => SecureStorage.DefaultDataDirectory;
@@ -24,6 +29,8 @@ internal static class AgentComposition
     {
         DataDirectory = DataDirectory,
         AgentVersion = AgentVersion,
+        PackageArchitecture = AgentRelease.ArchitectureOf(RuntimeInformation.ProcessArchitecture),
+        ReleasePublicKeys = ReadReleaseKeys(),
     };
 
     /// <param name="users">The tray broker (service only); CLI commands have no tray.</param>
@@ -48,6 +55,7 @@ internal static class AgentComposition
             UserInteraction = users,
             SystemRestart = new WindowsSystemRestart(),
             PolicyRegistry = new WindowsPolicyRegistry(),
+            AgentInstaller = new WindowsAgentInstaller(),
         };
     }
 
@@ -75,6 +83,18 @@ internal static class AgentComposition
         }
 
         return LogLevel.Information;
+    }
+
+    private static string? ReadReleaseKeys()
+    {
+        using var stream = typeof(AgentComposition).Assembly.GetManifestResourceStream(ReleaseKeysResource);
+        if (stream is null)
+        {
+            return null;
+        }
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     private static string ReadVersion()

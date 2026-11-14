@@ -35,6 +35,8 @@ public sealed class AgentRuntime : IDisposable
     private readonly ScanService _scans;
     private readonly InventoryService _inventory;
     private readonly JobRunner _jobs;
+    private readonly ReleaseKeyRing _releaseKeys;
+    private readonly AgentUpdateHandler _agentUpdate;
     private readonly WindowsUpdatePolicyManager? _policy;
     private readonly SemaphoreSlim _flushSignal = new(0, int.MaxValue);
     private string? _announcedVersion;
@@ -77,7 +79,11 @@ public sealed class AgentRuntime : IDisposable
         var notifier = new UserNotifier(platform, State, loggerFactory.CreateLogger<UserNotifier>());
         var install = new InstallUpdatesHandler(platform, State, reporter, _scans, notifier, _time, loggerFactory.CreateLogger<InstallUpdatesHandler>());
         var restart = new RestartHandler(platform, State, reporter, options, _time, loggerFactory.CreateLogger<RestartHandler>());
-        _jobs = new JobRunner(platform, State, reporter, _scans, _inventory, install, restart, notifier, _gate, options, _time, loggerFactory.CreateLogger<JobRunner>());
+        _releaseKeys = LoadReleaseKeys(options.ReleasePublicKeys);
+        _agentUpdate = new AgentUpdateHandler(platform, State, reporter, _releaseKeys, GetActiveClient, options, _time,
+            loggerFactory.CreateLogger<AgentUpdateHandler>());
+        _jobs = new JobRunner(platform, State, reporter, _scans, _inventory, install, restart, _agentUpdate, notifier, _gate, options, _time,
+            loggerFactory.CreateLogger<JobRunner>());
         if (platform.PolicyRegistry is not null)
         {
             _policy = new WindowsUpdatePolicyManager(platform.PolicyRegistry, State, _time, loggerFactory.CreateLogger<WindowsUpdatePolicyManager>());
@@ -149,7 +155,9 @@ public sealed class AgentRuntime : IDisposable
             RebootReasons = reboot.Reasons,
             ActiveJobIds = held,
             CurrentActivity = _jobs.CurrentActivity,
-            Capabilities = _platform.Capabilities,
+            Capabilities = _agentUpdate.CanUpdate ? [.. _platform.Capabilities, AgentCapabilities.SelfUpdate] : _platform.Capabilities,
+            AgentArchitecture = _options.PackageArchitecture,
+            ReleaseKeyIds = _agentUpdate.TrustedKeyIds,
             Sessions = _platform.UserInteraction is null ? null : SafeSessions(),
             WindowsUpdatePolicy = policyReport,
         };
@@ -679,8 +687,43 @@ public sealed class AgentRuntime : IDisposable
             Version.TryParse(_options.AgentVersion.Split('+', '-')[0], out var current) &&
             available > current)
         {
-            _logger.LogInformation("A newer EasyPatch agent ({Available}) is available; this agent is {Current}. Install the new MSI to upgrade (automatic agent updates are not enabled).",
-                latest.Version, _options.AgentVersion);
+            if (_agentUpdate.CanUpdate)
+            {
+                _logger.LogInformation("A newer EasyPatch agent ({Available}) is available; this agent is {Current}. It is installed when an administrator updates this agent or the \"Agent updates\" policy is Automatic.",
+                    latest.Version, _options.AgentVersion);
+            }
+            else
+            {
+                _logger.LogInformation("A newer EasyPatch agent ({Available}) is available; this agent is {Current} and cannot update itself. Install the new MSI to upgrade.",
+                    latest.Version, _options.AgentVersion);
+            }
+        }
+    }
+
+    private ReleaseKeyRing LoadReleaseKeys(string? pem)
+    {
+        if (string.IsNullOrWhiteSpace(pem))
+        {
+            _logger.LogInformation("This agent was built without a release key, so it cannot update itself. Upgrade it by installing a newer MSI.");
+            return ReleaseKeyRing.Empty;
+        }
+
+        try
+        {
+            var ring = new ReleaseKeyRing(pem);
+            if (ring.IsEmpty)
+            {
+                _logger.LogError("The release key text built into this agent contains no public key, so it cannot update itself.");
+                return ring;
+            }
+
+            _logger.LogDebug("Agent updates are accepted when signed with release key(s) {KeyIds}.", string.Join(", ", ring.KeyIds));
+            return ring;
+        }
+        catch (System.Security.Cryptography.CryptographicException ex)
+        {
+            _logger.LogError("The release key built into this agent is not valid, so it cannot update itself: {Message}", ex.Message);
+            return ReleaseKeyRing.Empty;
         }
     }
 
@@ -702,6 +745,7 @@ public sealed class AgentRuntime : IDisposable
     public void Dispose()
     {
         _keys.Dispose();
+        _releaseKeys.Dispose();
         _outbox.Dispose();
         _gate.Dispose();
         _flushSignal.Dispose();

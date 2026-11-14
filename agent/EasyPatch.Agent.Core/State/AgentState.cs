@@ -125,6 +125,18 @@ public sealed class JobRecord
 
     /// <summary>Progress of a restart job.</summary>
     public RestartProgress? Restart { get; set; }
+
+    /// <summary>Set when Windows Installer was started for an agent update job.</summary>
+    public AgentUpdateProgress? AgentUpdate { get; set; }
+}
+
+public sealed class AgentUpdateProgress
+{
+    public required string FromVersion { get; set; }
+    public required string TargetVersion { get; set; }
+    public required string PackagePath { get; set; }
+    public required string LogPath { get; set; }
+    public DateTimeOffset LaunchedAt { get; set; }
 }
 
 public sealed class RestartProgress

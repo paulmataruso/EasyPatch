@@ -344,6 +344,21 @@ public sealed class FakeUserInteraction : IUserInteraction
 
     public void SetStatus(TrayStatus status) => Status = status;
 
+    public bool TraysSuspended { get; private set; }
+
+    /// <summary>How many trays were connected when they were asked to exit.</summary>
+    public int ClosedTrays { get; private set; }
+
+    public void SuspendTrays(bool suspended)
+    {
+        TraysSuspended = suspended;
+        if (suspended)
+        {
+            ClosedTrays = TrayConnected;
+            TrayConnected = 0;
+        }
+    }
+
     public void Answer(Guid jobId, bool restartNow, int? postponeMinutes = null) =>
         _responses.Add(new RestartPromptResponse(jobId, restartNow, postponeMinutes, SessionId: 1));
 }
@@ -423,4 +438,82 @@ public sealed class FakePolicyRegistry : IPolicyRegistry
     public int? DWord(PolicyRegistryKey key, string name) => Read(key, name).DWord;
 
     public int Count => _values.Count;
+}
+
+/// <summary>
+/// Stands in for msiexec. By default it behaves like a real upgrade: starting it "stops the service" (cancels
+/// <see cref="ServiceStopping"/>) and it never exits while the old agent is alive. Set <see cref="ExitCode"/> to make it
+/// return while the old agent is still running instead.
+/// </summary>
+public sealed class FakeAgentInstaller : IAgentInstaller
+{
+    public List<(string PackagePath, string LogPath, byte[] Package)> Started { get; } = [];
+
+    /// <summary>Cancelled when the installer starts, like Windows Installer stopping the agent service.</summary>
+    public CancellationTokenSource? ServiceStopping { get; set; }
+
+    /// <summary>When set, msiexec exits with this code without replacing the agent.</summary>
+    public int? ExitCode { get; set; }
+
+    /// <summary>Text written to the installer log when it starts.</summary>
+    public string? LogText { get; set; }
+
+    /// <summary>Number of <see cref="IsInstallerBusy"/> calls that return true before it reports idle.</summary>
+    public int BusyChecks { get; set; }
+
+    /// <summary>Called on every busy check (e.g. to advance the clock).</summary>
+    public Action? OnBusyCheck { get; set; }
+
+    public Exception? StartFailure { get; set; }
+
+    public IInstallerProcess Start(string packagePath, string logPath)
+    {
+        if (StartFailure is not null)
+        {
+            throw StartFailure;
+        }
+
+        Started.Add((packagePath, logPath, File.ReadAllBytes(packagePath)));
+        if (LogText is not null)
+        {
+            File.WriteAllText(logPath, LogText, System.Text.Encoding.Unicode);
+        }
+
+        if (ExitCode is null)
+        {
+            ServiceStopping?.Cancel();
+        }
+
+        return new Process(ExitCode);
+    }
+
+    public bool IsInstallerBusy()
+    {
+        OnBusyCheck?.Invoke();
+        if (BusyChecks > 0)
+        {
+            BusyChecks--;
+            return true;
+        }
+
+        return false;
+    }
+
+    private sealed class Process(int? exitCode) : IInstallerProcess
+    {
+        public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
+        {
+            if (exitCode is { } code)
+            {
+                return code;
+            }
+
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
 }

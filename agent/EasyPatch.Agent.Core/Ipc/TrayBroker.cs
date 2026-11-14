@@ -21,12 +21,25 @@ public sealed class TrayBroker : IUserInteraction
     private readonly List<RestartPromptResponse> _responses = [];
     private TrayStatus _status = new();
     private RestartPrompt? _prompt;
+    private bool _suspended;
 
     /// <param name="signedInSessions">IDs of the sessions with a signed-in user.</param>
     public TrayBroker(Func<IReadOnlyCollection<int>> signedInSessions, ILogger<TrayBroker> logger)
     {
         _signedInSessions = signedInSessions ?? throw new ArgumentNullException(nameof(signedInSessions));
         _logger = logger;
+    }
+
+    /// <summary>True while an agent update keeps the trays closed.</summary>
+    public bool TraysSuspended
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _suspended;
+            }
+        }
     }
 
     /// <summary>Sessions with a connected tray.</summary>
@@ -54,7 +67,9 @@ public sealed class TrayBroker : IUserInteraction
             _connections.TryGetValue(sessionId, out replaced);
             _connections[sessionId] = connection;
             connection.Send(new TrayMessage { Type = TrayMessageType.Status, Status = _status });
-            connection.Send(new TrayMessage { Type = TrayMessageType.Prompt, Prompt = _prompt });
+            connection.Send(_suspended
+                ? new TrayMessage { Type = TrayMessageType.Exit }
+                : new TrayMessage { Type = TrayMessageType.Prompt, Prompt = _prompt });
         }
 
         replaced?.Close();
@@ -139,6 +154,18 @@ public sealed class TrayBroker : IUserInteraction
 
             _status = status;
             Broadcast(new TrayMessage { Type = TrayMessageType.Status, Status = status });
+        }
+    }
+
+    public void SuspendTrays(bool suspended)
+    {
+        lock (_lock)
+        {
+            _suspended = suspended;
+            if (suspended)
+            {
+                Broadcast(new TrayMessage { Type = TrayMessageType.Exit });
+            }
         }
     }
 

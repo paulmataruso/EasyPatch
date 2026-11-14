@@ -128,6 +128,11 @@ internal sealed class TrayLauncher : BackgroundService
 
     private void LaunchMissing()
     {
+        if (_broker.TraysSuspended)
+        {
+            return; // an agent update is replacing the executable
+        }
+
         var connected = _broker.ConnectedSessions;
         var signedIn = WindowsUserSessions.SignedIn();
         var signedInIds = signedIn.Select(s => s.SessionId).ToHashSet();

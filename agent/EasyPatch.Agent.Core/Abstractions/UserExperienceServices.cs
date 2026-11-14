@@ -76,6 +76,10 @@ public interface IUserInteraction
     IReadOnlyList<RestartPromptResponse> TakeResponses();
 
     void SetStatus(TrayStatus status);
+
+    /// <summary>Asks every tray to exit and, while <paramref name="suspended"/> is true, keeps trays from starting again.
+    /// An agent update needs this: the trays run from the executable Windows Installer replaces.</summary>
+    void SuspendTrays(bool suspended);
 }
 
 /// <summary>Used where no interactive users can exist (tests, or platforms without a tray).</summary>
@@ -94,6 +98,10 @@ public sealed class NoUserInteraction : IUserInteraction
     public IReadOnlyList<RestartPromptResponse> TakeResponses() => [];
 
     public void SetStatus(TrayStatus status)
+    {
+    }
+
+    public void SuspendTrays(bool suspended)
     {
     }
 }

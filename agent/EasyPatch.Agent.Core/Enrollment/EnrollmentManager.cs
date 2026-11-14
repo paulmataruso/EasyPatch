@@ -39,6 +39,9 @@ public static class AgentEventIds
     public static readonly EventId RestartStarted = new(1010, "RestartStarted");
     public static readonly EventId WindowsUpdatePolicyChanged = new(1011, "WindowsUpdatePolicyChanged");
     public static readonly EventId WindowsUpdatePolicyConflict = new(1012, "WindowsUpdatePolicyConflict");
+    public static readonly EventId AgentUpdateStarted = new(1013, "AgentUpdateStarted");
+    public static readonly EventId AgentUpdated = new(1014, "AgentUpdated");
+    public static readonly EventId AgentUpdateFailed = new(1015, "AgentUpdateFailed");
 }
 
 /// <summary>

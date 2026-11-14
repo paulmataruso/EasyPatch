@@ -23,6 +23,7 @@ public sealed class JobRunner
     private readonly InventoryService _inventory;
     private readonly InstallUpdatesHandler _install;
     private readonly RestartHandler _restart;
+    private readonly AgentUpdateHandler _agentUpdate;
     private readonly UserNotifier _notifier;
     private readonly WuaOperationGate _gate;
     private readonly AgentRuntimeOptions _options;
@@ -40,6 +41,7 @@ public sealed class JobRunner
         InventoryService inventory,
         InstallUpdatesHandler install,
         RestartHandler restart,
+        AgentUpdateHandler agentUpdate,
         UserNotifier notifier,
         WuaOperationGate gate,
         AgentRuntimeOptions options,
@@ -53,6 +55,7 @@ public sealed class JobRunner
         _inventory = inventory;
         _install = install;
         _restart = restart;
+        _agentUpdate = agentUpdate;
         _notifier = notifier;
         _gate = gate;
         _options = options;
@@ -298,7 +301,7 @@ public sealed class JobRunner
         lock (_lock)
         {
             _executingJobId = jobId;
-            _activity = next.Job.Type.ToString();
+            _activity = next.Job.Type == JobType.AgentUpdate ? "Updating agent" : next.Job.Type.ToString();
         }
 
         await _gate.EnterAsync(cancellationToken);
@@ -310,6 +313,7 @@ public sealed class JobRunner
                 JobType.InstallUpdates => await _install.ExecuteAsync(record, cancellationToken),
                 JobType.UpdateScan => await RunScanJobAsync(jobId, cancellationToken),
                 JobType.InventoryRefresh => await RunInventoryJobAsync(jobId, cancellationToken),
+                JobType.AgentUpdate => await _agentUpdate.ExecuteAsync(record, cancellationToken),
                 _ => throw new NotSupportedException($"Job type {next.Job.Type} is not supported."),
             };
 
@@ -437,6 +441,7 @@ public sealed class JobRunner
         JobType.InstallUpdates => job.Install is not null,
         JobType.Restart => job.Restart is not null && _platform.SystemRestart is not null && RestartPayload.Validate(job.Restart).Count == 0,
         JobType.NotifyUser => job.Notify is not null && _platform.UserInteraction is not null && Enum.IsDefined(job.Notify.Preset),
+        JobType.AgentUpdate => job.AgentUpdate is not null && _agentUpdate.CanUpdate,
         _ => false,
     };
 }

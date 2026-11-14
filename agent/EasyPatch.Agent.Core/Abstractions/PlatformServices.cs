@@ -226,6 +226,10 @@ public sealed record AgentPlatform(
     /// <summary>Windows Update policy overrides.</summary>
     public IPolicyRegistry? PolicyRegistry { get; init; }
 
+    /// <summary>Installs agent updates (the self-update capability also needs a release key; see
+    /// <see cref="AgentRuntimeOptions.ReleasePublicKeys"/>).</summary>
+    public IAgentInstaller? AgentInstaller { get; init; }
+
     public IUserInteraction Users => UserInteraction ?? NoUserInteraction.Instance;
 
     public IReadOnlyList<string> Capabilities

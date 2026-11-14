@@ -195,6 +195,70 @@ public sealed class AgentApiClient
 
     public static byte[] Serialize<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, ContractJson.Options);
 
+    /// <summary>Downloads an agent package from this server's package downloads into <paramref name="destination"/>.</summary>
+    /// <remarks>Not signed: the download is public, and the caller trusts the bytes only after checking them against a
+    /// release signature it verified itself. The URL is always on this server; only the file name comes from the job.</remarks>
+    /// <exception cref="AgentTransientException">Network failure, timeout or server error; worth retrying.</exception>
+    /// <exception cref="AgentRejectedException">The server does not have the package.</exception>
+    /// <exception cref="InvalidDataException">The server sent more than <paramref name="maxBytes"/>.</exception>
+    public async Task DownloadAgentPackageAsync(string fileName, Stream destination, long maxBytes, TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+        ArgumentNullException.ThrowIfNull(destination);
+        var route = "downloads/agent/" + Uri.EscapeDataString(fileName);
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, route);
+            request.Headers.TryAddWithoutValidation("User-Agent", _userAgent);
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutSource.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                var status = response.StatusCode;
+                var message = $"Downloading {fileName} failed with HTTP {(int)status}.";
+                throw status is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests || (int)status >= 500
+                    ? new AgentTransientException(message, status, null, GetRetryAfter(response))
+                    : new AgentRejectedException(message, status, null);
+            }
+
+            if (response.Content.Headers.ContentLength > maxBytes)
+            {
+                throw new InvalidDataException($"{fileName} is larger than its release signature says.");
+            }
+
+            await using var source = await response.Content.ReadAsStreamAsync(timeoutSource.Token);
+            var buffer = new byte[81920];
+            long total = 0;
+            int read;
+            while ((read = await source.ReadAsync(buffer, timeoutSource.Token)) > 0)
+            {
+                total += read;
+                if (total > maxBytes)
+                {
+                    throw new InvalidDataException($"{fileName} is larger than its release signature says.");
+                }
+
+                await destination.WriteAsync(buffer.AsMemory(0, read), timeoutSource.Token);
+            }
+
+            _logger.LogDebug("GET {Route} -> {Bytes} bytes", route, total);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new AgentTransientException($"Downloading {fileName} timed out.", null, null, null, ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new AgentTransientException($"Could not download {fileName}: {ex.Message}", null, null, null, ex);
+        }
+        catch (IOException ex)
+        {
+            throw new AgentTransientException($"The download of {fileName} was interrupted: {ex.Message}", null, null, null, ex);
+        }
+    }
+
     // ------------------------------------------------------------------ core
 
     private async Task<T> SendAsync<T>(string route, byte[] body, bool signed, CancellationToken cancellationToken)

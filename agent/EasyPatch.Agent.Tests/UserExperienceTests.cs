@@ -386,7 +386,9 @@ public sealed class UserExperienceTests
         await h.Runtime.CheckInOnceAsync(Ct);
 
         var checkIn = h.Server.CheckIns[^1];
-        Assert.Equal(AgentCapabilities.All.Order(StringComparer.Ordinal), checkIn.Capabilities.Order(StringComparer.Ordinal));
+        // Self-update also needs a release key built in (AgentUpdateTests); this harness has none.
+        Assert.Equal(AgentCapabilities.All.Where(c => c != AgentCapabilities.SelfUpdate).Order(StringComparer.Ordinal),
+            checkIn.Capabilities.Order(StringComparer.Ordinal));
         Assert.Equal(3, checkIn.Sessions!.SignedInUsers);
         Assert.Equal(2, checkIn.Sessions.TrayConnected);
         var status = h.Users.Status!;
