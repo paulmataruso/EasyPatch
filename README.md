@@ -309,7 +309,7 @@ License** ([FSL-1.1-ALv2](LICENSE.md)). Copyright 2026 DHI Technical Services LL
   managed services. Selling EasyPatch, or offering it or a product built from it for others to
   run their own patch management, is not permitted.
 * Each version becomes available under the Apache License 2.0 two years after it is released.
-* For a commercial license, contact DHI Technical Services LLC through the
-  [maintainer's GitHub profile](https://github.com/paulmataruso).
+* For a commercial license, contact DHI Technical Services LLC at
+  [paulmataruso@dhitechnical.com](mailto:paulmataruso@dhitechnical.com).
 
 Third-party components keep their own licenses.
