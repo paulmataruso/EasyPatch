@@ -202,6 +202,7 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
         existing.AgentAutoUpdateEnabled = values.AgentAutoUpdateEnabled;
         existing.RestartSchedule = values.RestartSchedule;
         existing.WindowsUpdate = values.WindowsUpdate;
+        existing.ApplicationUpdates = values.ApplicationUpdates?.Normalized();
         existing.UpdatedAt = clock.GetUtcNow();
         existing.UpdatedByUserId = userId;
         return existing;

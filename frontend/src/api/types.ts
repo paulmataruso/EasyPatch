@@ -64,8 +64,12 @@ export const UPDATE_CATEGORIES = [
   'Feature',
   'Driver',
   'Other',
+  'Application',
 ] as const;
 export type UpdateCategory = (typeof UPDATE_CATEGORIES)[number];
+
+/** Categories a policy can allow. Application (winget) updates are approved per application instead (see ApplicationUpdateSettings). */
+export const POLICY_CATEGORIES: readonly UpdateCategory[] = UPDATE_CATEGORIES.filter((c) => c !== 'Application');
 
 /** Categories installed by default (everything except Feature and Driver). */
 export const DEFAULT_INSTALL_CATEGORIES: readonly UpdateCategory[] = [
@@ -117,6 +121,7 @@ export const AGENT_CAPABILITIES = {
   windowsUpdatePolicy: 'windows-update-policy',
   tray: 'tray',
   selfUpdate: 'self-update',
+  applicationUpdates: 'app-updates',
 } as const;
 
 export const WINDOWS_UPDATE_POLICY_GROUPS = ['AutomaticUpdates', 'FeatureUpdates', 'QualityUpdates', 'RestartBehavior'] as const;
@@ -481,6 +486,15 @@ export interface PolicyValues {
   securityInstallDelayDays: number | null;
   /** Updates fixing a CISA known-exploited vulnerability skip the rollout delay; null inherits (the global default is true). */
   knownExploitedSkipsDelay: boolean | null;
+  /** Third-party application updates through winget; replaces the inherited setting as a whole, null inherits (the global default is off). */
+  applicationUpdates: ApplicationUpdateSettings | null;
+}
+
+/** winget application updates: only the approved package IDs are checked and upgraded, and only where already installed. */
+export interface ApplicationUpdateSettings {
+  enabled: boolean;
+  /** winget package IDs such as Mozilla.Firefox (at most 100). */
+  approvedApps: string[];
 }
 
 export interface PolicyDto extends PolicyValues {
@@ -528,6 +542,7 @@ export interface EffectivePolicyDto {
   /** For values supplied by a tag policy: field name → tag name. */
   sourceTags: Record<string, string> | null;
   knownExploitedSkipsDelay: boolean;
+  applicationUpdates: ApplicationUpdateSettings | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -696,6 +711,19 @@ export interface EndpointDetailDto {
   agentUpdate: AgentUpdateInfoDto | null;
   /** Null for Windows endpoints. */
   linux: LinuxDetailsDto | null;
+  /** winget application updates (null for Linux endpoints). */
+  applications?: ApplicationUpdatesStatusDto | null;
+}
+
+export interface ApplicationUpdatesStatusDto {
+  /** The effective policy enables application updates with at least one approved application. */
+  enabled: boolean;
+  /** The agent can check and upgrade applications (agent 1.4.0 or newer). */
+  supported: boolean;
+  approvedApps: number;
+  wingetVersion: string | null;
+  lastCheckAt: Instant | null;
+  lastError: string | null;
 }
 
 /** Whether the agent can update itself and to which version (see the "Agent updates" policy). */

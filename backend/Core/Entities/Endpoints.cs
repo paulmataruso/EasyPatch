@@ -45,6 +45,15 @@ public sealed class Endpoint
     /// <summary>Linux: apt or dnf.</summary>
     public string? PackageManager { get; set; }
 
+    /// <summary>Windows: winget version seen by the last application update check (agent 1.4.0 and later).</summary>
+    public string? WingetVersion { get; set; }
+
+    /// <summary>When the agent last checked applications for updates.</summary>
+    public DateTimeOffset? ApplicationScanAt { get; set; }
+
+    /// <summary>Why the last application update check failed (null after a successful one or when application updates are off).</summary>
+    public string? ApplicationScanError { get; set; }
+
     /// <summary>How the agent protects its private key at rest (dpapi, systemd-creds-host, file-permissions).</summary>
     public string? KeyProtection { get; set; }
 

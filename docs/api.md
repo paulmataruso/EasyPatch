@@ -113,6 +113,10 @@ deadlineMinutes, expiryMinutes}`) and `windowsUpdate`. `windowsUpdate` has one e
 (inherit), `{managed: false}` (*Not configured*) or `{managed: true, value: {…}}`.
 `securityInstallDelayDays` (0 to 90) and `installDelayDays` (0 to 365) set the rollout delay;
 `knownExploitedSkipsDelay` (default `true`) lets updates that fix a CISA known-exploited vulnerability skip it.
+`applicationUpdates` (`{enabled, approvedApps[]}`, at most 100 winget package IDs such as
+`Mozilla.Firefox`) turns on [application updates](application-updates.md); it replaces the
+inherited value as a whole, and IDs are trimmed and de-duplicated. `allowedCategories` cannot
+contain `Application`: applications are approved by ID instead.
 Invalid values return `400 validation_failed`.
 
 ### Tags
@@ -149,9 +153,9 @@ Invalid values return `400 validation_failed`.
 | Method | Route | Notes |
 |---|---|---|
 | GET | `/endpoints` | Filters: `organizationId, siteId, search, compliance, online, os, rebootPending, outdatedAgent, status, tagId, knownExploited`. Each item includes `tags`, `missingDeferredCount` (updates inside their rollout delay) and `knownExploitedMissingCount` (outstanding allowed updates that fix a CISA known-exploited vulnerability). Sort: `hostname` (default), `organization, site, os, missing, knownExploited, lastCheckIn, compliance, agentVersion`. |
-| GET/PUT/DELETE | `/endpoints/{id}` | GET includes `platform` (`Windows` or `Linux`) and, for Linux, `linux`: `osId`, `osVersion`, `kernelVersion`, `packageManager`, `keyProtection`. PUT: `siteId`, `notes`, `esuOverride`. DELETE revokes the credentials and removes the record. |
+| GET/PUT/DELETE | `/endpoints/{id}` | GET includes `platform` (`Windows` or `Linux`) and, for Linux, `linux`: `osId`, `osVersion`, `kernelVersion`, `packageManager`, `keyProtection`. For Windows, `applications` describes application updates: `enabled` (effective policy), `supported` (agent 1.4.0 or newer), `approvedApps` (count), `wingetVersion`, `lastCheckAt`, `lastError`. PUT: `siteId`, `notes`, `esuOverride`. DELETE revokes the credentials and removes the record. |
 | POST | `/endpoints/{id}/revoke` | `{reason?}`. Revokes all credentials; the agent can no longer call the server. |
-| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification and excluded updates, with the live state of an active job overlaid. `deferredUntil` is set while an update is inside its rollout delay. `cveIds`, `knownExploited` and `kevDueDate` (the earliest CISA due date) describe the vulnerabilities the update fixes on this endpoint; known-exploited updates are listed first within each state. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). |
+| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification and excluded updates, with the live state of an active job overlaid. `deferredUntil` is set while an update is inside its rollout delay. `cveIds`, `knownExploited` and `kevDueDate` (the earliest CISA due date) describe the vulnerabilities the update fixes on this endpoint; known-exploited updates are listed first within each state. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). Application updates (category `Application`) include `package` with the winget package ID as the name, the target and installed versions and `winget` as the repository. |
 | GET | `/endpoints/{id}/installed-updates` | Updates confirmed installed by a scan |
 | GET | `/endpoints/{id}/update-history` | Windows Update history (`?search=&page=&pageSize=`). Always empty for Linux endpoints |
 | GET | `/endpoints/{id}/events` | Agent and server activity (`?severity=&page=&pageSize=`) |

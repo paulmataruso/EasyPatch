@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using EasyPatch.Agent.Core;
 using EasyPatch.Agent.Core.Abstractions;
+using EasyPatch.Agent.Core.Applications;
 using EasyPatch.Agent.Core.Runtime;
 using EasyPatch.Agent.Platform;
 using EasyPatch.Contracts.Agent;
@@ -56,6 +57,9 @@ internal static class AgentComposition
             SystemRestart = new WindowsSystemRestart(),
             PolicyRegistry = new WindowsPolicyRegistry(),
             AgentInstaller = new WindowsAgentInstaller(),
+            ApplicationUpdates = new WingetApplicationUpdateService(
+                new WingetProcessRunner(loggerFactory.CreateLogger<WingetProcessRunner>()),
+                loggerFactory.CreateLogger<WingetApplicationUpdateService>()),
         };
     }
 

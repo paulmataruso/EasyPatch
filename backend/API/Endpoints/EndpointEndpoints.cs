@@ -190,7 +190,8 @@ public static class EndpointEndpoints
                 window?.Start.ToString("HH:mm", CultureInfo.InvariantCulture), window?.DurationMinutes,
                 endpoint.Site?.TimeZone ?? endpoint.Organization!.TimeZone, p.ScanStaleAfterHours, p.MaxConcurrentInstallsPerSite, p.Sources,
                 p.TrayIconEnabled, p.InstallNotificationsEnabled, OrganizationEndpoints.ToDto(p.RestartSchedule), p.WindowsUpdate, registry,
-                p.AgentAutoUpdateEnabled, p.InstallDelayDays, p.SecurityInstallDelayDays, p.SourceTags, p.KnownExploitedSkipsDelay));
+                p.AgentAutoUpdateEnabled, p.InstallDelayDays, p.SecurityInstallDelayDays, p.SourceTags, p.KnownExploitedSkipsDelay,
+                p.ApplicationUpdates));
         });
 
         // Per-endpoint policy overrides (the most specific layer).
@@ -499,7 +500,15 @@ public static class EndpointEndpoints
             e.WindowsUpdatePolicyReportedAt,
             await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Endpoint && p.EndpointId == id, ct),
             await AgentUpdateInfoAsync(e, packages, policies, ct),
-            e.Platform == AgentPlatforms.Linux ? new LinuxDetailsDto(e.OsId, e.OsVersion, e.KernelVersion, e.PackageManager, e.KeyProtection) : null);
+            e.Platform == AgentPlatforms.Linux ? new LinuxDetailsDto(e.OsId, e.OsVersion, e.KernelVersion, e.PackageManager, e.KeyProtection) : null,
+            e.Platform == AgentPlatforms.Linux ? null : await ApplicationStatusAsync(e, policies, ct));
+    }
+
+    private static async Task<ApplicationUpdatesStatusDto> ApplicationStatusAsync(Core.Entities.Endpoint e, PolicyService policies, CancellationToken ct)
+    {
+        var apps = (await policies.ResolveAsync(e, ct)).ApplicationUpdates;
+        return new ApplicationUpdatesStatusDto(apps.IsActive, e.AgentCapabilities.Contains(AgentCapabilities.ApplicationUpdates), apps.ApprovedApps.Count,
+            e.WingetVersion, e.ApplicationScanAt, e.ApplicationScanError);
     }
 
     private static async Task<AgentUpdateInfoDto> AgentUpdateInfoAsync(EasyPatch.Core.Entities.Endpoint e, AgentPackageService packages, PolicyService policies, CancellationToken ct)

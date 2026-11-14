@@ -51,7 +51,7 @@ public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService p
         {
             var u = row.Update!;
             var decision = InstallFilter.Evaluate(row.UpdateGuid, u.KbNumbers, u.Category, u.IsOptional,
-                row.State == EndpointUpdateState.Installed, row.State == EndpointUpdateState.PendingReboot, payload);
+                row.State == EndpointUpdateState.Installed, row.State == EndpointUpdateState.PendingReboot, payload, UpdateRequirement.ApplicationId(u));
             if (decision.Install)
             {
                 items.Add(new PreviewItem(row.UpdateGuid, u.RevisionNumber, u.Title, u.PrimaryKb, u.Category, u.MaxDownloadSizeBytes, u.RebootBehavior, row.State));

@@ -186,6 +186,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.HasOne<Endpoint>().WithMany().HasForeignKey(x => x.EndpointId).OnDelete(DeleteBehavior.Cascade);
             Json(e.Property(x => x.RestartSchedule));
             Json(e.Property(x => x.WindowsUpdate));
+            Json(e.Property(x => x.ApplicationUpdates));
         });
         b.Entity<Tag>(e =>
         {
@@ -256,6 +257,8 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.Platform).HasMaxLength(16).HasDefaultValue(EasyPatch.Contracts.Agent.AgentPlatforms.Windows);
             e.Property(x => x.OsId).HasMaxLength(64);
             e.Property(x => x.PackageManager).HasMaxLength(16);
+            e.Property(x => x.WingetVersion).HasMaxLength(32);
+            e.Property(x => x.ApplicationScanError).HasMaxLength(1000);
             e.Property(x => x.KeyProtection).HasMaxLength(32);
             e.Property(x => x.AgentPackageFormat).HasMaxLength(8);
             e.HasIndex(x => x.Platform);

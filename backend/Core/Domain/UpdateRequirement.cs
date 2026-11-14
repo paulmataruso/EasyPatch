@@ -49,7 +49,7 @@ public static class UpdateRequirement
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(filter);
         var excluded = InstallFilter.IsExcluded(row.UpdateGuid, update.KbNumbers, filter);
-        if (excluded || InstallFilter.EvaluatePolicy(update.Category, update.IsOptional, filter) is not null)
+        if (excluded || InstallFilter.EvaluatePolicy(update.Category, update.IsOptional, filter, ApplicationId(update)) is not null)
         {
             return new RequirementDecision(excluded, false, null);
         }
@@ -71,4 +71,14 @@ public static class UpdateRequirement
 
     public static string? LineKey(PackageUpdateInfo? package) =>
         package is null ? null : package.Name + ":" + package.Architecture;
+
+    /// <summary>Line key of a reported update: the Linux package line, or the application (winget ID) for application updates.</summary>
+    public static string? LineKey(ReportedUpdate update)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        return update.Application is { } app ? app.Id + ":" : LineKey(update.Package);
+    }
+
+    /// <summary>The winget package ID of an application update (stored as the package name), otherwise null.</summary>
+    public static string? ApplicationId(Update? update) => update?.Category == UpdateCategory.Application ? update.PackageName : null;
 }

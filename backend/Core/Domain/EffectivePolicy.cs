@@ -48,6 +48,9 @@ public sealed record EffectivePolicy
 
     /// <summary>Windows Update settings to enforce (null groups are not managed).</summary>
     public WindowsUpdatePolicySettings WindowsUpdate { get; init; } = new();
+
+    /// <summary>Third-party application updates (winget); off unless enabled with approved applications.</summary>
+    public ApplicationUpdateSettings ApplicationUpdates { get; init; } = new();
     public IReadOnlyDictionary<string, PolicyScope> Sources { get; init; } = new Dictionary<string, PolicyScope>();
 
     /// <summary>For values that came from a tag policy: the tag's name.</summary>
@@ -62,6 +65,7 @@ public sealed record EffectivePolicy
         JitterPercent = JitterPercent,
         UserExperience = new UserExperienceConfig { TrayIcon = TrayIconEnabled, InstallNotifications = InstallNotificationsEnabled },
         WindowsUpdate = Enum.GetValues<WindowsUpdatePolicyGroup>().Any(WindowsUpdate.IsManaged) ? WindowsUpdate : null,
+        Applications = ApplicationUpdates.IsActive ? new ApplicationUpdatesConfig { Enabled = true, ApprovedApps = ApplicationUpdates.ApprovedApps } : null,
     };
 
     public InstallFilterOptions ToFilter(IEnumerable<Guid>? excludedUpdateGuids = null) => new()
@@ -71,6 +75,7 @@ public sealed record EffectivePolicy
         ExcludedKbs = ExcludedKbs,
         ExcludedUpdateGuids = excludedUpdateGuids?.ToArray() ?? [],
         AcceptEulas = AcceptEulas,
+        ApprovedApplications = ApplicationUpdates.IsActive ? ApplicationUpdates.ApprovedApps : [],
     };
 }
 
@@ -210,6 +215,17 @@ public static class PolicyResolver
             }
         }
 
+        var applications = new ApplicationUpdateSettings();
+        Source(nameof(EffectivePolicy.ApplicationUpdates), PolicyScope.Global, null);
+        foreach (var (policy, layerScope, tagName) in layers)
+        {
+            if (policy.ApplicationUpdates is { } apps)
+            {
+                applications = apps;
+                Source(nameof(EffectivePolicy.ApplicationUpdates), layerScope, tagName);
+            }
+        }
+
         T? Group<T>(string name, Func<PolicyWindowsUpdate, PolicyGroupSetting<T>?> selector)
             where T : class
         {
@@ -264,6 +280,7 @@ public static class PolicyResolver
             AgentAutoUpdateEnabled = Pick(nameof(EffectivePolicy.AgentAutoUpdateEnabled), p => p.AgentAutoUpdateEnabled, true),
             RestartSchedule = restart is { Enabled: true } ? restart : null,
             WindowsUpdate = windowsUpdate,
+            ApplicationUpdates = applications,
             Sources = sources,
             SourceTags = sourceTags,
         };
@@ -297,9 +314,9 @@ public static class PolicyResolver
         Range(nameof(policy.InstallDelayDays), policy.InstallDelayDays, 0, 365);
         Range(nameof(policy.SecurityInstallDelayDays), policy.SecurityInstallDelayDays, 0, 90);
         if (policy.AllowedCategories is { } cats &&
-            cats.Any(c => !Enum.TryParse<UpdateCategory>(c, ignoreCase: true, out _)))
+            cats.Any(c => !Enum.TryParse<UpdateCategory>(c, ignoreCase: true, out var parsed) || parsed == UpdateCategory.Application))
         {
-            errors.Add("AllowedCategories contains an unknown category.");
+            errors.Add("AllowedCategories contains an unknown category (application updates are set under ApplicationUpdates).");
         }
 
         if (policy.MaintenanceDays is { } days && days.Any(d => d is < 0 or > 6))
@@ -320,6 +337,11 @@ public static class PolicyResolver
         if (policy.WindowsUpdate is { } windowsUpdate)
         {
             errors.AddRange(windowsUpdate.Validate());
+        }
+
+        if (policy.ApplicationUpdates is { } applicationUpdates)
+        {
+            errors.AddRange(applicationUpdates.Validate());
         }
 
         return errors;

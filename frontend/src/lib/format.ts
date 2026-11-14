@@ -154,6 +154,8 @@ export function describeSkipReason(reason: string | null | undefined): string {
       return 'Maintenance window closed';
     case 'Cancelled':
       return 'Cancelled';
+    case 'ApplicationNotApproved':
+      return 'Application not approved by policy';
     case null:
     case undefined:
     case '':

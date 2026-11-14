@@ -61,6 +61,7 @@ import {
   humanize,
   isLinux,
 } from '../../lib/format';
+import { describeApplicationUpdates } from '../../lib/applications';
 import { useUrlState } from '../../lib/urlState';
 
 // ---------------------------------------------------------------------------------------------
@@ -129,6 +130,7 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
       </Card>
 
       {linux ? <PackageManagerCard endpoint={e} lastScanItems={lastScanItems} /> : <WindowsUpdateCard endpoint={e} lastScanItems={lastScanItems} />}
+      {e.applications && (e.applications.enabled || e.applications.lastCheckAt) && <ApplicationUpdatesCard status={e.applications} />}
 
       <Card title="Hardware">
         <KeyValueList
@@ -234,6 +236,32 @@ function WindowsUpdateCard({ endpoint: e, lastScanItems }: { endpoint: EndpointD
         )}
         {auOff && <Alert tone="danger" title="Windows Update service disabled">Scans and installations fail until the service start mode is restored.</Alert>}
         {e.lastScanError && <Alert tone="danger" title="Last scan failed">{e.lastScanError}</Alert>}
+      </div>
+    </Card>
+  );
+}
+
+function ApplicationUpdatesCard({ status: a }: { status: NonNullable<EndpointDetailDto['applications']> }) {
+  return (
+    <Card title="Application updates (winget)">
+      <KeyValueList
+        items={[
+          ['Policy', a.enabled ? `On for ${a.approvedApps} approved application${a.approvedApps === 1 ? '' : 's'}` : 'Off'],
+          ['winget', a.wingetVersion ? <Mono>{a.wingetVersion}</Mono> : null],
+          ['Last check', a.lastCheckAt ? `${formatDateTime(a.lastCheckAt)} (${formatRelative(a.lastCheckAt)})` : 'Never'],
+        ]}
+      />
+      <div className="mt-4 flex flex-col gap-2">
+        {a.enabled && !a.supported && (
+          <Alert tone="warn" title="Agent too old">
+            Application updates need agent 1.4.0 or newer. Update the agent to check approved applications.
+          </Alert>
+        )}
+        {a.enabled && a.lastError && (
+          <Alert tone="danger" title="Last application check failed">
+            {a.lastError}
+          </Alert>
+        )}
       </div>
     </Card>
   );
@@ -773,6 +801,9 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
                   {linux && <span className="text-xs text-muted">(Windows updates only)</span>}
                 </>,
               ),
+              ...(linux
+                ? []
+                : [row('Application updates (winget)', 'applicationUpdates', describeApplicationUpdates(p.applicationUpdates))]),
               row('Rollout delay: security updates', 'securityInstallDelayDays', delayText(p.securityInstallDelayDays ?? 0)),
               row('Rollout delay: other updates', 'installDelayDays', delayText(p.installDelayDays ?? 0)),
               row(

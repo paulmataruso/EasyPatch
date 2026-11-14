@@ -13,6 +13,10 @@ public enum UpdateCategory
     Feature,
     Driver,
     Other,
+
+    /// <summary>A newer version of a third-party application (winget, agent 1.4.0 and later). Never part of
+    /// <see cref="Agent.InstallFilterOptions.Categories"/>: application updates are governed by the approved application list.</summary>
+    Application,
 }
 
 public enum JobType

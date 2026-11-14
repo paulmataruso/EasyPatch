@@ -172,6 +172,16 @@ order:
 8. **Critical**: the Critical Updates classification
 9. **Other**: everything else
 
+**Application** is used only for winget application updates (an update reported with
+application details). It is never one of a policy's allowed categories; application updates are
+approved by package ID instead (see [application-updates.md](application-updates.md)). Each one
+is a catalog entry for one version of one winget package: the update GUID is derived from the
+lower-cased package ID and the version (SHA-256, formatted as a version 8 UUID), the package ID
+and version are stored as the update's package name and version with `winget` as the
+repository, and the installed version is stored on the endpoint's update row. Because the
+installed version is reported with the same GUID, the next scan after an upgrade marks the
+update installed.
+
 The original Microsoft classification is stored as well. Cumulative, ServicingStack and
 DotNet are derived categories, not Microsoft classifications.
 
@@ -576,3 +586,30 @@ that ended before `enabled_at` or are already recorded in `last_scheduled_period
 pending emails through `INotificationTransport` with the PDF attached. Report emails use their own
 outbox fields rather than `notification_deliveries`, which are bound to channels. The retention
 task deletes reports older than `RetentionReportsMonths`.
+
+## 10. Application updates (winget)
+
+Policy: `policies.application_updates` (jsonb, `ApplicationUpdateSettings {enabled, approvedApps}`)
+is resolved as a unit like the restart schedule. `EffectivePolicy.ToAgentConfig` sends
+`AgentConfig.Applications` only while it is on with at least one approved ID, and `ToFilter` puts
+the IDs in `InstallFilterOptions.ApprovedApplications`, which every install job carries.
+`InstallFilter` decides Application updates by that list in every mode, independently of the
+allowed categories.
+
+Agent: `AgentRuntime` wraps the Windows Update service in a `CompositeUpdateService` when the
+platform provides an `IApplicationUpdateService` (Windows only; the agent then reports the
+`app-updates` capability). After a successful Windows Update scan, and only while the current
+configuration enables it, the composite asks `WingetApplicationUpdateService` to check the
+approved IDs and appends the results, with an `ApplicationScanReport` (succeeded, error, winget
+version, number checked) on the scan report. Installs are routed by handle type; the download
+step of an application update is a no-op because winget downloads during the upgrade.
+`WingetProcessRunner` finds `winget.exe` in the newest `Microsoft.DesktopAppInstaller` package
+under `%ProgramFiles%\WindowsApps`, runs it with an argument vector, caps the output at 4 MB and
+kills the process tree on timeout. `WingetOutput` finds a package's row in `winget list` output by
+its ID rather than by the (translated) column headers.
+
+Server: `ScanIngestionService` drops malformed application updates, records `winget_version`,
+`application_scan_at` and `application_scan_error` on the endpoint, and, when the application
+check failed, keeps the existing Application rows instead of ageing them out
+(`UpdateReconciler`'s `keepWhenUnreported`). When the report has no application section
+(application updates off), unreported Application rows become NotApplicable like any other row.

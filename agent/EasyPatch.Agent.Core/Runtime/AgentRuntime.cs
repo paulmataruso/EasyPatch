@@ -1,4 +1,5 @@
 using EasyPatch.Agent.Core.Abstractions;
+using EasyPatch.Agent.Core.Applications;
 using EasyPatch.Agent.Core.Enrollment;
 using EasyPatch.Agent.Core.Jobs;
 using EasyPatch.Agent.Core.Outbox;
@@ -63,6 +64,17 @@ public sealed class AgentRuntime : IDisposable
 
         Directory.CreateDirectory(options.DataDirectory);
         State = new AgentStateStore(options.DataDirectory, loggerFactory.CreateLogger<AgentStateStore>());
+        if (platform.ApplicationUpdates is { } applications)
+        {
+            // Application updates join every scan and install, but only while the server's policy turns them on.
+            platform = platform with
+            {
+                Updates = new CompositeUpdateService(platform.Updates, applications, () => State.Read(s => s.Config.Applications),
+                    loggerFactory.CreateLogger<CompositeUpdateService>()),
+            };
+            _platform = platform;
+        }
+
         _keys = new AgentKeyStore(options.DataDirectory, platform.SecretProtector, loggerFactory.CreateLogger<AgentKeyStore>());
         _outbox = new ReportOutbox(options.DataDirectory, options.MaxOutboxItems, options.MaxOutboxBytes, _time, loggerFactory.CreateLogger<ReportOutbox>());
         _outbox.ItemEnqueued += (_, _) => _flushSignal.Release();

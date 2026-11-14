@@ -45,6 +45,11 @@ Linux package upgrades are classified as Security or Other, so with the default 
 available upgrade of an installed package is required. Remove Other from the policy's categories
 to require only security upgrades.
 
+Application updates (winget, category **Application**) are not selected by category: an
+application update is required when application updates are on in the policy and the application
+is on the approved list. The *Other updates* rollout delay applies. See
+[application-updates.md](application-updates.md).
+
 Updates that are not required are still shown and can still be installed, but they never affect
 compliance. When a policy changes, or tags are added to or removed from an endpoint, the required
 flags and statuses of every affected endpoint are recalculated immediately.

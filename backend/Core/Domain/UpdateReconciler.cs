@@ -36,7 +36,8 @@ public static class UpdateReconciler
         Func<Guid, bool> isExcluded,
         Func<Guid, Guid, bool> isRequired,
         Guid scanId,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        Func<EndpointUpdate, bool>? keepWhenUnreported = null)
     {
         ArgumentNullException.ThrowIfNull(existing);
         ArgumentNullException.ThrowIfNull(missing);
@@ -179,7 +180,8 @@ public static class UpdateReconciler
 
         foreach (var row in existing.Values)
         {
-            if (seen.Contains(row.UpdateGuid))
+            // keepWhenUnreported: rows the scan could not see (e.g. application updates when the winget part failed).
+            if (seen.Contains(row.UpdateGuid) || keepWhenUnreported?.Invoke(row) == true)
             {
                 continue;
             }

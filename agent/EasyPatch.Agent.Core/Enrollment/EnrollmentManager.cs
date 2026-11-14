@@ -348,6 +348,13 @@ public static class AgentConfigLimits
             InventoryIntervalMinutes = Math.Clamp(config.InventoryIntervalMinutes, 60, 7 * 24 * 60),
             JitterPercent = Math.Clamp(config.JitterPercent, 0, 50),
             UserExperience = config.UserExperience ?? new UserExperienceConfig(),
+            Applications = config.Applications is { } apps
+                ? apps with
+                {
+                    ApprovedApps = (apps.ApprovedApps ?? []).Where(ApplicationIds.IsValid).Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(ApplicationIds.MaxApproved).ToList(),
+                }
+                : null,
         };
     }
 }

@@ -326,7 +326,7 @@ public static class OrganizationEndpoints
         p.MaintenanceStart?.ToString("HH:mm", CultureInfo.InvariantCulture), p.MaintenanceDurationMinutes, p.ScanStaleAfterHours,
         p.MaxConcurrentInstallsPerSite, p.UpdatedAt, p.EndpointId, p.TrayIconEnabled, p.InstallNotificationsEnabled,
         ToDto(p.RestartSchedule), p.WindowsUpdate, p.AgentAutoUpdateEnabled, p.InstallDelayDays, p.SecurityInstallDelayDays, p.TagId,
-        p.KnownExploitedSkipsDelay);
+        p.KnownExploitedSkipsDelay, p.ApplicationUpdates);
 
     internal static RestartScheduleDto? ToDto(RestartScheduleSettings? r) => r is null
         ? null
@@ -376,6 +376,7 @@ public static class OrganizationEndpoints
             AgentAutoUpdateEnabled = r.AgentAutoUpdateEnabled,
             RestartSchedule = FromRequest(r.RestartSchedule),
             WindowsUpdate = r.WindowsUpdate,
+            ApplicationUpdates = r.ApplicationUpdates?.Normalized(),
         };
     }
 

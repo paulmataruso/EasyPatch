@@ -123,6 +123,22 @@ cancelled.
 | Names show as empty boxes in the PDF | The embedded font covers Latin, Greek and Cyrillic only |
 | `The report is too large to email` | Reports over 15 MB are not emailed. Generate it without the endpoint list, or download it |
 
+## Application updates (winget)
+
+The endpoint's **Overview** tab shows the last application check and its error; failures also
+appear as *ApplicationScanFailed* events. See [application-updates.md](application-updates.md).
+
+| Symptom | Cause and fix |
+|---|---|
+| *Agent too old* | Application updates need agent 1.4.0 or newer |
+| `winget (App Installer) is not installed for all users` (`winget_not_found`) | Install App Installer from the Microsoft Store or the [winget releases](https://github.com/microsoft/winget-cli/releases) for all users. Windows Server 2019 and 2022 and Windows 10 LTSC do not include it |
+| `winget_too_old` | Update App Installer to 1.6 or newer |
+| An approved application never shows updates | It is installed only for one user (for example in `AppData`), which the agent cannot see, or winget cannot match it to a package or tell its version. Run `winget list --id <ID> --exact --source winget` in an elevated prompt to see what winget reports |
+| `not_verified` | winget exited successfully but the new version was not listed afterwards. Check whether the application was running, then install again |
+| `winget_0x8A150101` | The application was running. Close it, or retry in the maintenance window |
+| `winget_0x8A150109` or `winget_0x8A15010A` | The installer needs a restart. EasyPatch does not restart for application updates: restart the computer, and the next check confirms the upgrade |
+| `winget_0x8A150011` or a hash error | The installer did not match the reviewed manifest (often a vendor re-publishing a file). EasyPatch never skips this check; the next version in the repository usually fixes it |
+
 ## Vulnerability data (CVEs and known-exploited updates)
 
 | Symptom | Cause and fix |

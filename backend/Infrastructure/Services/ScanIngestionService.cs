@@ -36,6 +36,16 @@ public sealed class ScanIngestionService(
             return; // idempotent retry
         }
 
+        // Application updates must carry a valid winget ID and version and the GUID derived from them; others are dropped.
+        static bool Valid(ReportedUpdate u) => u.Application is not { } app ||
+                                               (ApplicationIds.IsValid(app.Id) && ApplicationIds.IsValidVersion(app.Version) &&
+                                                u.UpdateGuid == ApplicationIds.UpdateGuidFor(app.Id, app.Version));
+        if (report.Missing.Any(u => !Valid(u)) || report.Installed.Any(u => !Valid(u)))
+        {
+            logger.LogWarning("Scan {ScanId} of endpoint {EndpointId} contained invalid application updates; they were ignored", report.ScanId, endpointId);
+            report = report with { Missing = report.Missing.Where(Valid).ToList(), Installed = report.Installed.Where(Valid).ToList() };
+        }
+
         var now = clock.GetUtcNow();
         var catalog = report.Succeeded
             ? await UpsertCatalogAsync(report.Missing.Concat(report.Installed).ToList(), now, ct)
@@ -69,6 +79,10 @@ public sealed class ScanIngestionService(
         db.UpdateScans.Add(scan);
         endpoint.LastScanAttemptAt = completedAt;
         ApplySource(endpoint, report.Source);
+        if (report.Succeeded)
+        {
+            ApplyApplicationScan(endpoint, report.Applications, completedAt, now, report.JobId);
+        }
 
         if (!report.Succeeded)
         {
@@ -100,7 +114,7 @@ public sealed class ScanIngestionService(
         {
             var row = catalog[(r.UpdateGuid, r.RevisionNumber)];
             return new ReconcileItem(r.UpdateGuid, row.Id, r.RebootRequired, r.SupersededUpdateGuids,
-                firstSeen.GetValueOrDefault(r.UpdateGuid), UpdateRequirement.LineKey(r.Package));
+                firstSeen.GetValueOrDefault(r.UpdateGuid), UpdateRequirement.LineKey(r));
         }
 
         var result = UpdateReconciler.Reconcile(
@@ -110,9 +124,11 @@ public sealed class ScanIngestionService(
             report.Installed.Select(ToItem).ToList(),
             guid => byGuid.TryGetValue(guid, out var u) && InstallFilter.IsExcluded(guid, u.KbNumbers, filter),
             (guid, updateId) => byId.TryGetValue(updateId, out var u) &&
-                                InstallFilter.IsRequired(u.Category, u.IsOptional, guid, u.KbNumbers, filter),
+                                InstallFilter.IsRequired(u.Category, u.IsOptional, guid, u.KbNumbers, filter, UpdateRequirement.ApplicationId(u)),
             scan.Id,
-            now);
+            now,
+            // A failed application check says nothing about the applications: keep their states until one succeeds.
+            report.Applications is { Succeeded: false } ? r => r.Update?.Category == UpdateCategory.Application : null);
         db.EndpointUpdates.AddRange(result.Added);
 
         // Linux: remember which version each endpoint had installed (the catalog row is shared by every endpoint), and
@@ -120,6 +136,11 @@ public sealed class ScanIngestionService(
         var cveChanges = new HashSet<Guid>();
         foreach (var reported in report.Missing.Concat(report.Installed))
         {
+            if (reported.Application is { } application && rows.TryGetValue(reported.UpdateGuid, out var applicationRow))
+            {
+                applicationRow.InstalledVersion = Truncate(application.InstalledVersion, 255);
+            }
+
             if (reported.Package is { } package && rows.TryGetValue(reported.UpdateGuid, out var packageRow))
             {
                 packageRow.InstalledVersion = Truncate(package.InstalledVersion, 255);
@@ -385,10 +406,11 @@ public sealed class ScanIngestionService(
         var classification = Truncate(UpdateClassifier.GetMicrosoftClassificationName(r.Categories), 128);
         var products = UpdateClassifier.GetProducts(r.Categories).Select(p => Truncate(p, 200)!).Take(20).ToList();
         var package = r.Package;
-        var packageName = Truncate(package?.Name, 255);
-        var packageVersion = Truncate(package?.Version, 255);
+        var application = r.Application;
+        var packageName = Truncate(application?.Id ?? package?.Name, 255);
+        var packageVersion = Truncate(application?.Version ?? package?.Version, 255);
         var packageArch = Truncate(package?.Architecture, 32);
-        var repository = Truncate(package?.Repository, 255);
+        var repository = application is not null ? ApplicationIds.Source : Truncate(package?.Repository, 255);
         var source = Truncate(package?.SourcePackage?.Trim(), 255);
         var advisories = package?.Advisories.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => Truncate(a.Trim(), 64)!).Distinct().Take(50).ToList() ?? [];
         var changed = row.Title != title || (description is not null && row.Description != description) ||
@@ -430,6 +452,29 @@ public sealed class ScanIngestionService(
         row.PackageSource = source;
         row.Advisories = advisories;
         row.UpdatedAt = now;
+    }
+
+    /// <summary>Records the outcome of the application (winget) check. Null: application updates are off for this endpoint.</summary>
+    private void ApplyApplicationScan(Endpoint endpoint, ApplicationScanReport? applications, DateTimeOffset completedAt, DateTimeOffset now, Guid? jobId)
+    {
+        if (applications is null)
+        {
+            endpoint.ApplicationScanError = null;
+            return;
+        }
+
+        endpoint.ApplicationScanAt = completedAt;
+        endpoint.WingetVersion = Truncate(applications.WingetVersion?.Trim(), 32);
+        var error = applications.Succeeded
+            ? null
+            : Truncate(applications.ErrorMessage ?? applications.ErrorCode ?? "The application check failed.", 1000);
+        if (error is not null && error != endpoint.ApplicationScanError)
+        {
+            EndpointEvents.Add(db, endpoint, "ApplicationScanFailed", $"Application update check failed: {error}", now, EventSeverity.Warning, jobId,
+                new { applications.ErrorCode });
+        }
+
+        endpoint.ApplicationScanError = error;
     }
 
     private static void ApplySource(Endpoint endpoint, UpdateSourceInfo? source)

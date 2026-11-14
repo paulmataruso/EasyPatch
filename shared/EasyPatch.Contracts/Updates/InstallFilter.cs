@@ -20,7 +20,7 @@ public static class InstallFilter
         ArgumentNullException.ThrowIfNull(update);
         ArgumentNullException.ThrowIfNull(payload);
         var decision = Evaluate(update.UpdateGuid, update.KbNumbers, UpdateClassifier.Classify(update), update.BrowseOnly,
-            update.IsInstalled, update.RebootRequired, payload);
+            update.IsInstalled, update.RebootRequired, payload, update.Application?.Id);
         if (!decision.Install)
         {
             return decision;
@@ -40,8 +40,9 @@ public static class InstallFilter
     }
 
     /// <summary>Core decision from already-classified metadata (used by the server with stored categories).</summary>
+    /// <param name="applicationId">winget package ID of an <see cref="UpdateCategory.Application"/> update.</param>
     public static FilterDecision Evaluate(Guid updateGuid, IEnumerable<string> kbNumbers, UpdateCategory category, bool browseOnly,
-        bool isInstalled, bool rebootRequired, InstallUpdatesPayload payload)
+        bool isInstalled, bool rebootRequired, InstallUpdatesPayload payload, string? applicationId = null)
     {
         ArgumentNullException.ThrowIfNull(kbNumbers);
         ArgumentNullException.ThrowIfNull(payload);
@@ -62,19 +63,31 @@ public static class InstallFilter
 
         if (payload.Mode == InstallMode.Selected)
         {
-            return payload.SelectedUpdateGuids.Contains(updateGuid)
-                ? FilterDecision.Accept(category)
-                : FilterDecision.Skip(SkipReasons.NotSelected, category);
+            if (!payload.SelectedUpdateGuids.Contains(updateGuid))
+            {
+                return FilterDecision.Skip(SkipReasons.NotSelected, category);
+            }
+
+            // Application updates are installed only while the application is approved, even when selected by hand.
+            return category == UpdateCategory.Application && !IsApproved(applicationId, payload.Filter)
+                ? FilterDecision.Skip(SkipReasons.ApplicationNotApproved, category)
+                : FilterDecision.Accept(category);
         }
 
-        var policyDecision = EvaluatePolicy(category, browseOnly, payload.Filter);
+        var policyDecision = EvaluatePolicy(category, browseOnly, payload.Filter, applicationId);
         return policyDecision is null ? FilterDecision.Accept(category) : FilterDecision.Skip(policyDecision, category);
     }
 
-    /// <summary>Returns null when the category/optional rules allow the update, otherwise the skip reason.</summary>
-    public static string? EvaluatePolicy(UpdateCategory category, bool browseOnly, InstallFilterOptions filter)
+    /// <summary>Returns null when the category/optional rules allow the update, otherwise the skip reason. Application updates
+    /// are allowed by the approved application list instead of the categories.</summary>
+    public static string? EvaluatePolicy(UpdateCategory category, bool browseOnly, InstallFilterOptions filter, string? applicationId = null)
     {
         ArgumentNullException.ThrowIfNull(filter);
+        if (category == UpdateCategory.Application)
+        {
+            return IsApproved(applicationId, filter) ? null : SkipReasons.ApplicationNotApproved;
+        }
+
         if (!filter.Categories.Contains(category))
         {
             return SkipReasons.CategoryNotAllowed;
@@ -89,8 +102,15 @@ public static class InstallFilter
     }
 
     /// <summary>True when policy would install this update automatically (used for compliance "required" flag).</summary>
-    public static bool IsRequired(UpdateCategory category, bool browseOnly, Guid updateGuid, IEnumerable<string> kbNumbers, InstallFilterOptions filter) =>
-        !IsExcluded(updateGuid, kbNumbers, filter) && EvaluatePolicy(category, browseOnly, filter) is null;
+    public static bool IsRequired(UpdateCategory category, bool browseOnly, Guid updateGuid, IEnumerable<string> kbNumbers, InstallFilterOptions filter,
+        string? applicationId = null) =>
+        !IsExcluded(updateGuid, kbNumbers, filter) && EvaluatePolicy(category, browseOnly, filter, applicationId) is null;
+
+    public static bool IsApproved(string? applicationId, InstallFilterOptions filter)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        return applicationId is not null && filter.ApprovedApplications.Contains(applicationId, StringComparer.OrdinalIgnoreCase);
+    }
 
     public static bool IsExcluded(Guid updateGuid, IEnumerable<string> kbNumbers, InstallFilterOptions filter)
     {

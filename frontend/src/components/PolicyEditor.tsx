@@ -1,6 +1,15 @@
 import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Plus, RotateCcw, Save, X } from 'lucide-react';
-import { DEFAULT_INSTALL_CATEGORIES, UPDATE_CATEGORIES, type PolicyDto, type PolicyRequest, type PolicyScope, type UpdateCategory } from '../api/types';
+import {
+  DEFAULT_INSTALL_CATEGORIES,
+  POLICY_CATEGORIES,
+  type ApplicationUpdateSettings,
+  type PolicyDto,
+  type PolicyRequest,
+  type PolicyScope,
+  type UpdateCategory,
+} from '../api/types';
+import { describeApplicationUpdates, isValidAppId, MAX_APPROVED_APPS, parseAppIds, SUGGESTED_APPS } from '../lib/applications';
 import { DAY_LABELS, formatDays, formatDuration, humanize, isValidTime, normalizeKb } from '../lib/format';
 import {
   DEFAULT_RESTART_SCHEDULE,
@@ -39,6 +48,7 @@ const EMPTY: PolicyRequest = {
   installDelayDays: null,
   securityInstallDelayDays: null,
   knownExploitedSkipsDelay: null,
+  applicationUpdates: null,
 };
 
 export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
@@ -66,6 +76,7 @@ export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
     installDelayDays: policy.installDelayDays ?? null,
     securityInstallDelayDays: policy.securityInstallDelayDays ?? null,
     knownExploitedSkipsDelay: policy.knownExploitedSkipsDelay ?? null,
+    applicationUpdates: policy.applicationUpdates ?? null,
   };
 }
 
@@ -245,7 +256,7 @@ export function PolicyEditor({
             onToggle={(explicit) => update('allowedCategories', explicit ? [...effectiveCategories] : null)}
           >
             <div className="flex flex-wrap gap-2">
-              {UPDATE_CATEGORIES.map((c) => {
+              {POLICY_CATEGORIES.map((c) => {
                 const checked = effectiveCategories.includes(c);
                 const disabled = readOnly || (!isGlobal && categories === null);
                 return (
@@ -266,7 +277,7 @@ export function PolicyEditor({
                         const set = new Set(effectiveCategories);
                         if (e.target.checked) set.add(c);
                         else set.delete(c);
-                        update('allowedCategories', UPDATE_CATEGORIES.filter((x) => set.has(x)));
+                        update('allowedCategories', POLICY_CATEGORIES.filter((x) => set.has(x)));
                       }}
                     />
                     {humanize(c)}
@@ -495,6 +506,35 @@ export function PolicyEditor({
       </Card>
 
       {!linux && (
+        <Card title="Application updates (winget)">
+          <Row
+            label="Third-party application updates"
+            hint={
+              <>
+                Upgrades approved applications with winget from the winget community repository, only on computers where the application is already installed
+                machine-wide. Updates of approved applications are installed like Windows updates (scheduled installs and “Install all missing updates”); an upgrade
+                counts as installed only when winget then lists the new version. Requires agent 1.4.0 and App Installer (winget) 1.6 or newer, which Windows Server
+                2019 and 2022 do not include. See docs/application-updates.md.
+              </>
+            }
+            inheritable={!isGlobal}
+            explicit={isGlobal || form.applicationUpdates !== null}
+            readOnly={readOnly}
+            inheritedText={describeApplicationUpdates(inherited?.applicationUpdates)}
+            onToggle={(explicit) =>
+              update('applicationUpdates', explicit ? { enabled: false, approvedApps: [], ...inherited?.applicationUpdates } : null)
+            }
+          >
+            <ApplicationUpdatesFields
+              value={form.applicationUpdates ?? { enabled: false, approvedApps: [] }}
+              disabled={readOnly || (!isGlobal && form.applicationUpdates === null)}
+              onChange={(v) => update('applicationUpdates', v)}
+            />
+          </Row>
+        </Card>
+      )}
+
+      {!linux && (
         <Card title="Windows Update settings">
           <WindowsUpdateSection
             value={form.windowsUpdate}
@@ -555,6 +595,9 @@ export function validatePolicy(form: PolicyRequest, isGlobal: boolean): string |
     return 'Every setting is required in the global policy.';
   }
   if (form.allowedCategories !== null && form.allowedCategories.length === 0) return 'Select at least one update category.';
+  const apps = form.applicationUpdates?.approvedApps ?? [];
+  if (apps.length > MAX_APPROVED_APPS) return `Approve at most ${MAX_APPROVED_APPS} applications.`;
+  if (apps.some((id) => !isValidAppId(id))) return 'Approved applications must be winget package IDs such as Mozilla.Firefox.';
   if (form.maintenanceDays !== null) {
     if (!form.maintenanceStart || !isValidTime(form.maintenanceStart)) return 'Maintenance window start must be a time such as 02:00.';
     const d = form.maintenanceDurationMinutes;
@@ -564,6 +607,112 @@ export function validatePolicy(form: PolicyRequest, isGlobal: boolean): string |
     return 'Automatic installation needs at least one maintenance day.';
   }
   return validateRestartSchedule(form.restartSchedule) ?? validateWindowsUpdate(form.windowsUpdate);
+}
+
+function ApplicationUpdatesFields({ value, disabled, onChange }: {
+  value: ApplicationUpdateSettings;
+  disabled: boolean;
+  onChange: (value: ApplicationUpdateSettings) => void;
+}) {
+  const id = useId();
+  const [input, setInput] = useState('');
+  const [inputError, setInputError] = useState<string | null>(null);
+  const approved = value.approvedApps;
+
+  function add(text: string) {
+    const { ids, invalid } = parseAppIds(text, approved);
+    if (invalid.length > 0) {
+      setInputError(`Not a winget package ID: ${invalid.slice(0, 3).join(', ')}. Use the ID shown by “winget search”, such as Mozilla.Firefox.`);
+      return;
+    }
+    if (approved.length + ids.length > MAX_APPROVED_APPS) {
+      setInputError(`Approve at most ${MAX_APPROVED_APPS} applications.`);
+      return;
+    }
+    setInputError(null);
+    if (ids.length > 0) onChange({ ...value, approvedApps: [...approved, ...ids] });
+    setInput('');
+  }
+
+  const suggestions = SUGGESTED_APPS.filter((s) => !approved.some((a) => a.toLowerCase() === s.id.toLowerCase()));
+  return (
+    <div className={cx('flex flex-col gap-3', disabled && 'opacity-60')}>
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={id} className="text-sm">
+          Status
+        </label>
+        <Select id={id} value={value.enabled ? 'on' : 'off'} disabled={disabled} onChange={(e) => onChange({ ...value, enabled: e.target.value === 'on' })} className="w-auto">
+          <option value="off">Off</option>
+          <option value="on">On for the approved applications</option>
+        </Select>
+      </div>
+      <div>
+        <p className="text-sm font-medium">Approved applications</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {approved.length === 0 && <span className="text-sm text-subtle">None</span>}
+          {approved.map((app) => (
+            <span key={app} className="inline-flex items-center gap-1 rounded-full bg-neutral-soft py-0.5 pr-1 pl-2.5 font-mono text-xs">
+              {app}
+              {!disabled && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${app}`}
+                  className="rounded-full p-0.5 hover:bg-hover"
+                  onClick={() => onChange({ ...value, approvedApps: approved.filter((a) => a !== app) })}
+                >
+                  <X className="size-3" aria-hidden />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      </div>
+      {!disabled && (
+        <>
+          <div className="flex max-w-md gap-2">
+            <Input
+              aria-label="winget package ID to approve"
+              placeholder="Mozilla.Firefox"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  add(input);
+                }
+              }}
+              aria-invalid={inputError ? true : undefined}
+            />
+            <Button onClick={() => add(input)} icon={<Plus className="size-4" aria-hidden />}>
+              Approve
+            </Button>
+          </div>
+          {inputError && <p className="text-xs text-danger">{inputError}</p>}
+          {suggestions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-muted">Common:</span>
+              {suggestions.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  title={s.id}
+                  className="rounded-full border border-line px-2 py-0.5 text-xs hover:bg-hover"
+                  onClick={() => add(s.id)}
+                >
+                  + {s.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {value.enabled && approved.length === 0 && <p className="text-xs text-warn">No applications are approved, so none are checked.</p>}
+      <p className="text-xs text-muted">
+        Applications installed only for one user (for example in AppData) are not visible to the agent. Installers may close a running application. EasyPatch never
+        installs an application that is not already there and never restarts a computer because of an application update.
+      </p>
+    </div>
+  );
 }
 
 function Row({ label, hint, inheritable, explicit, readOnly, inheritedText, onToggle, children }: {

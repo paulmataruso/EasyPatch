@@ -533,6 +533,15 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("agent_version");
 
+                    b.Property<DateTimeOffset?>("ApplicationScanAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("application_scan_at");
+
+                    b.Property<string>("ApplicationScanError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("application_scan_error");
+
                     b.Property<string>("Architecture")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -870,6 +879,11 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
                         .HasColumnName("windows_update_service_state");
+
+                    b.Property<string>("WingetVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("winget_version");
 
                     b.Property<bool>("WufbPoliciesConfigured")
                         .HasColumnType("boolean")
@@ -2581,6 +2595,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.PrimitiveCollection<List<string>>("AllowedCategories")
                         .HasColumnType("text[]")
                         .HasColumnName("allowed_categories");
+
+                    b.Property<string>("ApplicationUpdates")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("application_updates");
 
                     b.Property<bool?>("AutoInstallEnabled")
                         .HasColumnType("boolean")

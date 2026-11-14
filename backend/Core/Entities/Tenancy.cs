@@ -89,6 +89,9 @@ public sealed class Policy
     /// <summary>Windows Update settings to enforce, per group (a missing group inherits).</summary>
     public Domain.PolicyWindowsUpdate? WindowsUpdate { get; set; }
 
+    /// <summary>Third-party application updates (winget), overriding the level above as a unit (null = inherit).</summary>
+    public Domain.ApplicationUpdateSettings? ApplicationUpdates { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? UpdatedByUserId { get; set; }
 }

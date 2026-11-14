@@ -11,7 +11,10 @@ public static class AgentCapabilities
     /// <summary>The agent can install signed agent updates (it was built with at least one release key).</summary>
     public const string SelfUpdate = "self-update";
 
-    public static IReadOnlyList<string> All { get; } = [Restart, NotifyUser, WindowsUpdatePolicy, Tray, SelfUpdate];
+    /// <summary>The agent can check and install third-party application updates (winget; Windows agent 1.4.0 and later).</summary>
+    public const string ApplicationUpdates = "app-updates";
+
+    public static IReadOnlyList<string> All { get; } = [Restart, NotifyUser, WindowsUpdatePolicy, Tray, SelfUpdate, ApplicationUpdates];
 
     /// <summary>The capability a job type needs, or null when every agent supports it.</summary>
     public static string? RequiredFor(JobType type) => type switch

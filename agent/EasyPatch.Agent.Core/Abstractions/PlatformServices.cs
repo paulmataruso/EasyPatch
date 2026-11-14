@@ -48,6 +48,9 @@ public sealed class UpdateScanResult : IDisposable
 
     public bool MicrosoftUpdateRegistered { get; }
 
+    /// <summary>Outcome of the application (winget) part; null when application updates are off.</summary>
+    public ApplicationScanReport? Applications { get; init; }
+
     public void Dispose()
     {
         foreach (var candidate in Missing)
@@ -130,6 +133,33 @@ public interface IUpdateService
 
     /// <summary>Windows Update history newer than <paramref name="since"/> (newest first), at most <paramref name="maxEntries"/>.</summary>
     Task<IReadOnlyList<HistoryEntryReport>> GetHistoryAsync(DateTimeOffset? since, int maxEntries, CancellationToken cancellationToken);
+}
+
+/// <summary>An application update found by <see cref="IApplicationUpdateService"/>.</summary>
+public sealed class ApplicationUpdateHandle(string id, string version, string? installedVersion) : IUpdateHandle
+{
+    public string Id { get; } = id;
+
+    public string Version { get; } = version;
+
+    public string? InstalledVersion { get; } = installedVersion;
+
+    public void Dispose()
+    {
+    }
+}
+
+/// <summary>Result of an application update check.</summary>
+public sealed record ApplicationScanResult(IReadOnlyList<UpdateCandidate> Missing, IReadOnlyList<ReportedUpdate> Installed, ApplicationScanReport Report);
+
+/// <summary>Third-party application updates (winget). Implementations upgrade applications that are already installed, to the
+/// version a scan found, and report success only when a new check shows that version installed.</summary>
+public interface IApplicationUpdateService
+{
+    /// <summary>Checks the approved applications (winget package IDs, already validated) for newer versions.</summary>
+    Task<ApplicationScanResult> ScanAsync(IReadOnlyList<string> approvedIds, CancellationToken cancellationToken);
+
+    Task<UpdateOperationResult> InstallAsync(ApplicationUpdateHandle update, CancellationToken cancellationToken);
 }
 
 /// <summary>Progress of a batch installation: how many of the updates the package manager has finished.</summary>
@@ -280,6 +310,9 @@ public sealed record AgentPlatform(
     /// <summary>Signed-in users on a platform without a tray (Linux). Ignored when <see cref="UserInteraction"/> is set.</summary>
     public IUserSessionCounter? SessionCounter { get; init; }
 
+    /// <summary>Third-party application updates (winget on Windows). Used only while the server's policy enables them.</summary>
+    public IApplicationUpdateService? ApplicationUpdates { get; init; }
+
     public IUserInteraction Users => UserInteraction ?? (SessionCounter is { } counter ? new SessionsOnlyInteraction(counter) : NoUserInteraction.Instance);
 
     public IReadOnlyList<string> Capabilities
@@ -301,6 +334,11 @@ public sealed record AgentPlatform(
             if (PolicyRegistry is not null)
             {
                 list.Add(AgentCapabilities.WindowsUpdatePolicy);
+            }
+
+            if (ApplicationUpdates is not null)
+            {
+                list.Add(AgentCapabilities.ApplicationUpdates);
             }
 
             return list;

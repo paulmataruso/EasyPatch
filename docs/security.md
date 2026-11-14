@@ -371,6 +371,37 @@ exposure: hostnames, missing updates and known-exploited vulnerabilities.
   report retention period. Generating a report makes no outbound connection: the font is embedded
   in the server.
 
+## Application updates (winget)
+
+Application updates ([application-updates.md](application-updates.md)) are off by default. When
+an administrator turns them on and approves applications, the Windows agent runs winget as
+LocalSystem.
+
+* **No general command execution.** The agent builds two fixed command lines (`winget list` and
+  `winget upgrade`) and passes them as an argument vector, never through a shell. The only
+  variable parts are a package ID and a version, both checked against strict patterns (letters,
+  digits and `.-_+`; IDs must contain a dot) on the server and on the agent. `--force`,
+  `--ignore-security-hash`, installer overrides and sources other than the winget community
+  repository are never used.
+* **Upgrades of installed applications only.** The agent checks only approved IDs and offers
+  only upgrades of applications that winget lists as installed. The version installed is the one
+  the agent's own check found; the server cannot choose it, downgrade an application or install a
+  new one.
+* **Approval enforced on both sides.** The server marks only approved application updates as
+  required and puts the approved list in every install job; the agent's install filter skips
+  application updates that are not on it. Changing the list needs the Operator role (global
+  policy: SuperAdmin) and is audited like every policy change.
+* **Verified results.** An upgrade is reported as installed only when winget lists the new version
+  afterwards, never on the exit code alone.
+* **Validated reports.** The server ignores application updates whose ID or version is malformed
+  or whose update GUID does not match the ID and version.
+* **Residual risk.** The packages come from the winget community repository and the vendors'
+  download sites; winget checks each installer's SHA-256 against the reviewed manifest. A
+  compromised manifest or vendor installer would run as LocalSystem on the computers where that
+  application is approved and installed, as it would for any software deployment. A third-party
+  installer can restart the computer by itself despite silent mode. Approve only well-known
+  applications.
+
 ## Threat model (STRIDE summary)
 
 | # | Threat | Mitigation |
@@ -378,7 +409,7 @@ exposure: hostnames, missing updates and known-exploited vulnerabilities.
 | S1 | Attacker impersonates an agent | Per-device ECDSA keys, signed requests, nonce and timestamp checks, revocation |
 | S2 | Attacker impersonates the server to an agent | The agent uses the operating system's normal TLS validation of the server certificate (the Windows certificate store, or the system CA store on Linux; the public CA from Caddy's ACME). TLS validation cannot be turned off. |
 | S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory TOTP |
-| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select, by GUID or category, Windows updates or Linux package upgrades that the agent's own scan found, never arbitrary binaries or packages. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. |
+| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select, by GUID or category, Windows updates, Linux package upgrades or upgrades of approved, installed applications (winget) that the agent's own scan found, never arbitrary binaries or packages. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. |
 | T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |
 | T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |
 | T4 | A tampered or malicious vulnerability feed | Fixed HTTPS hosts with normal certificate validation, no redirects, size limits, strict parsing (document IDs and CVE IDs are validated). Feed data only changes display order, CVE lists and, by default, whether a known-exploited update skips the rollout delay: it cannot add updates, run commands or restart computers. Super administrators can turn the downloads off. See [Vulnerability data](#vulnerability-data). |
@@ -390,7 +421,7 @@ exposure: hostnames, missing updates and known-exploited vulnerabilities.
 | I5 | A monthly report reaches the wrong people or is read in transit | Recipients are entered per organization (no default), changes are audited, Operator role required; email only over STARTTLS or TLS; tenant-scoped API. See [Monthly reports](#monthly-reports). |
 | D1 | Check-in floods | Per-credential and per-IP rate limits, request size limits, jitter |
 | D2 | Enrollment queue spam | A deployment code is required, pending requests are capped and expire, per-IP rate limit |
-| E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability. Windows updates come from the sources Windows is configured for, and Linux packages from the repositories the computer is configured for. Agent updates install only packages whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |
+| E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability. Windows updates come from the sources Windows is configured for, and Linux packages from the repositories the computer is configured for. Application updates (off by default) can only upgrade an installed application to the version the winget community repository offers; a compromised server could approve more applications, but not choose versions, sources or installers. See [Application updates](#application-updates-winget). Agent updates install only packages whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |
 | E2 | A local non-admin user reads agent secrets | Windows: ProgramData ACL (SYSTEM and Administrators), DPAPI, registry ACL on bootstrap values. Linux: root-only `/etc/easypatch` and `/var/lib/easypatch`, `systemd-creds` where available, no token on the command line |
 | E3 | Cross-site request forgery or XSS in the admin UI | SameSite=Strict, CSRF header check, a strict CSP from Caddy, and React escaping |
 | E4 | A local user abuses the tray pipe to make the service do something | The pipe accepts only *restart now* or an offered postponement for the current restart request, from interactive sessions; the session comes from Windows. See [Tray and local pipe](#tray-and-local-pipe). |

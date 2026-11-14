@@ -95,6 +95,19 @@ public sealed record AgentConfig
 
     /// <summary>Windows Update settings to enforce. Null (or a null group) means leave Windows' configuration alone.</summary>
     public WindowsUpdatePolicySettings? WindowsUpdate { get; init; }
+
+    /// <summary>Third-party application updates (winget, Windows agents 1.4.0 and later). Null: off.</summary>
+    public ApplicationUpdatesConfig? Applications { get; init; }
+}
+
+/// <summary>Which applications the agent checks for newer versions. Only applications already installed are upgraded;
+/// nothing is ever installed that was not there before.</summary>
+public sealed record ApplicationUpdatesConfig
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>winget package IDs (see <see cref="ApplicationIds.IsValid"/>).</summary>
+    public IReadOnlyList<string> ApprovedApps { get; init; } = [];
 }
 
 public sealed record CheckInRequest
@@ -196,6 +209,10 @@ public sealed record InstallFilterOptions
     public IReadOnlyList<string> ExcludedKbs { get; init; } = [];
     public IReadOnlyList<Guid> ExcludedUpdateGuids { get; init; } = [];
     public bool AcceptEulas { get; init; } = true;
+
+    /// <summary>winget package IDs whose updates may be installed (empty: none). Agents before 1.4.0 ignore it; they never
+    /// report application updates.</summary>
+    public IReadOnlyList<string> ApprovedApplications { get; init; } = [];
 }
 
 public sealed record JobAckResponse
@@ -267,6 +284,7 @@ public static class SkipReasons
     public const string EulaNotAccepted = "EulaNotAccepted";
     public const string MaintenanceWindowClosed = "MaintenanceWindowClosed";
     public const string Cancelled = "Cancelled";
+    public const string ApplicationNotApproved = "ApplicationNotApproved";
 
     public static string Describe(string? reason) => reason switch
     {
@@ -280,6 +298,7 @@ public static class SkipReasons
         RequiresUserInput => "Requires interactive user input",
         EulaNotAccepted => "License agreement not accepted by policy",
         MaintenanceWindowClosed => "Maintenance window closed",
+        ApplicationNotApproved => "Application not approved by policy",
         Cancelled => "Cancelled",
         null => "",
         _ => reason,
@@ -309,6 +328,24 @@ public sealed record ScanResultReport
 
     /// <summary>Result of "IsInstalled=1".</summary>
     public IReadOnlyList<ReportedUpdate> Installed { get; init; } = [];
+
+    /// <summary>Outcome of the application (winget) part of the scan; null when application updates are off.</summary>
+    public ApplicationScanReport? Applications { get; init; }
+}
+
+/// <summary>Application updates in a scan. When <see cref="Succeeded"/> is false the server keeps the application states
+/// it knew rather than treating unreported applications as gone.</summary>
+public sealed record ApplicationScanReport
+{
+    public bool Succeeded { get; init; }
+    public string? ErrorCode { get; init; }
+    public string? ErrorMessage { get; init; }
+
+    /// <summary>winget version, e.g. <c>1.9.25200</c>.</summary>
+    public string? WingetVersion { get; init; }
+
+    /// <summary>Approved applications checked.</summary>
+    public int Checked { get; init; }
 }
 
 public sealed record ReportedUpdate
@@ -342,6 +379,26 @@ public sealed record ReportedUpdate
 
     /// <summary>Linux: the package this update upgrades. Null for Windows updates.</summary>
     public PackageUpdateInfo? Package { get; init; }
+
+    /// <summary>Windows: the third-party application this update upgrades (winget). Null for Windows Update updates.</summary>
+    public ApplicationUpdateInfo? Application { get; init; }
+}
+
+/// <summary>A newer version of an installed application, from the winget community repository. The update's GUID identifies
+/// this version of this package (<see cref="ApplicationIds.UpdateGuidFor"/>).</summary>
+public sealed record ApplicationUpdateInfo
+{
+    /// <summary>winget package ID, e.g. <c>Mozilla.Firefox</c>.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>The version this update installs.</summary>
+    public required string Version { get; init; }
+
+    /// <summary>The version installed when the scan ran.</summary>
+    public string? InstalledVersion { get; init; }
+
+    /// <summary>Always <c>winget</c> (the community repository; the Microsoft Store source is never used).</summary>
+    public string Source { get; init; } = ApplicationIds.Source;
 }
 
 /// <summary>A newer version of an installed Linux package. The update's GUID identifies exactly this version of the

@@ -159,7 +159,8 @@ public sealed record PolicyDto(
     int? InstallDelayDays = null,
     int? SecurityInstallDelayDays = null,
     Guid? TagId = null,
-    bool? KnownExploitedSkipsDelay = null);
+    bool? KnownExploitedSkipsDelay = null,
+    ApplicationUpdateSettings? ApplicationUpdates = null);
 
 /// <summary>Recurring restart. <c>Time</c> is "HH:mm" in the site (or organization) time zone; days use 0 = Sunday … 6 = Saturday.</summary>
 public sealed record RestartScheduleDto(
@@ -197,7 +198,8 @@ public sealed record PolicyRequest(
     bool? AgentAutoUpdateEnabled = null,
     int? InstallDelayDays = null,
     int? SecurityInstallDelayDays = null,
-    bool? KnownExploitedSkipsDelay = null);
+    bool? KnownExploitedSkipsDelay = null,
+    ApplicationUpdateSettings? ApplicationUpdates = null);
 
 public sealed record EffectivePolicyDto(
     int CheckInIntervalSeconds,
@@ -225,7 +227,8 @@ public sealed record EffectivePolicyDto(
     int InstallDelayDays = 0,
     int SecurityInstallDelayDays = 0,
     IReadOnlyDictionary<string, string>? SourceTags = null,
-    bool KnownExploitedSkipsDelay = true);
+    bool KnownExploitedSkipsDelay = true,
+    ApplicationUpdateSettings? ApplicationUpdates = null);
 
 // ---------------------------------------------------------------------------------------------
 // Tags
@@ -335,7 +338,13 @@ public sealed record EndpointDetailDto(
     DateTimeOffset? WindowsUpdatePolicyReportedAt,
     bool HasOwnPolicy,
     AgentUpdateInfoDto? AgentUpdate = null,
-    LinuxDetailsDto? Linux = null);
+    LinuxDetailsDto? Linux = null,
+    ApplicationUpdatesStatusDto? Applications = null);
+
+/// <summary>Application (winget) update checks of a Windows endpoint. <c>Enabled</c>: the effective policy turns them on with
+/// approved applications; <c>Supported</c>: the agent has the <c>app-updates</c> capability (1.4.0 and later).</summary>
+public sealed record ApplicationUpdatesStatusDto(bool Enabled, bool Supported, int ApprovedApps, string? WingetVersion, DateTimeOffset? LastCheckAt,
+    string? LastError);
 
 /// <summary>Linux-only endpoint details (null for Windows endpoints).</summary>
 /// <param name="KeyProtection">How the agent's private key is protected: systemd-creds-host or file-permissions.</param>

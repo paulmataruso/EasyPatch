@@ -80,6 +80,10 @@ on one computer, a site, or a whole customer, and tracks compliance across every
   failed updates, most widely missing and known-exploited updates, operating systems, optional
   endpoint list), generated on demand or emailed on a chosen day to the organization's recipients
   over STARTTLS or TLS. See [docs/compliance.md](docs/compliance.md#monthly-reports).
+* **Third-party application updates (Windows, opt-in)**: upgrades approved, already installed
+  applications with winget from the winget community repository, verified by checking the
+  installed version afterwards. Off by default; applications are approved per package ID in
+  policy. See [docs/application-updates.md](docs/application-updates.md).
 * **Two enrollment methods**:
   * limited-use, expiring enrollment tokens;
   * tokenless deployment codes for RMM scripts. Each computer that uses one waits for an
@@ -156,6 +160,7 @@ The full guides are [docs/installation.md](docs/installation.md),
 | [agent-installation.md](docs/agent-installation.md) | Windows agent requirements, MSI properties, RMM deployment, command line, logs, building the MSI |
 | [linux-agent.md](docs/linux-agent.md) | Linux agent: supported distributions, install script and token enrollment, how packages are scanned and installed, self-update, building the packages |
 | [architecture.md](docs/architecture.md) | Components, data model, update state model, policy, job system, agent lifecycle, deployment design |
+| [application-updates.md](docs/application-updates.md) | Third-party application updates with winget: requirements, approval, what the agent runs, restarts, limitations and trust model |
 | [compliance.md](docs/compliance.md) | Compliance statuses and rules, required updates, CVE and known-exploited data, OS support status, reports and monthly PDF reports |
 | [alerts.md](docs/alerts.md) | Alert rules, notification channels (email, Slack, Teams, signed webhooks), delivery and troubleshooting |
 | [security.md](docs/security.md) | Security model, threat model, hardening checklist, known limitations |

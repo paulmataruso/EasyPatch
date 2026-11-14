@@ -97,6 +97,7 @@ public sealed class ScanService
                 Missing = scan.Missing.Select(c => c.Update).ToList(),
                 // Descriptions of installed updates are not displayed; omitting them keeps reports small.
                 Installed = scan.Installed.Select(u => u with { Description = null }).ToList(),
+                Applications = scan.Applications,
             };
             _state.Update(s => s.LastScanAt = completedAt);
             _logger.LogInformation("Scan completed: {Missing} applicable updates not installed, {Installed} installed.",

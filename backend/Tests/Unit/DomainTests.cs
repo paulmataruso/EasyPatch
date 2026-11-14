@@ -165,6 +165,40 @@ public sealed class PolicyResolverTests
     {
         var errors = PolicyResolver.ValidatePolicy(new Policy { CheckInIntervalSeconds = 1, MaintenanceDays = [9], AllowedCategories = ["Bogus"] });
         Assert.NotEmpty(errors);
+        Assert.NotEmpty(PolicyResolver.ValidatePolicy(new Policy { AllowedCategories = ["Security", "Application"] }));
+        Assert.NotEmpty(PolicyResolver.ValidatePolicy(new Policy
+        {
+            ApplicationUpdates = new ApplicationUpdateSettings { Enabled = true, ApprovedApps = ["Mozilla.Firefox", "& calc.exe"] },
+        }));
+    }
+
+    [Fact]
+    public void Application_updates_are_off_by_default_and_overridden_as_a_unit()
+    {
+        var global = PolicyDefaults.CreateGlobal(Now);
+        var none = PolicyResolver.Resolve(global, null, null);
+        Assert.False(none.ApplicationUpdates.IsActive);
+        Assert.Null(none.ToAgentConfig().Applications);
+        Assert.Empty(none.ToFilter().ApprovedApplications);
+
+        var org = new Policy
+        {
+            Scope = PolicyScope.Organization,
+            ApplicationUpdates = new ApplicationUpdateSettings { Enabled = true, ApprovedApps = ["Mozilla.Firefox", "7zip.7zip"] },
+        };
+        var on = PolicyResolver.Resolve(global, org, null);
+        Assert.Equal(PolicyScope.Organization, on.Sources[nameof(EffectivePolicy.ApplicationUpdates)]);
+        Assert.Equal(["Mozilla.Firefox", "7zip.7zip"], on.ToAgentConfig().Applications!.ApprovedApps);
+        Assert.Equal(["Mozilla.Firefox", "7zip.7zip"], on.ToFilter().ApprovedApplications);
+        Assert.DoesNotContain(UpdateCategory.Application, on.ToFilter().Categories);
+
+        // The site's list replaces the organization's (no merging), and an empty enabled list checks nothing.
+        var site = new Policy { Scope = PolicyScope.Site, ApplicationUpdates = new ApplicationUpdateSettings { Enabled = true, ApprovedApps = ["Zoom.Zoom"] } };
+        Assert.Equal(["Zoom.Zoom"], PolicyResolver.Resolve(global, org, site).ToFilter().ApprovedApplications);
+        var off = new Policy { Scope = PolicyScope.Site, ApplicationUpdates = new ApplicationUpdateSettings { Enabled = false } };
+        var resolved = PolicyResolver.Resolve(global, org, off);
+        Assert.Null(resolved.ToAgentConfig().Applications);
+        Assert.Empty(resolved.ToFilter().ApprovedApplications);
     }
 }
 
