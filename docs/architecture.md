@@ -55,6 +55,7 @@ agent/EasyPatch.Inventory       WMI and registry inventory, reboot and update-so
 agent/EasyPatch.Agent           Windows service host, tray app, DPAPI, CLI           [Windows]
 agent/EasyPatch.Agent.Tests     Agent logic tests (run on any OS using fakes)
 agent/Installer                 WiX v5 MSI project
+tools/EasyPatch.ReleaseSigner   easypatch-release: creates the release key, signs and verifies agent MSIs
 frontend/                       React + TypeScript + Vite + Tailwind SPA
 ```
 
@@ -190,6 +191,7 @@ editor has no per-site install limit).
 | Install notifications ("Updates are installing") | on |
 | Restart schedule | none |
 | Windows Update settings | each group *Not configured* |
+| Agent updates | Automatic |
 
 Global limits are stored in `server_settings`. The global max concurrent installs defaults
 to 50.
@@ -230,8 +232,8 @@ an endpoint will receive. How the agent applies and restores them is described i
 
 ## 4. Job system
 
-Job types are `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart` and
-`NotifyUser` (a preset message to signed-in users).
+Job types are `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart`,
+`NotifyUser` (a preset message to signed-in users) and `AgentUpdate`.
 
 ```
 Queued ──lease──► Delivered ──ack──► Acknowledged ──► Running ──► Completed
@@ -258,9 +260,11 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
   `WaitingForReboot`, scans and inventory jobs are still delivered (the agent runs them while
   it waits), but further install jobs stay queued until the restart has been handled.
 * **Agent capabilities.** Agents report what they support in every check-in (`restart`,
-  `notify-user`, `tray`, `windows-update-policy`). Restart and message jobs can only be created
-  for, and are only delivered to, agents that report the matching capability. For older agents
-  the API answers `409 agent_upgrade_required`.
+  `notify-user`, `tray`, `windows-update-policy`, `self-update`). Restart, message and agent
+  update jobs can only be created for, and are only delivered to, agents that report the
+  matching capability. For older agents the API answers `409 agent_upgrade_required`.
+* **Priority.** When several jobs are queued for an endpoint, scans go first, then installs,
+  restarts and agent updates.
 * **Concurrency limits.** Install jobs are only delivered while the global limit and the
   per-site limit allow it. This check runs under a transaction-scoped advisory lock.
 * **Deduplication.** A partial unique index on (`endpoint_id`, `dedupe_key`) covering active
@@ -312,6 +316,32 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
   showing its warning, the restart is aborted (`AbortSystemShutdown`); once Windows has
   started shutting down it can no longer be cancelled.
 
+### Agent update jobs
+
+An `AgentUpdate` job carries the package description (file name, version, architecture, size,
+SHA-256), the release key ID and the release signature from the package's `.sig` file. The
+server never signs anything; see [security.md](security.md#agent-release-signing).
+
+* **Who creates them.** An Operator (*Update agent…*, one endpoint or bulk), or the worker's
+  `agent-updates` task every 2 minutes for online endpoints whose effective *Agent updates*
+  policy is Automatic. The task picks the newest package for the agent's architecture that is
+  newer than the installed agent and signed with a key the agent reported. It starts at most
+  `EasyPatch:AutomaticAgentUpdateConcurrency` (default 25) agent update jobs at a time across
+  the installation. After a failed or cancelled update of a version it waits 6 hours, and stops
+  after 3 failures of that version (an Operator can still start it). Automatic jobs expire after
+  24 hours.
+* **Only one at a time.** An endpoint has at most one active agent update job.
+* **On the agent.** The job runs like any other job (it waits for a running install). The agent
+  verifies the signature, version and architecture, downloads the package to
+  `C:\ProgramData\EasyPatch\updates`, verifies size and SHA-256, records in its state that it
+  is installing, closes the trays and starts `msiexec /i <package> /qn /norestart`. Windows
+  Installer stops the service, replaces the files and starts the new version.
+* **Completion.** The new version finds the job in its state and completes it once its own
+  version is at least the target. If the previous version comes back instead (Windows Installer
+  failed and rolled back), it waits while Windows Installer is still busy (at most 30 minutes
+  after the start) and then fails the job with the error from the installer log. If `msiexec`
+  exits while the old agent is still running, the job fails with its exit code.
+
 ## 5. Agent lifecycle
 
 ```
@@ -351,6 +381,8 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
   the CBS `RebootPending` key, the WU `RebootRequired` key and `PendingFileRenameOperations`,
   and lists the reasons. Install jobs never restart the computer. The agent restarts it only
   for a `Restart` job (see [Restart jobs](#restart-jobs)).
+* **Self-update.** Agents 1.2.0 and newer report the package architecture and the IDs of the
+  release keys built into them, and can run `AgentUpdate` jobs (above).
 * **Resilience.** On a service restart or reboot, the agent reloads its saved state and
   resumes the active job, which is idempotent. Reports wait in the on-disk outbox until the
   server accepts them. Network failures use exponential backoff with full jitter, up to

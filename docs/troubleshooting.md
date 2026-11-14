@@ -64,6 +64,10 @@ problem.
 | Agent requests fail with `credential_revoked` or `endpoint_revoked` | The endpoint was revoked or removed in the console. Re-enroll the agent with `enroll --force` |
 | Agent requests fail with `credential_expired` | The credential passed its lifetime without rotating, for example a computer that was off for a year. Re-enroll the agent |
 | No agent packages under **Agent Management → Packages** | Check the file names (`EasyPatchAgent-<version>-x64.msi` or `-arm64.msi`) and that the files are world-readable. The API logs a warning for each `.msi` it ignores. The list refreshes at most once a minute |
+| A package shows **not signed** or **invalid** under **Agent Management → Packages** | Agents update only to packages with a valid `<msi>.sig` next to them. *Not signed*: copy the `.sig` file from the build. *Invalid*: hover over the badge for the reason; usually the MSI was rebuilt or Authenticode-signed after the `.sig` was made. Sign it again with `easypatch-release sign` |
+| Agents do not update themselves | Only agents 1.2.0 and later built with a release key can (the endpoint's overview says so). The *Agent updates* policy must be Automatic for automatic updates, the endpoint must be online, and the package must be signed with a key the agent trusts. At most 25 agent updates run at a time; a failed update waits 6 hours, and after 3 failures of the same version only **Update agent…** retries it |
+| `409 agent_upgrade_required` on **Update agent…** | The agent is older than 1.2.0, or was built without a release key. Install the new MSI on it once |
+| `409 release_key_not_trusted` | The newest package was signed with a different release key than the one built into the agent. Sign it with the original key, or install an agent built with the new key manually. See [security.md](security.md#agent-release-signing) |
 
 ## Jobs
 
@@ -78,6 +82,8 @@ A job moves through `Queued` → `Delivered` → `Acknowledged` → `Running`, a
 | `409 nothing_to_install` | The last scan shows no update that matches the selection or policy: they are installed, excluded or no longer offered. Run a scan first if the data is old |
 | Job is `WaitingForReboot` | Windows needs a restart before it can install the remaining updates. Installing never restarts a computer. Restart it yourself or with **Restart…** on the endpoint (or a restart schedule in policy). The agent then continues the job. If no restart happens within 30 days, the job fails with `reboot_not_performed` |
 | `409 agent_upgrade_required` on **Restart…** or **Send message…** | The endpoint runs an agent version without restart or message support (before 1.1.0). Upgrade the agent |
+| Agent update job `Failed` | The job message gives the reason and the code (`update_untrusted_key`, `update_signature_invalid`, `update_hash_mismatch`, `update_download_failed`, `update_install_failed`, `update_install_timeout`). See [agent-installation.md](agent-installation.md#troubleshooting) |
+| Agent update job stays `Running` (*Installing*) | Windows Installer is replacing the agent. The job completes when the new version checks in, usually within a minute. If the computer is turned off during the update, the job completes or fails when it is back |
 | Restart job stays `Running` | It is waiting for a signed-in user (prompt) or for its countdown or deadline. The job's progress shows which. A prompt without a deadline waits up to 7 days |
 | Restart job `Failed` with `restart_not_performed` | Windows did not restart within 30 minutes of the request (a user or application may have cancelled the shutdown), or nobody accepted a prompt without a deadline within 7 days |
 | Message job `Failed` with `no_recipients` | Nobody was signed in, or the EasyPatch tray was not running in the signed-in sessions. The endpoint's overview shows signed-in users and trays |

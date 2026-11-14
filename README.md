@@ -72,6 +72,11 @@ tracks compliance across every customer.
 * **Per-device agent credentials.** Each agent generates its own ECDSA P-256 key pair; only the
   public key goes to the server. Every request is signed with a timestamp and nonce for replay
   protection, and keys rotate automatically. The agent contains no shared secret.
+* **Agent self-update** (agent 1.2.0 and later), automatic or on demand, set per organization,
+  site or endpoint. Agents install only MSIs signed with your own release key, whose public
+  half is built into the agent; the server only relays packages and cannot make an agent
+  install anything else or downgrade it. See
+  [docs/security.md](docs/security.md#agent-release-signing).
 
 ## Architecture
 
@@ -162,13 +167,15 @@ docs/        Documentation
 
 ## Project status
 
-Version 1.0.0, pre-release. Server, console and agent logic are covered by automated tests on
+Version 1.2.0, pre-release. Server, console and agent logic are covered by automated tests on
 Linux. The following have not yet been validated by this repository's automated tests:
 
 * the Windows-specific agent components on real Windows: Windows Update Agent COM calls, WMI
   inventory, DPAPI key storage and the Windows service host;
 * the MSI on real Windows. It builds on Linux, and installs, upgrades and uninstalls under
   Wine, but Windows Installer ICE validation has not been run;
+* agent self-update on real Windows (`msiexec` replacing the running service). The agent's
+  side of it is tested with a simulated Windows Installer;
 * the PowerShell install script on Windows.
 
 Validate them on test endpoints before rolling out to production.

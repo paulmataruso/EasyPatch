@@ -99,11 +99,11 @@ Then:
 ## 6. Offer agent packages
 
 Build the agent MSI (see [agent-installation.md](agent-installation.md#building-from-source))
-and copy it to `data/agent-packages/`:
+and copy it, with its `.sig` release signature, to `data/agent-packages/`:
 
 ```bash
-cp EasyPatchAgent-1.0.0-x64.msi data/agent-packages/
-chmod 644 data/agent-packages/*.msi
+cp EasyPatchAgent-1.2.0-x64.msi EasyPatchAgent-1.2.0-x64.msi.sig data/agent-packages/
+chmod 644 data/agent-packages/*
 ```
 
 * File names must match `EasyPatchAgent-<version>-x64.msi` or `EasyPatchAgent-<version>-arm64.msi`
@@ -116,7 +116,15 @@ chmod 644 data/agent-packages/*.msi
 * Packages appear under **Agent Management → Packages**. The console uses the newest package to
   build `msiexec` commands and the PowerShell install script for deployment codes. That script
   verifies the package's SHA-256, and optionally its Authenticode signature, before installing.
-* Agents never update themselves. When a newer package is available, they only log it.
+* Agents 1.2.0 and later update themselves to the newest **signed** package (one with a valid
+  `.sig` file): automatically when the *Agent updates* policy is Automatic (the default), or when
+  an Operator chooses *Update agent…*. Copying a newer signed package here therefore starts a
+  rollout. Set the policy to Manual first if you want to choose when. Agents check the release
+  signature against the key built into them, so the server cannot make them install anything
+  else. See [agent-installation.md](agent-installation.md#upgrading). Older agents only log that
+  a newer version exists; install the MSI on them once.
+* The release private key belongs on the machine that builds the agent. Never copy it to the
+  server: the server needs only the MSI and its `.sig` file.
 
 Agent installation and enrollment are described in [agent-installation.md](agent-installation.md).
 

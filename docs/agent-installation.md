@@ -214,6 +214,10 @@ you require it.
   settings, the agent applies it after the next check-in and reports whether it was applied,
   or whether another policy source (for example domain Group Policy) changed the values. See
   [architecture.md](architecture.md#windows-update-policy-enforcement).
+* **Agent updates** (1.2.0 and later): the agent installs a newer EasyPatch agent when an
+  administrator chooses *Update agent*, or by itself when the *Agent updates* policy is
+  *Automatic*. It checks the package's release signature against the key built into it before
+  downloading anything. See [Upgrading](#upgrading).
 * **Maintenance windows**: a scheduled job does not start new updates after the window closes.
   An update that is already installing is never interrupted.
 * **Outages**: reports are written to disk before they are sent and are delivered in order when
@@ -243,6 +247,9 @@ agent's informational events, including:
 | 1010 | Restarting the computer for a restart job (warning) |
 | 1011 | Windows Update settings applied, changed or restored |
 | 1012 | Windows Update settings were changed by another policy source; EasyPatch stopped re-applying them (warning) |
+| 1013 | Installing an agent update (the service is about to be restarted by Windows Installer) |
+| 1014 | Agent updated (logged by the new version) |
+| 1015 | Agent update failed or refused (warning, with the reason) |
 
 ## Tray icon
 
@@ -268,9 +275,49 @@ be shown, and restart countdowns use Windows' own shutdown warning instead.
 
 ## Upgrading
 
-Install the newer MSI over the existing one with the same command (no properties needed). The
-server URL and proxy are kept, the identity in `C:\ProgramData\EasyPatch` is preserved and an
-active job resumes after the service restarts. Downgrades are blocked.
+### Automatic and console updates (agent 1.2.0 and later)
+
+Agents 1.2.0 and later update themselves. To release a new version:
+
+1. Build it with the release key (see [Building from source](#building-from-source)), which
+   produces `EasyPatchAgent-<version>-<arch>.msi` and its release signature
+   `EasyPatchAgent-<version>-<arch>.msi.sig`.
+2. Copy both files to `data/agent-packages` on the server. *Agent Management → Packages*
+   shows the package as **signed** with the key ID. A package without a valid `.sig` is still
+   offered for manual download, but agents do not update to it.
+
+Then:
+
+* With the *Agent updates* policy on **Automatic** (the default), online computers install the
+  newest signed package for their architecture within a few minutes, at most 25 at a time. A
+  failed update is tried again after 6 hours, and after three failures of the same version only
+  when an administrator asks.
+* With **Manual**, nothing happens until an Operator chooses **Update agent…** on an endpoint
+  (*More* menu) or for several endpoints in the endpoint list.
+
+The policy can be set for the whole installation, an organization, a site or a single computer.
+
+During an update the agent checks the release signature against the key built into it, checks
+that the package is newer and for its architecture, downloads it from the server, checks its
+size and SHA-256, closes the trays, and runs Windows Installer (`msiexec /i … /qn /norestart`).
+Windows Installer stops the service, replaces the files and starts the new version, which
+completes the job. The computer is not restarted and users are not asked anything; the tray
+icon disappears for a few seconds. Agents are never downgraded. The package and the installer
+log are kept in `C:\ProgramData\EasyPatch\updates` (the log as `install-<version>.log`; logs
+are deleted after 30 days).
+
+The endpoint's overview shows whether its agent can update itself, and why not if it cannot:
+`agent_upgrade_required` (older than 1.2.0 or built without a release key),
+`release_key_not_trusted` (the package was signed with a key this agent was not built with),
+`package_not_signed` or `agent_up_to_date`.
+
+### Installing the MSI
+
+Agents older than 1.2.0, and agents built without a release key, must be upgraded by installing
+the newer MSI over the existing one with the same command (no properties needed). This is also
+how you move a computer to an agent with a different release key. The server URL and proxy are
+kept, the identity in `C:\ProgramData\EasyPatch` is preserved and an active job resumes after
+the service restarts. Downgrades are blocked.
 
 An agent that never finished enrolling loses its token or deployment code on upgrade; pass it
 again or run `enroll`.
@@ -299,23 +346,47 @@ need them.
 | Updates not offered that you expected | WSUS approvals, Windows Update for Business deferrals or a target release version apply. The console shows the detected update source, and the endpoint's *Policy* tab shows any Windows Update settings EasyPatch applied |
 | No tray icon | On Windows 11, look in the hidden-icons flyout (**^**) first. Otherwise the *Tray icon* policy is off, the user signed in less than 15 seconds ago, or the session is a remote session that is disconnected. *Signed-in users* on the endpoint's overview shows how many sessions have a tray. If a session is signed in but has no tray, the agent log says *did not connect to the service*. Agent 1.1.0 had this problem for every user who was not running as administrator; install 1.1.1 or later |
 | Windows Update settings show *Conflict* | Another policy source (usually domain Group Policy or Intune) set different values. Remove that policy, or change the EasyPatch setting to match; changing the EasyPatch setting applies it again |
+| Agent update failed with `update_untrusted_key` or `update_signature_invalid` | The package was signed with a key this agent was not built with, or the `.sig` file does not belong to the package. Check the key ID under *Agent Management → Packages*. Agents keep trusting only the keys they were built with; to change keys see [security.md](security.md#agent-release-signing) |
+| Agent update failed with `update_hash_mismatch` | The file downloaded from the server is not the one that was signed (it was replaced, rebuilt or truncated). Copy the MSI and its `.sig` from the same build again |
+| Agent update failed with `update_install_failed` | Windows Installer failed or rolled back, and the previous version is still running. The job message has the Windows Installer error; the full log is `C:\ProgramData\EasyPatch\updates\install-<version>.log` |
+| Agent update failed with `update_download_failed` | The agent could not download the package from `downloads/agent/<file>` (network, proxy, or the file was removed from the server) |
 | Restart job failed with `restart_not_performed` | Windows did not restart within 30 minutes of the request, or nobody accepted a prompt without a deadline within 7 days. Check the System event log for shutdowns cancelled by a user or an application |
 
 ## Building from source
 
+Create the release key once, on the machine that builds the agent (not on the EasyPatch server):
+
+```bash
+dotnet run --project tools/EasyPatch.ReleaseSigner -- generate-key
+# writes ~/.easypatch/easypatch-release-key.pem (private, keep it safe and backed up)
+#    and ~/.easypatch/easypatch-release-key.pub.pem (public, built into the agent)
+```
+
+The build scripts build the public key into the agent and write a `.sig` release signature next
+to each MSI. Override the locations with `EASYPATCH_RELEASE_PUBLIC_KEY` and
+`EASYPATCH_RELEASE_KEY`; set `EASYPATCH_RELEASE_KEY_PASSWORD` to create or use an encrypted
+private key. Without the keys the build still succeeds with a warning, but the agent cannot
+update itself, and agents will not update to unsigned MSIs. Keep using the same key for later
+versions: agents only accept the keys they were built with. See
+[security.md](security.md#agent-release-signing).
+
 * Windows: `pwsh scripts/build-agent.ps1 -Version 1.2.0 -Architecture x64,arm64` builds, tests,
-  optionally signs, and builds the MSIs.
+  optionally Authenticode-signs, and builds and release-signs the MSIs. `-RequireReleaseKey`
+  fails the build when a release key is missing.
 * Linux with Docker: `scripts/build-msi-linux.sh --version 1.2.0 --arch all` builds, tests and
   builds the MSIs. It runs the same WiX Toolset 5.0.2 under Wine in a pinned container
   (`agent/Installer/linux/Dockerfile`), with networking disabled during the build. Two things
-  are not available on Linux: Windows Installer ICE validation (Wine cannot run it) and code
-  signing. Build packages that must be signed on Windows.
+  are not available on Linux: Windows Installer ICE validation (Wine cannot run it) and
+  Authenticode signing. Build packages that must be Authenticode-signed on Windows. Release
+  signatures work on Linux.
 * Linux/macOS without Docker: `scripts/build-agent.sh --version 1.2.0 --rid all` builds, tests and
   publishes the agent executable only.
 
 On Windows, signing is optional and is configured through environment variables, never
 through files in the repository. See `agent/Installer/build-installer.ps1` for `EASYPATCH_SIGN_CERT_THUMBPRINT`,
 `EASYPATCH_SIGN_PFX_PATH`/`EASYPATCH_SIGN_PFX_PASSWORD` and `EASYPATCH_SIGN_TIMESTAMP_URL`. Each
-MSI is written to `artifacts/installer` together with a `.sha256` file. Copy the MSI to
-`data/agent-packages` on the server to offer it for download. The server computes the SHA-256
-itself; the `.sha256` file is for your own verification.
+MSI is written to `artifacts/installer` together with a `.sha256` file and, with a release key,
+a `.sig` file. Copy the MSI and its `.sig` to `data/agent-packages` on the server to offer it for
+download and for agent updates. The server computes the SHA-256 itself; the `.sha256` file is
+for your own verification. To check packages against a public key:
+`dotnet run --project tools/EasyPatch.ReleaseSigner -- verify --public-key <public.pem> <msi>...`.

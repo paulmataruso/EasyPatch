@@ -5,12 +5,16 @@
 #
 #   scripts/build-msi-linux.sh [--version 1.2.3] [--arch x64|arm64|all] [--no-test]
 #
-# Not available on Linux: ICE validation (Wine cannot run it) and code signing. Build release packages that
-# must be signed or ICE-validated on Windows (scripts/build-agent.ps1 or the agent CI workflow).
+# Not available on Linux: ICE validation (Wine cannot run it) and Authenticode signing. Build release packages that
+# must be Authenticode-signed or ICE-validated on Windows (scripts/build-agent.ps1 or the agent CI workflow).
+#
+# Release signatures for agent self-update are made here: each MSI gets <msi>.sig, signed with the release private key
+# (EASYPATCH_RELEASE_KEY, default ~/.easypatch/easypatch-release-key.pem; EASYPATCH_RELEASE_KEY_PASSWORD if it is
+# encrypted). Copy the MSI and its .sig to the server's agent-packages directory.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="1.1.1"
+version="1.2.0"
 arches=("x64")
 test_flag=()
 image="easypatch-msi-builder:wix5.0.2"
@@ -22,7 +26,7 @@ while [[ $# -gt 0 ]]; do
       if [[ "$2" == "all" ]]; then arches=("x64" "arm64"); else arches=("$2"); fi
       shift 2 ;;
     --no-test) test_flag=(--no-test); shift ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -42,6 +46,7 @@ echo "==> Building the MSI builder image ($image)"
 docker build -q -t "$image" agent/Installer/linux >/dev/null
 
 mkdir -p artifacts/installer
+built=()
 for arch in "${arches[@]}"; do
   name="EasyPatchAgent-$version-$arch.msi"
   echo "==> Building $name"
@@ -68,4 +73,19 @@ for arch in "${arches[@]}"; do
   printf '%s  %s' "$hash" "$name" > "artifacts/installer/$name.sha256"
   echo "    artifacts/installer/$name"
   echo "    SHA-256 $hash"
+  built+=("artifacts/installer/$name")
 done
+
+release_key="${EASYPATCH_RELEASE_KEY:-$HOME/.easypatch/easypatch-release-key.pem}"
+public_key="${EASYPATCH_RELEASE_PUBLIC_KEY:-$HOME/.easypatch/easypatch-release-key.pub.pem}"
+if [[ -f "$release_key" ]]; then
+  echo "==> Signing the release (agent self-update)"
+  dotnet run --project tools/EasyPatch.ReleaseSigner -c Release -- sign --key "$release_key" "${built[@]}"
+  if [[ -f "$public_key" ]]; then
+    # The packages must verify against the public key built into the agent, or no agent will install them.
+    dotnet run --project tools/EasyPatch.ReleaseSigner -c Release --no-build -- verify --public-key "$public_key" "${built[@]}"
+  fi
+else
+  rm -f "${built[@]/%/.sig}"
+  echo "WARNING: no release key at $release_key: the MSIs are not signed, so agents will not update themselves to them." >&2
+fi

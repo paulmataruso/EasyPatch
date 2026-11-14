@@ -5,15 +5,21 @@
 
 .EXAMPLE
   pwsh scripts/build-agent.ps1 -Version 1.2.0
-  pwsh scripts/build-agent.ps1 -Version 1.2.0 -Architecture x64,arm64 -RequireSigning
+  pwsh scripts/build-agent.ps1 -Version 1.2.0 -Architecture x64,arm64 -RequireSigning -RequireReleaseKey
+
+.NOTES
+  The release public key (EASYPATCH_RELEASE_PUBLIC_KEY, default ~/.easypatch/easypatch-release-key.pub.pem) is built
+  into the agent, and the MSIs are signed with the private key (EASYPATCH_RELEASE_KEY) for agent self-update. See
+  agent/Installer/build-installer.ps1.
 #>
 [CmdletBinding()]
 param(
-    [ValidatePattern('^\d{1,3}\.\d{1,3}\.\d{1,5}$')][string]$Version = '1.1.1',
+    [ValidatePattern('^\d{1,3}\.\d{1,3}\.\d{1,5}$')][string]$Version = '1.2.0',
     [ValidateSet('x64', 'arm64')][string[]]$Architecture = @('x64'),
     [switch]$SkipTests,
     [switch]$SkipInstaller,
-    [switch]$RequireSigning
+    [switch]$RequireSigning,
+    [switch]$RequireReleaseKey
 )
 
 Set-StrictMode -Version Latest
@@ -33,9 +39,15 @@ try {
         'agent/EasyPatch.Agent.Tests/EasyPatch.Agent.Tests.csproj'
     )
 
+    $publicKey = if ($env:EASYPATCH_RELEASE_PUBLIC_KEY) { $env:EASYPATCH_RELEASE_PUBLIC_KEY } else { Join-Path (Join-Path $HOME '.easypatch') 'easypatch-release-key.pub.pem' }
+    $keyArguments = @()
+    if (Test-Path $publicKey) { $keyArguments = @("-p:EasyPatchReleasePublicKey=$((Resolve-Path $publicKey).Path)") }
+    elseif ($RequireReleaseKey) { throw "No release public key at $publicKey." }
+    else { Write-Warning "No release public key at ${publicKey}: this agent will not be able to update itself." }
+
     Write-Host "==> Building agent projects ($Version, warnings are errors)"
     foreach ($project in $projects) {
-        dotnet build $project -c Release "-p:Version=$Version"
+        dotnet build $project -c Release "-p:Version=$Version" @keyArguments
         if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
     }
 
@@ -48,12 +60,13 @@ try {
     $onWindows = $PSVersionTable.PSEdition -eq 'Desktop' -or $IsWindows
     foreach ($arch in $Architecture) {
         if (-not $SkipInstaller -and $onWindows) {
-            & (Join-Path $repoRoot 'agent/Installer/build-installer.ps1') -Version $Version -Architecture $arch -RequireSigning:$RequireSigning
+            & (Join-Path $repoRoot 'agent/Installer/build-installer.ps1') -Version $Version -Architecture $arch -RequireSigning:$RequireSigning `
+                -RequireReleaseKey:$RequireReleaseKey
         }
         else {
             $rid = "win-$arch"
             Write-Host "==> Publishing $rid (MSI requires Windows)"
-            dotnet publish agent/EasyPatch.Agent/EasyPatch.Agent.csproj -c Release -r $rid -o "artifacts/agent/$rid" "-p:Version=$Version"
+            dotnet publish agent/EasyPatch.Agent/EasyPatch.Agent.csproj -c Release -r $rid -o "artifacts/agent/$rid" "-p:Version=$Version" @keyArguments
             if ($LASTEXITCODE -ne 0) { throw "Publish failed: $rid" }
         }
     }

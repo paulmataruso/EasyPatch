@@ -8,7 +8,8 @@
   2. optional Authenticode signing of EasyPatch.Agent.exe
   3. WiX v5 build of the MSI
   4. optional Authenticode signing of the MSI
-  5. writes <msi>.sha256
+  5. release signature for agent self-update (<msi>.sig)
+  6. writes <msi>.sha256
 
   Signing is enabled when one of these is set (never commit certificates or passwords):
     EASYPATCH_SIGN_CERT_THUMBPRINT   SHA-1 thumbprint of a code-signing certificate in Cert:\CurrentUser\My or LocalMachine\My
@@ -17,16 +18,24 @@
     EASYPATCH_SIGN_TIMESTAMP_URL     RFC 3161 timestamp server (default http://timestamp.digicert.com)
     EASYPATCH_SIGNTOOL               full path to signtool.exe (default: found in PATH or the Windows 10/11 SDK)
 
+  Agent self-update (see docs/security.md, "Agent release signing"):
+    EASYPATCH_RELEASE_PUBLIC_KEY     public key built into the agent (default ~\.easypatch\easypatch-release-key.pub.pem)
+    EASYPATCH_RELEASE_KEY            private key that signs the MSI (default ~\.easypatch\easypatch-release-key.pem)
+    EASYPATCH_RELEASE_KEY_PASSWORD   password, if the private key is encrypted
+  Without the public key the agent cannot update itself; without the private key the MSI has no .sig, so agents do not
+  update to it. -RequireReleaseKey turns both into errors.
+
 .EXAMPLE
   ./agent/Installer/build-installer.ps1 -Version 1.2.0 -Architecture x64
 #>
 [CmdletBinding()]
 param(
-    [Parameter()][ValidatePattern('^\d{1,3}\.\d{1,3}\.\d{1,5}$')][string]$Version = '1.1.1',
+    [Parameter()][ValidatePattern('^\d{1,3}\.\d{1,3}\.\d{1,5}$')][string]$Version = '1.2.0',
     [Parameter()][ValidateSet('x64', 'arm64')][string]$Architecture = 'x64',
     [Parameter()][ValidateSet('Release', 'Debug')][string]$Configuration = 'Release',
     [Parameter()][string]$OutputDirectory,
-    [switch]$RequireSigning
+    [switch]$RequireSigning,
+    [switch]$RequireReleaseKey
 )
 
 Set-StrictMode -Version Latest
@@ -92,12 +101,35 @@ function Invoke-Sign([string]$Path, [string]$Description) {
     Write-Host "Signed $Path"
 }
 
+function Get-KeyPath([string]$Variable, [string]$FileName) {
+    $value = [Environment]::GetEnvironmentVariable($Variable)
+    if ($value) { return $value }
+    return Join-Path (Join-Path $HOME '.easypatch') $FileName
+}
+
+$publicKey = Get-KeyPath 'EASYPATCH_RELEASE_PUBLIC_KEY' 'easypatch-release-key.pub.pem'
+$releaseKey = Get-KeyPath 'EASYPATCH_RELEASE_KEY' 'easypatch-release-key.pem'
+if (Test-Path $publicKey) {
+    $publicKey = (Resolve-Path $publicKey).Path
+    Write-Host "==> Release public key: $publicKey (agents install only updates signed with its private key)"
+}
+elseif ($RequireReleaseKey) {
+    throw "No release public key at $publicKey."
+}
+else {
+    Write-Warning "No release public key at ${publicKey}: this agent will not be able to update itself. Create one with: dotnet run --project tools/EasyPatch.ReleaseSigner -- generate-key"
+    $publicKey = $null
+}
+if ($RequireReleaseKey -and -not (Test-Path $releaseKey)) { throw "No release key at $releaseKey." }
+
 Write-Host "==> Publishing agent $Version ($rid)"
 if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
-Invoke-Checked 'dotnet' @(
+$publishArguments = @(
     'publish', (Join-Path $repoRoot 'agent\EasyPatch.Agent\EasyPatch.Agent.csproj'),
     '-c', $Configuration, '-r', $rid, '-o', $publishDir,
     "-p:Version=$Version", '-p:ContinuousIntegrationBuild=true')
+if ($publicKey) { $publishArguments += "-p:EasyPatchReleasePublicKey=$publicKey" }
+Invoke-Checked 'dotnet' $publishArguments
 
 $exe = Join-Path $publishDir 'EasyPatch.Agent.exe'
 if (-not (Test-Path $exe)) { throw "Publish did not produce $exe" }
@@ -117,6 +149,21 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $msi = Join-Path $OutputDirectory $msiName
 Copy-Item $builtMsi $msi -Force
 Invoke-Sign $msi 'EasyPatch Agent Installer'
+
+# The release signature covers the final file, so it is made after Authenticode signing.
+$signer = Join-Path $repoRoot 'tools\EasyPatch.ReleaseSigner'
+if (Test-Path $releaseKey) {
+    Write-Host '==> Signing the release (agent self-update)'
+    Invoke-Checked 'dotnet' @('run', '--project', $signer, '-c', 'Release', '--', 'sign', '--key', $releaseKey, $msi)
+    if ($publicKey) {
+        # The package must verify against the public key built into the agent, or no agent will install it.
+        Invoke-Checked 'dotnet' @('run', '--project', $signer, '-c', 'Release', '--no-build', '--', 'verify', '--public-key', $publicKey, $msi)
+    }
+}
+else {
+    Remove-Item "$msi.sig" -ErrorAction SilentlyContinue
+    Write-Warning "No release key at ${releaseKey}: $msiName has no .sig, so agents will not update themselves to it."
+}
 
 $hash = (Get-FileHash -Algorithm SHA256 -Path $msi).Hash.ToLowerInvariant()
 Set-Content -Path "$msi.sha256" -Value "$hash  $msiName" -Encoding ascii -NoNewline

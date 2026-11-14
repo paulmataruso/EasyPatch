@@ -196,6 +196,60 @@ the named pipe `\\.\pipe\EasyPatchAgent`:
   administrator's deadline, which the restart prompt allows anyway. No input from the tray is
   ever executed, and the tray cannot change the agent's configuration, jobs or credentials.
 
+## Agent release signing
+
+Agents 1.2.0 and newer can update themselves. The EasyPatch server is not trusted to decide
+what code runs on endpoints: it only relays agent packages and their signatures, and the agent
+checks them against a key that was built into it.
+
+**The release key.** An ECDSA P-256 key pair, created once on the machine that builds the agent
+with `dotnet run --project tools/EasyPatch.ReleaseSigner -- generate-key`. The private key
+(`~/.easypatch/easypatch-release-key.pem`, mode 600) stays on that machine and is never copied
+to the EasyPatch server or into source control. Set `EASYPATCH_RELEASE_KEY_PASSWORD` to store it
+encrypted (PKCS#8, AES-256-CBC, PBKDF2-SHA256 with 600,000 iterations). The public key
+(`easypatch-release-key.pub.pem`) is built into the agent executable by the build scripts.
+An agent built without it reports that it cannot update itself and must be upgraded by
+installing a newer MSI.
+
+**What is signed.** The build scripts write `<msi>.sig` next to each MSI. It signs the file
+name, version, architecture, size and SHA-256 of the package, prefixed with a fixed domain
+string, so a signature cannot be reused for another file, version or architecture. The
+server reads the `.sig` file only to offer the package; it does not and cannot vouch for it.
+
+**What the agent checks**, in this order, before anything is installed:
+
+1. The signature's key ID is one of the keys built into the agent, and the signature verifies.
+   The server cannot supply or replace keys.
+2. The package is newer than the running agent (agents are never downgraded) and is for the
+   agent's architecture.
+3. The download, from `downloads/agent/<file>` on the agent's own server over TLS, has exactly
+   the signed size and SHA-256. The agent checks the hash again immediately before starting
+   Windows Installer, holding the file open so it cannot be changed in between.
+4. It runs `%SystemRoot%\System32\msiexec.exe /i <package> /qn /norestart /l*v <log>` and
+   nothing else. No MSI properties are passed, so the installed server URL is kept and nothing
+   is re-enrolled. `/norestart` means the computer is never restarted by an agent update.
+
+The job completes only when the new version is running and reports it. If Windows Installer
+fails and rolls back, the previous version reports the failure with the installer's error code.
+
+**Who can start an update.** An Operator (Admin or SuperAdmin) with *Update agent*, or the
+worker when the *Agent updates* policy is *Automatic* (the default). With *Automatic*, copying a
+newer signed MSI into the agent-packages directory starts the rollout to every computer whose
+policy allows it, at most `EasyPatch:AutomaticAgentUpdateConcurrency` (default 25) at a time.
+Set the policy to *Manual* where updates must be scheduled by hand.
+
+**Changing the key.** The agent accepts several `PUBLIC KEY` blocks in its public key file. To
+move to a new key, append the new public key to the file, release a version signed with the old
+key (it now trusts both), and sign later releases with the new key. If the private key is lost,
+agents cannot update themselves until a version with a new key is installed manually. If it is
+stolen, treat it like a stolen code-signing certificate: build agents with a new key only and
+install them manually, because agents that still trust the old key would accept a package signed
+with it from a compromised server.
+
+Release signatures are separate from Authenticode. They work without a code-signing
+certificate; when Authenticode signing is configured, it is applied first, and the release
+signature covers the signed file.
+
 ## Threat model (STRIDE summary)
 
 | # | Threat | Mitigation |
@@ -203,7 +257,7 @@ the named pipe `\\.\pipe\EasyPatchAgent`:
 | S1 | Attacker impersonates an agent | Per-device ECDSA keys, signed requests, nonce and timestamp checks, revocation |
 | S2 | Attacker impersonates the server to an agent | The agent uses normal Windows TLS validation of the server certificate (the public CA from Caddy's ACME). TLS validation cannot be turned off. |
 | S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory TOTP |
-| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select WUA updates by GUID or category, never arbitrary binaries. Restart payloads are a mode and range-checked durations; message payloads are a preset name. |
+| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select WUA updates by GUID or category, never arbitrary binaries. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. |
 | T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |
 | T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |
 | R1 | Admin actions are denied after the fact | `audit_logs` records the user, IP, correlation ID and details of every mutating admin action |
@@ -212,7 +266,7 @@ the named pipe `\\.\pipe\EasyPatchAgent`:
 | I3 | Database exposure | No published port, internal Docker network, Compose secret for the password |
 | D1 | Check-in floods | Per-credential and per-IP rate limits, request size limits, jitter |
 | D2 | Enrollment queue spam | A deployment code is required, pending requests are capped and expire, per-IP rate limit |
-| E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability, and update sources are controlled by Windows. Agent self-update is **not implemented**. When it is, it must verify Authenticode against a publisher identity pinned in the agent, not a hash supplied by the server. |
+| E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability, and Windows updates come from the sources Windows is configured for. Agent updates install only MSIs whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |
 | E2 | A local non-admin user reads agent secrets | ProgramData ACL (SYSTEM and Administrators), DPAPI, registry ACL on bootstrap values |
 | E3 | Cross-site request forgery or XSS in the admin UI | SameSite=Strict, CSRF header check, a strict CSP from Caddy, and React escaping |
 | E4 | A local user abuses the tray pipe to make the service do something | The pipe accepts only *restart now* or an offered postponement for the current restart request, from interactive sessions; the session comes from Windows. See [Tray and local pipe](#tray-and-local-pipe). |
@@ -246,7 +300,13 @@ the named pipe `\\.\pipe\EasyPatchAgent`:
   revocable, and deployment codes or the environment-variable method avoid the problem.
 * The server cannot verify the Authenticode signatures of agent MSIs it hosts. The generated
   PowerShell installer verifies the SHA-256 and, optionally, the Authenticode signature on
-  the endpoint.
+  the endpoint. Agent updates do not depend on Authenticode: the agent verifies the release
+  signature (see [Agent release signing](#agent-release-signing)).
+* A compromised server can still choose *which* signed release an agent updates to, as long as
+  it is newer than the installed one, and *when*. It cannot install anything unsigned or older.
+  Remove packages of releases you no longer want installed from the agent-packages directory.
+* Agents older than 1.2.0 have no release key and cannot update themselves. Install 1.2.0 or
+  later on them once.
 * The Data Protection key ring (`dpkeys` volume) is stored unencrypted on the Docker host, as
   is the database volume. Anyone with root on the host can read MFA secrets. Protect the
   host, and encrypt backups (`scripts/backup.sh` output includes the key ring).
