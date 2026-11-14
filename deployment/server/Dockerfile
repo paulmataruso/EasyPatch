@@ -2,7 +2,7 @@
 # EasyPatch server image: the API (default entrypoint) and the background worker, built from one source tree.
 # Build context: repository root.  docker build -f deployment/server/Dockerfile -t easypatch-server .
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0.404-alpine3.24 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0.100-alpine3.24 AS build
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 WORKDIR /src
 
