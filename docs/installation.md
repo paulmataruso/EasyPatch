@@ -106,8 +106,8 @@ and the Linux `.deb` and `.rpm` packages (see [linux-agent.md](linux-agent.md#bu
 and copy them, each with its `.sig` release signature, to `data/agent-packages/`:
 
 ```bash
-cp EasyPatchAgent-1.3.0-x64.msi EasyPatchAgent-1.3.0-x64.msi.sig data/agent-packages/
-cp artifacts/linux/EasyPatchAgent-1.3.0-*.deb* artifacts/linux/EasyPatchAgent-1.3.0-*.rpm* data/agent-packages/
+cp EasyPatchAgent-1.4.0-x64.msi EasyPatchAgent-1.4.0-x64.msi.sig data/agent-packages/
+cp artifacts/linux/EasyPatchAgent-1.4.0-*.deb* artifacts/linux/EasyPatchAgent-1.4.0-*.rpm* data/agent-packages/
 chmod 644 data/agent-packages/*
 ```
 

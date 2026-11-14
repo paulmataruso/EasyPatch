@@ -203,7 +203,7 @@ docs/        Documentation
 
 ## Project status
 
-Version 1.3.2, pre-release. Server, console and agent logic are covered by automated tests on
+Version 1.4.0, pre-release. Server, console and agent logic are covered by automated tests on
 Linux. The following have not yet been validated by this repository's automated tests:
 
 * the Windows-specific agent components on real Windows: Windows Update Agent COM calls, WMI

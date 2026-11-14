@@ -104,8 +104,8 @@ The proxy is used by the agent only. Proxy credentials are not supported.
 2. Install it. The service starts and waits for enrollment.
 
    ```sh
-   sudo apt-get install ./EasyPatchAgent-1.3.2-x64.deb     # Debian, Ubuntu
-   sudo dnf install ./EasyPatchAgent-1.3.2-x64.rpm         # RHEL and rebuilds, CentOS Stream, Fedora
+   sudo apt-get install ./EasyPatchAgent-1.4.0-x64.deb     # Debian, Ubuntu
+   sudo dnf install ./EasyPatchAgent-1.4.0-x64.rpm         # RHEL and rebuilds, CentOS Stream, Fedora
    ```
 
 3. Enroll with the token. The agent does not accept a token as a command-line argument, because
@@ -294,7 +294,7 @@ sudo rm -rf /etc/easypatch /var/lib/easypatch
 ## Building from source
 
 ```sh
-scripts/build-linux-packages.sh --version 1.3.2 --arch all
+scripts/build-linux-packages.sh --version 1.4.0 --arch all
 ```
 
 The script runs the agent tests, publishes the self-contained agent for linux-x64 and linux-arm64,
