@@ -328,6 +328,8 @@ public sealed class PackageUpdateService : IUpdateService, IBatchUpdateService, 
                 Repository = repository,
                 Security = upgrade.Security,
                 Advisories = upgrade.Advisories,
+                Cves = upgrade.Cves,
+                SourcePackage = upgrade.Source,
             },
         };
     }

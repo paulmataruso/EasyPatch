@@ -39,6 +39,7 @@ public static class ReportingEndpoints
                 Never = g.Count(e => e.ComplianceStatus == ComplianceStatus.NeverScanned),
                 MissingUpdates = g.Sum(e => e.MissingRequiredCount),
                 Unsupported = g.Count(e => e.OsSupportStatus == OsSupportStatus.Unsupported),
+                KnownExploited = g.Count(e => e.KnownExploitedMissingCount > 0),
             }).FirstOrDefaultAsync(ct);
             var jobs = db.Jobs.AsNoTracking().ForTenant(tenant, j => j.OrganizationId);
             var queued = await jobs.CountAsync(j => j.Status == JobStatus.Queued || j.Status == JobStatus.Delivered, ct);
@@ -60,10 +61,10 @@ public static class ReportingEndpoints
             var stats = await OrganizationStats.LoadAsync(db, orgs.Select(o => o.Id).ToList(), ct);
             var leastCompliant = orgs.Select(o => OrganizationStats.ToSummary(o, stats)).Where(s => s.EndpointCount > 0)
                 .OrderBy(s => s.CompliancePercent).ThenByDescending(s => s.MissingRequiredUpdates).Take(5).ToList();
-            var c = counts ?? new { Total = 0, Online = 0, Compliant = 0, Missing = 0, Failed = 0, Reboot = 0, Stale = 0, Never = 0, MissingUpdates = 0, Unsupported = 0 };
+            var c = counts ?? new { Total = 0, Online = 0, Compliant = 0, Missing = 0, Failed = 0, Reboot = 0, Stale = 0, Never = 0, MissingUpdates = 0, Unsupported = 0, KnownExploited = 0 };
             return TypedResults.Ok(new DashboardSummaryDto(orgs.Count, c.Total, c.Online, c.Total - c.Online, c.Compliant, c.Missing, c.Failed, c.Reboot,
                 c.Stale, c.Never, ComplianceCalculator.Percentage(c.Compliant, c.Total), c.MissingUpdates, queued, running, failed24, pending,
-                c.Unsupported, outdated, leastCompliant));
+                c.Unsupported, outdated, leastCompliant, c.KnownExploited));
         });
 
         dashboard.MapGet("/activity", async (int? limit, Guid? organizationId, EventSeverity? severity, EasyPatchDbContext db, ITenantContext tenant,
@@ -351,6 +352,12 @@ public static class SettingsEndpoints
         app.MapGet("/api/v1/server-info", (Microsoft.Extensions.Options.IOptions<EasyPatchOptions> options, TimeProvider clock) =>
             TypedResults.Ok(new ServerInfoDto(typeof(SettingsEndpoints).Assembly.GetName().Version?.ToString(3) ?? "0.0.0", options.Value.PublicUrl,
                 clock.GetUtcNow()))).WithTags("Settings").RequireAuthorization(Policies.Viewer);
+
+        // Feed status only: the worker downloads the feeds (the API has no outbound internet access).
+        app.MapGet("/api/v1/vulnerability-feeds", async (EasyPatchDbContext db, CancellationToken ct) =>
+            TypedResults.Ok(await db.VulnerabilityFeeds.AsNoTracking().OrderBy(f => f.Name)
+                .Select(f => new VulnerabilityFeedDto(f.Name, f.LastAttemptAt, f.LastSuccessAt, f.LastError, f.Version, f.ItemCount))
+                .ToListAsync(ct))).WithTags("Settings").RequireAuthorization(Policies.Viewer);
 
         var lifecycle = app.MapGroup("/api/v1/lifecycle").WithTags("OS lifecycle").RequireAuthorization(Policies.Viewer);
         lifecycle.MapGet("/", async (EasyPatchDbContext db, CancellationToken ct) =>

@@ -4,7 +4,7 @@ import { useList } from '../../api/hooks';
 import { ENDPOINT_UPDATE_STATES, UPDATE_CATEGORIES, type FleetUpdateDto } from '../../api/types';
 import { EnumSelect, OrganizationSelect, SearchInput, SiteSelect } from '../../components/Filters';
 import { PackageFacts } from '../../components/PackageInfo';
-import { CategoryBadge, SeverityBadge } from '../../components/StatusBadges';
+import { CategoryBadge, CveCount, KnownExploitedBadge, SeverityBadge } from '../../components/StatusBadges';
 import { EmptyState, ErrorState, PageHeader, Pagination, SortHeader, Spinner, TableWrap, Toolbar } from '../../components/ui';
 import { formatBytes, formatDate, formatNumber, humanize } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
@@ -20,6 +20,7 @@ export function UpdatesPage() {
       ...scope,
       category: url.get('category') || undefined,
       state: url.get('state') || undefined,
+      knownExploited: url.get('knownExploited') || undefined,
       search: url.get('search') || undefined,
       page: url.page,
       pageSize: 50,
@@ -32,13 +33,23 @@ export function UpdatesPage() {
 
   return (
     <>
-      <PageHeader title="Update Management" subtitle="Every update reported by your endpoints, aggregated across the fleet." />
+      <PageHeader
+        title="Update Management"
+        subtitle="Every update reported by your endpoints, aggregated across the fleet. Updates fixing known-exploited vulnerabilities are listed first."
+      />
       <Toolbar>
         <SearchInput value={url.get('search')} onChange={(v) => url.set({ search: v })} placeholder="Title, KB or package" />
         <OrganizationSelect value={organizationId} onChange={(v) => url.set({ organizationId: v, siteId: null })} />
         <SiteSelect organizationId={organizationId} value={url.get('siteId')} onChange={(v) => url.set({ siteId: v })} />
         <EnumSelect label="Category" value={url.get('category')} onChange={(v) => url.set({ category: v })} options={UPDATE_CATEGORIES} format={humanize} />
         <EnumSelect label="State" value={url.get('state')} onChange={(v) => url.set({ state: v })} options={ENDPOINT_UPDATE_STATES} format={humanize} />
+        <EnumSelect
+          label="Exploitation"
+          value={url.get('knownExploited')}
+          onChange={(v) => url.set({ knownExploited: v })}
+          options={['true', 'false'] as const}
+          format={(v) => (v === 'true' ? 'Known exploited' : 'Not known exploited')}
+        />
       </Toolbar>
       {list.isPending ? (
         <Spinner />
@@ -80,12 +91,20 @@ export function UpdatesPage() {
                         ) : (
                           u.kbNumber && <div className="font-mono text-xs text-muted">{u.kbNumber}</div>
                         )}
+                        {u.cveCount > 0 && (
+                          <div className="text-xs text-muted">
+                            <CveCount count={u.cveCount} />
+                          </div>
+                        )}
                       </td>
                       <td>
                         <CategoryBadge category={u.category} />
                       </td>
                       <td>
-                        <SeverityBadge severity={u.msrcSeverity} />
+                        <div className="flex flex-col items-start gap-1">
+                          <SeverityBadge severity={u.msrcSeverity} />
+                          {u.knownExploited && <KnownExploitedBadge />}
+                        </div>
                       </td>
                       <td className="whitespace-nowrap text-muted">{formatDate(u.releaseDate)}</td>
                       <td className="text-right whitespace-nowrap tabular-nums">{formatBytes(u.sizeBytes)}</td>

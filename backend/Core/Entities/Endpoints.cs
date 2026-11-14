@@ -113,6 +113,10 @@ public sealed class Endpoint
 
     /// <summary>Missing updates policy allows but whose rollout delay has not passed (not counted as required).</summary>
     public int MissingDeferredCount { get; set; }
+
+    /// <summary>Missing updates that fix a vulnerability in the CISA Known Exploited Vulnerabilities catalog (excluded
+    /// updates and updates outside the policy's categories do not count).</summary>
+    public int KnownExploitedMissingCount { get; set; }
     public DateTimeOffset? ComplianceEvaluatedAt { get; set; }
 
     public string? Notes { get; set; }

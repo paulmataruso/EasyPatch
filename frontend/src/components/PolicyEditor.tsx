@@ -38,6 +38,7 @@ const EMPTY: PolicyRequest = {
   agentAutoUpdateEnabled: null,
   installDelayDays: null,
   securityInstallDelayDays: null,
+  knownExploitedSkipsDelay: null,
 };
 
 export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
@@ -64,6 +65,7 @@ export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
     agentAutoUpdateEnabled: policy.agentAutoUpdateEnabled ?? null,
     installDelayDays: policy.installDelayDays ?? null,
     securityInstallDelayDays: policy.securityInstallDelayDays ?? null,
+    knownExploitedSkipsDelay: policy.knownExploitedSkipsDelay ?? null,
   };
 }
 
@@ -394,6 +396,17 @@ export function PolicyEditor({
               <NumberRow key={f.key} spec={f} value={form[f.key]} inherited={inherited?.[f.key] ?? 0} isGlobal={isGlobal} readOnly={readOnly} onChange={(v) => update(f.key, v)} />
             ))}
           </div>
+          <BoolRow
+            label="Known-exploited vulnerabilities"
+            hint="Updates that fix a vulnerability in the CISA Known Exploited Vulnerabilities catalog are required at once instead of waiting for the delay. See Updates → known exploited."
+            value={form.knownExploitedSkipsDelay}
+            inherited={isGlobal ? true : (inherited?.knownExploitedSkipsDelay ?? true)}
+            isGlobal={isGlobal}
+            readOnly={readOnly}
+            onChange={(v) => update('knownExploitedSkipsDelay', v)}
+            onLabel="Skip the delay"
+            offLabel="Wait"
+          />
           {DELAY_FIELDS.some((f) => (form[f.key] ?? 0) > LONG_DELAY_DAYS) && (
             <Alert tone="warn">
               A delay longer than {LONG_DELAY_DAYS} days leaves endpoints without released fixes for over a month. Endpoints still count as compliant while updates

@@ -22,6 +22,10 @@ public sealed record ServerSettings
     public int RetentionScansDays { get; init; } = 90;
     public int RetentionHistoryDays { get; init; } = 730;
 
+    /// <summary>Download MSRC, CISA KEV and Debian Security Tracker data (worker, outbound HTTPS). Turn off on servers
+    /// without internet access.</summary>
+    public bool VulnerabilityFeedsEnabled { get; init; } = true;
+
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();

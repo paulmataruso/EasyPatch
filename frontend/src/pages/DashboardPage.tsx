@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { AlertTriangle, CheckCircle2, Clock, Monitor, Power, ShieldAlert, UserCheck, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Monitor, Power, ShieldAlert, ShieldX, UserCheck, Wifi, WifiOff } from 'lucide-react';
 import { useApi, useList } from '../api/hooks';
 import type { AlertDto, AlertSummaryDto, ComplianceTrendPoint, DashboardSummaryDto, EndpointEventDto } from '../api/types';
 import { AlertSeverityBadge } from './alerts/AlertsPage';
@@ -159,8 +159,13 @@ function SummaryTiles({ s }: { s: DashboardSummaryDto }) {
         hint={`${formatNumber(s.compliant)} of ${formatNumber(s.endpoints)} endpoints`}
       />
       <StatTile label="Endpoints" value={formatNumber(s.endpoints)} icon={<Monitor className="size-4" aria-hidden />} hint={`${s.organizations} organizations`} to={link('/endpoints', 'View all')} />
-      <StatTile label="Online" value={formatNumber(s.online)} tone="ok" icon={<Wifi className="size-4" aria-hidden />} to={link('/endpoints?online=true', 'View')} />
-      <StatTile label="Offline" value={formatNumber(s.offline)} tone={s.offline > 0 ? 'warn' : undefined} icon={<WifiOff className="size-4" aria-hidden />} to={link('/endpoints?online=false', 'View')} />
+      <StatTile
+        label="Online / offline"
+        value={`${formatNumber(s.online)} / ${formatNumber(s.offline)}`}
+        tone={s.offline > 0 ? 'warn' : 'ok'}
+        icon={s.offline > 0 ? <WifiOff className="size-4" aria-hidden /> : <Wifi className="size-4" aria-hidden />}
+        to={link('/endpoints?online=false', 'View offline')}
+      />
       <StatTile
         label="Missing updates"
         value={formatNumber(s.missingUpdates)}
@@ -168,6 +173,14 @@ function SummaryTiles({ s }: { s: DashboardSummaryDto }) {
         icon={<ShieldAlert className="size-4" aria-hidden />}
         hint={`${formatNumber(s.missingRequiredUpdates)} required updates outstanding`}
         to={link('/endpoints?compliance=MissingUpdates', 'View endpoints')}
+      />
+      <StatTile
+        label="Known-exploited exposure"
+        value={formatNumber(s.knownExploitedEndpoints)}
+        tone={s.knownExploitedEndpoints > 0 ? 'danger' : 'ok'}
+        icon={<ShieldX className="size-4" aria-hidden />}
+        hint="Endpoints missing a fix for a CISA known-exploited vulnerability"
+        to={link('/endpoints?knownExploited=true', 'View endpoints')}
       />
       <StatTile
         label="Failed updates"

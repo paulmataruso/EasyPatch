@@ -3,12 +3,12 @@ import { Link, useParams } from 'react-router';
 import { Download, ExternalLink } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApi, useApiMutation, useList } from '../../api/hooks';
-import { ENDPOINT_UPDATE_STATES, type BulkResultDto, type FleetUpdateDetailDto, type FleetUpdateEndpointDto } from '../../api/types';
+import { ENDPOINT_UPDATE_STATES, type BulkResultDto, type FleetUpdateDetailDto, type FleetUpdateEndpointDto, type VulnerabilityDto } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { Dialog } from '../../components/Dialog';
 import { EnumSelect, OrganizationSelect, SiteSelect } from '../../components/Filters';
 import { Advisories } from '../../components/PackageInfo';
-import { CategoryBadge, OnlineBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
+import { CategoryBadge, KnownExploitedBadge, OnlineBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
 import { Alert, Badge, Button, Card, EmptyState, ErrorState, InlineError, KeyValueList, PageHeader, Pagination, Spinner, StatTile, TableWrap, Toolbar } from '../../components/ui';
 import { formatBytes, formatDate, formatRelative, humanize } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
@@ -58,6 +58,7 @@ export function UpdateDetailPage() {
             )}
             <CategoryBadge category={s.category} />
             <SeverityBadge severity={s.msrcSeverity} />
+            {s.knownExploited && <KnownExploitedBadge />}
             {d.rebootLikely && <Badge tone="info">Restart likely</Badge>}
           </span>
         }
@@ -107,6 +108,8 @@ export function UpdateDetailPage() {
           ]}
         />
       </Card>
+
+      {d.vulnerabilities && d.vulnerabilities.length > 0 && <VulnerabilitiesCard vulnerabilities={d.vulnerabilities} windows={!pkg} />}
 
       <h2 className="mb-2 text-base font-semibold">Endpoints</h2>
       <Toolbar>
@@ -288,5 +291,82 @@ function FleetInstallDialog({ open, onClose, guid, title, selectedIds, defaultOr
         <InlineError error={install.error} />
       </div>
     </Dialog>
+  );
+}
+
+/** CVEs the update fixes on the endpoints in scope: known-exploited first, then by CVSS score. */
+function VulnerabilitiesCard({ vulnerabilities, windows }: { vulnerabilities: VulnerabilityDto[]; windows: boolean }) {
+  const exploited = vulnerabilities.filter((v) => v.kev).length;
+  return (
+    <Card
+      title={`Vulnerabilities fixed (${vulnerabilities.length})`}
+      className="mb-5"
+      actions={exploited > 0 ? <span className="text-sm text-danger">{exploited} known exploited</span> : undefined}
+    >
+      <TableWrap className="max-h-96 overflow-y-auto">
+        <table className="table-base">
+          <thead>
+            <tr>
+              <th>CVE</th>
+              <th>Title</th>
+              <th>Severity</th>
+              <th className="text-right">CVSS</th>
+              <th>Exploitation</th>
+            </tr>
+          </thead>
+          <tbody>
+            {vulnerabilities.map((v) => (
+              <tr key={v.cveId}>
+                <td className="whitespace-nowrap">
+                  <a
+                    href={`https://nvd.nist.gov/vuln/detail/${v.cveId}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 font-mono text-accent hover:underline"
+                  >
+                    {v.cveId} <ExternalLink className="size-3" aria-hidden />
+                  </a>
+                  {windows && (
+                    <a
+                      href={`https://msrc.microsoft.com/update-guide/vulnerability/${v.cveId}`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="ml-2 text-xs text-muted hover:text-accent hover:underline"
+                    >
+                      MSRC
+                    </a>
+                  )}
+                </td>
+                <td className="min-w-64">{v.title ?? v.kevName ?? <span className="text-subtle">—</span>}</td>
+                <td>
+                  <SeverityBadge severity={v.severity} />
+                </td>
+                <td className="text-right tabular-nums">{v.cvssBase !== null ? v.cvssBase.toFixed(1) : '—'}</td>
+                <td>
+                  <div className="flex flex-col items-start gap-1">
+                    {v.kev ? (
+                      <>
+                        <KnownExploitedBadge dueDate={v.kevDueDate} />
+                        <span className="text-xs text-muted">
+                          CISA KEV since {v.kevDateAdded ?? '—'}
+                          {v.kevDueDate && `, due ${v.kevDueDate}`}
+                        </span>
+                        {v.kevRansomware && <Badge tone="danger">Used by ransomware</Badge>}
+                      </>
+                    ) : v.msrcExploited ? (
+                      <Badge tone="warn" title="Microsoft reports exploitation; not (yet) in the CISA KEV catalog">
+                        Exploited (Microsoft)
+                      </Badge>
+                    ) : (
+                      <span className="text-subtle">—</span>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+    </Card>
   );
 }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using EasyPatch.Contracts.Updates;
 
 namespace EasyPatch.Linux.Packages;
 
@@ -17,6 +18,12 @@ public sealed record PackageUpgrade(string Name, string Architecture, string? In
     public string? Severity { get; init; }
 
     public IReadOnlyList<string> Advisories { get; init; } = [];
+
+    /// <summary>CVE IDs fixed by this upgrade (dnf advisories).</summary>
+    public IReadOnlyList<string> Cves { get; init; } = [];
+
+    /// <summary>Source package (apt).</summary>
+    public string? Source { get; init; }
 
     /// <summary>Key used for lookups: <c>name:arch</c>.</summary>
     public string Key => Name + ":" + Architecture;
@@ -49,6 +56,26 @@ public static partial class PackageNames
 /// <summary>Parsers for apt output (run with LC_ALL=C).</summary>
 public static partial class AptParsers
 {
+    /// <summary>Parses <c>dpkg-query -W -f='${Package}\t${Architecture}\t${source:Package}\n'</c> into <c>name:arch</c> → source
+    /// package. Invalid names are skipped.</summary>
+    public static IReadOnlyDictionary<string, string> ParseSourcePackages(string output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in output.Split('\n'))
+        {
+            var parts = line.Trim().Split('\t');
+            if (parts.Length != 3 || !PackageNames.IsDebianName(parts[0]) || !PackageNames.IsDebianName(parts[2]) || !PackageNames.IsArchitecture(parts[1]))
+            {
+                continue;
+            }
+
+            result[parts[0] + ":" + parts[1]] = parts[2];
+        }
+
+        return result;
+    }
+
     // Inst libssl3 [3.0.17-1~deb12u2] (3.0.22-1~deb12u2 Debian-Security:12/oldstable-security [amd64])
     // Inst libc6 [2.39-0ubuntu8.9] (2.39-0ubuntu8.12 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
     // Inst linux-image-6.1.0-30-amd64 (6.1.124-1 Debian:12.9/stable [amd64])     (a new package)
@@ -271,6 +298,83 @@ public static partial class DnfParsers
     /// <summary>Parses dnf5 <c>advisory list --updates --json</c>: an array of objects with <c>name</c>, <c>type</c>,
     /// <c>severity</c> and <c>nevra</c> (dnf5 no longer prints the dnf4 "Important/Sec." column). Entries with a missing or
     /// malformed field are skipped; a document that is not a JSON array throws <see cref="JsonException"/>.</summary>
+    /// <summary>CVE IDs in a text (an advisory reference ID or title such as "CVE-2026-1234 pcre2: …").</summary>
+    public static IEnumerable<string> FindCves(string? text) =>
+        text is null ? [] : CveRegex().Matches(text).Select(m => m.Value.ToUpperInvariant());
+
+    public static bool IsCve(string value) => CveExactRegex().IsMatch(value);
+
+    [GeneratedRegex(@"\bCVE-\d{4}-\d{4,7}\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex CveRegex();
+
+    [GeneratedRegex(@"^CVE-\d{4}-\d{4,7}$", RegexOptions.CultureInvariant)]
+    private static partial Regex CveExactRegex();
+
+    /// <summary>Parses <c>dnf5 advisory info --json</c>: advisory name → CVE IDs from its references (RHEL lists them as
+    /// references of type "cve"; Fedora names them in Bugzilla titles).</summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseAdvisoryCves(string output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return result;
+        }
+
+        using var document = JsonDocument.Parse(output);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("Expected a JSON array of advisories.");
+        }
+
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || AnyCaseText(item, "name") is not { } name)
+            {
+                continue;
+            }
+
+            var cves = new SortedSet<string>(StringComparer.Ordinal);
+            if (AnyCase(item, "references") is { ValueKind: JsonValueKind.Array } references)
+            {
+                foreach (var reference in references.EnumerateArray())
+                {
+                    if (reference.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
+                    cves.UnionWith(FindCves(AnyCaseText(reference, "id")));
+                    cves.UnionWith(FindCves(AnyCaseText(reference, "title")));
+                }
+            }
+
+            if (cves.Count > 0)
+            {
+                result[name] = cves.ToList();
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>dnf5 writes some JSON keys capitalized ("Name") and others not ("references").</summary>
+    private static JsonElement? AnyCase(JsonElement item, string property)
+    {
+        foreach (var p in item.EnumerateObject())
+        {
+            if (string.Equals(p.Name, property, StringComparison.OrdinalIgnoreCase))
+            {
+                return p.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? AnyCaseText(JsonElement item, string property) =>
+        AnyCase(item, property) is { ValueKind: JsonValueKind.String } value && value.GetString() is { Length: > 0 } s ? s : null;
+
     public static IReadOnlyList<Advisory> ParseAdvisoryJson(string output)
     {
         ArgumentNullException.ThrowIfNull(output);

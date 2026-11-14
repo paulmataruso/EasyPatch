@@ -2,6 +2,7 @@ using System.Text;
 using EasyPatch.Agent.Core.Abstractions;
 using EasyPatch.Agent.Tests.Infrastructure;
 using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Updates;
 using EasyPatch.Linux.Packages;
 using EasyPatch.Linux.Platform;
 using EasyPatch.Linux.Processes;
@@ -142,6 +143,67 @@ public sealed class LinuxParserTests
         Assert.False(advisories[1].IsSecurity);
         Assert.Equal("1:3.2.2-6.el9_5.1", advisories[2].Version);
         Assert.Equal("openssl-libs", advisories[2].Name);
+    }
+
+    [Fact]
+    public void Dnf_updateinfo_with_cve_lists_only_cve_ids_per_package_version()
+    {
+        // `dnf updateinfo list --updates --with-cve` on Rocky Linux 9 prints every reference, not only CVEs.
+        const string output = """
+            CVE-2025-11083  Moderate/Sec.  binutils-2.35.2-67.el9_7.1.x86_64
+            RLSA-2025:23343 Moderate/Sec.  binutils-2.35.2-67.el9_7.1.x86_64
+            RHSA-2025:23343 Moderate/Sec.  binutils-2.35.2-67.el9_7.1.x86_64
+            CC-BY-4.0       Moderate/Sec.  binutils-2.35.2-67.el9_7.1.x86_64
+            CVE-2025-11083  Moderate/Sec.  binutils-gold-2.35.2-67.el9_7.1.x86_64
+            """;
+
+        var cves = DnfParsers.ParseUpdateInfo(output).Where(a => DnfParsers.IsCve(a.Id)).ToList();
+
+        Assert.Equal(2, cves.Count);
+        Assert.All(cves, c => Assert.Equal("CVE-2025-11083", c.Id));
+        Assert.Equal(["binutils", "binutils-gold"], cves.Select(c => c.Name));
+        Assert.False(DnfParsers.IsCve("CVE-2025-1"));
+        Assert.False(DnfParsers.IsCve("cve-2025-11083 "));
+    }
+
+    [Fact]
+    public void Dnf5_advisory_info_json_maps_advisories_to_cves()
+    {
+        // Shape of `dnf advisory info --updates --json` (dnf5 5.4): Fedora names CVEs in Bugzilla titles, RHEL-style
+        // advisories list them as references of type "cve".
+        const string output = """
+            [
+              {"Name":"FEDORA-2026-3dc7e56d1e","Type":"security","Severity":"Moderate","references":[
+                {"Title":"pcre2-10.49 is available","Id":"2526344","Type":"bugzilla","Url":"https://bugzilla.redhat.com/show_bug.cgi?id=2526344"},
+                {"Title":"CVE-2026-89162 pcre2: Information disclosure [fedora-all]","Id":"2531754","Type":"bugzilla","Url":"https://bugzilla.redhat.com/x"},
+                {"Title":"CVE-2026-89162 pcre2: Information disclosure [fedora-all]","Id":"2531756","Type":"bugzilla","Url":"https://bugzilla.redhat.com/y"},
+                {"Title":"cve-2026-89156 pcre2: Out-of-bounds read","Id":"2531803","Type":"bugzilla","Url":"https://bugzilla.redhat.com/z"}
+              ],"collections":{"packages":["pcre2-10.49-1.fc45.x86_64"]}},
+              {"Name":"RLSA-2026:1234","Type":"security","references":[{"Title":"","Id":"CVE-2026-1111","Type":"cve","Url":""}]},
+              {"Name":"FEDORA-2026-eb674199d1","Type":"enhancement","references":[]}
+            ]
+            """;
+
+        var cves = DnfParsers.ParseAdvisoryCves(output);
+
+        Assert.Equal(["CVE-2026-89156", "CVE-2026-89162"], cves["FEDORA-2026-3dc7e56d1e"]);
+        Assert.Equal(["CVE-2026-1111"], cves["RLSA-2026:1234"]);
+        Assert.False(cves.ContainsKey("FEDORA-2026-eb674199d1"));
+        Assert.Empty(DnfParsers.ParseAdvisoryCves(" "));
+        Assert.Throws<System.Text.Json.JsonException>(() => DnfParsers.ParseAdvisoryCves("{}"));
+    }
+
+    [Fact]
+    public void Dpkg_source_packages_are_keyed_by_name_and_architecture()
+    {
+        const string output = "libssl3\tamd64\topenssl\nopenssl\tamd64\topenssl\ntzdata\tall\ttzdata\nbad name\tamd64\tx\nlinux-image-6.1.0-40-amd64\tamd64\tlinux-signed-amd64\n";
+
+        var sources = AptParsers.ParseSourcePackages(output);
+
+        Assert.Equal("openssl", sources["libssl3:amd64"]);
+        Assert.Equal("tzdata", sources["tzdata:all"]);
+        Assert.Equal("linux-signed-amd64", sources["linux-image-6.1.0-40-amd64:amd64"]);
+        Assert.Equal(4, sources.Count);
     }
 
     [Fact]
@@ -316,7 +378,9 @@ public sealed class LinuxPackageUpdateTests : IDisposable
         Assert.Equal(["Security Updates", "Debian 12"], ssl.Categories.Select(c => c.Name));
         Assert.True(ssl.Package!.Security);
         Assert.Equal("3.0.15-1~deb12u1", ssl.Package.InstalledVersion);
+        Assert.Equal("openssl", ssl.Package.SourcePackage);
         Assert.False(scan.Missing[1].Update.Package!.Security);
+        Assert.Equal("tzdata", scan.Missing[1].Update.Package!.SourcePackage);
         Assert.Empty(scan.Installed);
         Assert.Contains(_apt.Commands, c => c.StartsWith("apt-get update", StringComparison.Ordinal));
     }
@@ -443,6 +507,8 @@ public sealed class LinuxPackageUpdateTests : IDisposable
                     .Select(o => $"Inst {o.Name} [{o.Old}] ({o.New} {o.Origin} [{o.Arch}])"))),
                 "apt-cache" => Ok(string.Empty),
                 "dpkg" when arguments[0] == "--print-architecture" => Ok("amd64\n"),
+                "dpkg-query" when arguments[1].Contains("source:Package", StringComparison.Ordinal) => Ok(string.Concat(Installed.Select(i =>
+                    $"{i.Key.Split(':')[0]}\t{i.Key.Split(':')[1]}\t{(i.Key.StartsWith("libssl", StringComparison.Ordinal) ? "openssl" : i.Key.Split(':')[0])}\n"))),
                 "dpkg-query" => Ok(string.Concat(Installed.Select(i => $"{i.Key.Split(':')[0]}\t{i.Key.Split(':')[1]}\t{i.Value}\tii \n"))),
                 "apt-mark" when arguments[0] == "showauto" => Ok(string.Join('\n', Auto)),
                 "apt-mark" when arguments[0] == "auto" => MarkAuto(arguments.Skip(2)),

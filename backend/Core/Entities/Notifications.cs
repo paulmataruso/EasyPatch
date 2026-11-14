@@ -23,6 +23,9 @@ public enum AlertRuleType
 
     /// <summary>The operating system is unsupported, or its support ends within <see cref="AlertRule.Threshold"/> days.</summary>
     OsUnsupported,
+
+    /// <summary>An endpoint is missing an update that fixes a CVE in the CISA Known Exploited Vulnerabilities catalog.</summary>
+    KnownExploitedMissing,
 }
 
 public enum AlertSeverity

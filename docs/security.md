@@ -287,8 +287,9 @@ signature covers the signed file.
 
 ## Notifications and webhooks
 
-Alert notifications are the only feature that makes the server open outbound connections
-(apart from ACME in Caddy). They are configured by super administrators only, under
+Alert notifications and the vulnerability data downloads (see [Vulnerability data](#vulnerability-data))
+are the only features that make the server open outbound connections (apart from ACME in Caddy).
+Notifications are configured by super administrators only, under
 *Settings → Alert rules* and *Settings → Notifications*, and every change is audited
 (`notifications.*`, `alert_rule.*`, `alert.acknowledge`) without the secrets.
 
@@ -328,6 +329,30 @@ Alert notifications are the only feature that makes the server open outbound con
   (which cannot be turned off). *None* sends the password and messages unencrypted and is
   meant only for a relay on a trusted network.
 
+## Vulnerability data
+
+The worker downloads public vulnerability data to show which CVEs updates fix and to flag
+known-exploited ones ([compliance.md](compliance.md#vulnerabilities-and-known-exploited-updates)):
+
+* **Fixed hosts, HTTPS only, nothing sent.** The URLs are built in: `www.cisa.gov` (with
+  `raw.githubusercontent.com/cisagov/kev-data` as fallback), `api.msrc.microsoft.com` and
+  `security-tracker.debian.org`. Requests are plain GETs without credentials or any data about
+  endpoints. Redirects are not followed and the system's certificate validation applies (it
+  cannot be turned off). Super administrators can turn the downloads off under *Settings →
+  Server → Vulnerability data*.
+* **Untrusted input.** The documents are parsed as data only, with size limits (32 MB for the
+  KEV catalog and the MSRC list, 128 MB per MSRC document, 512 MB for the Debian tracker, which is
+  streamed rather than loaded). MSRC document IDs from the list must look like `2026-Nov` before
+  they are put in a URL. CVE IDs must match `CVE-yyyy-nnnn…`; other values are dropped. Feed data
+  is stored in its own tables and never turned into commands: it changes which updates are shown
+  first and, by default, lets known-exploited updates skip a rollout delay. It cannot add updates,
+  install anything or restart a computer.
+* **Failures.** A failed download keeps the previous data and is retried after an hour. The stored
+  and logged error names the host and the HTTP status only.
+
+The CVEs Linux agents report come from the computer's own package manager (dnf advisories) and
+are validated the same way.
+
 ## Threat model (STRIDE summary)
 
 | # | Threat | Mitigation |
@@ -338,6 +363,7 @@ Alert notifications are the only feature that makes the server open outbound con
 | T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select, by GUID or category, Windows updates or Linux package upgrades that the agent's own scan found, never arbitrary binaries or packages. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. |
 | T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |
 | T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |
+| T4 | A tampered or malicious vulnerability feed | Fixed HTTPS hosts with normal certificate validation, no redirects, size limits, strict parsing (document IDs and CVE IDs are validated). Feed data only changes display order, CVE lists and, by default, whether a known-exploited update skips the rollout delay: it cannot add updates, run commands or restart computers. Super administrators can turn the downloads off. See [Vulnerability data](#vulnerability-data). |
 | R1 | Admin actions are denied after the fact | `audit_logs` records the user, IP, correlation ID and details of every mutating admin action |
 | I1 | Tenant data leaks between organizations | One tenant-scope service, organization-filtered queries and integration tests for isolation |
 | I2 | Secrets appear in logs | The server and agent never log tokens or keys. The MSI token property is hidden and registry values are not echoed to MSI logs (see above for limits). Structured logs leave out request bodies. |

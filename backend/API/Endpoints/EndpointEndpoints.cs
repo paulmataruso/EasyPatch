@@ -18,7 +18,7 @@ namespace EasyPatch.Api.Endpoints;
 
 public sealed record EndpointListQuery(
     Guid? OrganizationId, Guid? SiteId, string? Search, ComplianceStatus? Compliance, bool? Online, string? Os, bool? RebootPending, bool? OutdatedAgent,
-    EndpointStatus? Status, string? Sort, string? Dir, int? Page, int? PageSize, Guid? TagId = null);
+    EndpointStatus? Status, string? Sort, string? Dir, int? Page, int? PageSize, Guid? TagId = null, bool? KnownExploited = null);
 
 public static class EndpointEndpoints
 {
@@ -122,6 +122,7 @@ public static class EndpointEndpoints
                     EndpointUpdateState.PendingVerification => 3,
                     _ => 4,
                 })
+                .ThenByDescending(r => r.Row.KnownExploited)
                 .ThenByDescending(r => r.Row.IsRequired)
                 .ThenByDescending(r => r.Update!.ReleaseDate)
                 .Select(r => ToUpdateDto(r.Row, r.Update!, overlay.GetValueOrDefault(r.Row.UpdateGuid)))
@@ -189,7 +190,7 @@ public static class EndpointEndpoints
                 window?.Start.ToString("HH:mm", CultureInfo.InvariantCulture), window?.DurationMinutes,
                 endpoint.Site?.TimeZone ?? endpoint.Organization!.TimeZone, p.ScanStaleAfterHours, p.MaxConcurrentInstallsPerSite, p.Sources,
                 p.TrayIconEnabled, p.InstallNotificationsEnabled, OrganizationEndpoints.ToDto(p.RestartSchedule), p.WindowsUpdate, registry,
-                p.AgentAutoUpdateEnabled, p.InstallDelayDays, p.SecurityInstallDelayDays, p.SourceTags));
+                p.AgentAutoUpdateEnabled, p.InstallDelayDays, p.SecurityInstallDelayDays, p.SourceTags, p.KnownExploitedSkipsDelay));
         });
 
         // Per-endpoint policy overrides (the most specific layer).
@@ -427,6 +428,11 @@ public static class EndpointEndpoints
             query = query.Where(e => db.EndpointTags.Any(et => et.EndpointId == e.Id && et.TagId == tagId));
         }
 
+        if (q.KnownExploited is { } exploited)
+        {
+            query = exploited ? query.Where(e => e.KnownExploitedMissingCount > 0) : query.Where(e => e.KnownExploitedMissingCount == 0);
+        }
+
         var latest = Mapping.LatestAgentVersions.From(packages);
 
         var desc = PagingExtensions.IsDescending(q.Dir);
@@ -436,6 +442,7 @@ public static class EndpointEndpoints
             "site" => desc ? query.OrderByDescending(e => e.Site!.Name).ThenBy(e => e.Hostname) : query.OrderBy(e => e.Site!.Name).ThenBy(e => e.Hostname),
             "os" => desc ? query.OrderByDescending(e => e.OsBuildNumber).ThenBy(e => e.Hostname) : query.OrderBy(e => e.OsBuildNumber).ThenBy(e => e.Hostname),
             "missing" => desc ? query.OrderByDescending(e => e.MissingRequiredCount).ThenBy(e => e.Hostname) : query.OrderBy(e => e.MissingRequiredCount).ThenBy(e => e.Hostname),
+            "knownexploited" => desc ? query.OrderByDescending(e => e.KnownExploitedMissingCount).ThenBy(e => e.Hostname) : query.OrderBy(e => e.KnownExploitedMissingCount).ThenBy(e => e.Hostname),
             "lastcheckin" => desc ? query.OrderByDescending(e => e.LastCheckInAt).ThenBy(e => e.Hostname) : query.OrderBy(e => e.LastCheckInAt).ThenBy(e => e.Hostname),
             "compliance" => desc ? query.OrderByDescending(e => e.ComplianceStatus).ThenBy(e => e.Hostname) : query.OrderBy(e => e.ComplianceStatus).ThenBy(e => e.Hostname),
             "agentversion" => desc ? query.OrderByDescending(e => e.AgentVersion).ThenBy(e => e.Hostname) : query.OrderBy(e => e.AgentVersion).ThenBy(e => e.Hostname),
@@ -470,7 +477,7 @@ public static class EndpointEndpoints
         var row = new Mapping.EndpointRow(e.Id, e.Hostname, e.OrganizationId, e.Organization!.Name, e.SiteId, e.Site?.Name, e.Status, e.OperatingSystem,
             e.OsVersion, e.OsBuild, e.OsBuildNumber, e.OsProductType, e.Architecture, e.AgentVersion, e.IsOnline, e.LastCheckInAt, e.LastScanAt,
             e.ComplianceStatus, e.MissingRequiredCount, e.MissingTotalCount, e.FailedCount, e.RebootPending, e.OsSupportStatus, e.CurrentActivity, e.LastSeenIp,
-            e.Platform, e.AgentPackageFormat, e.MissingDeferredCount);
+            e.Platform, e.AgentPackageFormat, e.MissingDeferredCount, e.KnownExploitedMissingCount);
         var endpointTags = await Mapping.LoadTagsAsync(db, [id], ct);
         var credentials = await db.AgentCredentials.AsNoTracking().Where(c => c.EndpointId == id).OrderByDescending(c => c.CreatedAt).Take(10)
             .Select(c => new CredentialDto(c.CredentialId, c.KeyFingerprint, c.CreatedAt, c.ExpiresAt, c.RevokedAt, c.RevokedReason, c.LastUsedAt))
@@ -535,7 +542,7 @@ public static class EndpointEndpoints
         row.UpdateGuid, update.RevisionNumber, update.Title, update.Description, update.PrimaryKb, update.KbNumbers, update.Category, update.MsClassification,
         update.MsrcSeverity, update.ReleaseDate, update.MaxDownloadSizeBytes, update.RebootBehavior is > 0, update.SupportUrl, row.State, row.IsRequired,
         row.IsExcluded, row.FirstDetectedAt, row.StateChangedAt, row.InstalledAt, row.FailedAttempts, row.ErrorCode, row.ErrorMessage, overlay,
-        Mapping.Package(update, row.InstalledVersion), row.DeferredUntil);
+        Mapping.Package(update, row.InstalledVersion), row.DeferredUntil, row.CveIds, row.KnownExploited, row.KevDueDate);
 
     internal static List<Guid> ParseGuids(string? csv) =>
         string.IsNullOrWhiteSpace(csv)

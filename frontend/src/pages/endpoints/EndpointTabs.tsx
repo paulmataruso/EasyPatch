@@ -29,7 +29,7 @@ import { PolicyEditor, resolveInherited } from '../../components/PolicyEditor';
 import { describeRestartSchedule, describeWindowsUpdateGroup, WU_GROUPS } from '../../components/PolicySections';
 import { SessionSummary } from '../../components/RestartDialogs';
 import { TagChip } from '../../components/Tags';
-import { CategoryBadge, EventSeverityDot, JobItemStatusBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
+import { CategoryBadge, CveCount, EventSeverityDot, JobItemStatusBadge, KnownExploitedBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
 import { useToast } from '../../components/Toast';
 import {
   Alert,
@@ -402,6 +402,7 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
                         !u.isRequired && <span title="Not installed by policy (category, optional or excluded)">not required by policy</span>
                       )}
                       {u.rebootLikely && <span className="text-info">restart likely</span>}
+                      <CveCount cves={u.cveIds} />
                       {u.supportUrl && (
                         <a href={u.supportUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-0.5 text-accent hover:underline">
                           details <ExternalLink className="size-3" aria-hidden />
@@ -420,7 +421,10 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
                     <CategoryBadge category={u.category} />
                   </td>
                   <td>
-                    <SeverityBadge severity={u.msrcSeverity} />
+                    <div className="flex flex-col items-start gap-1">
+                      <SeverityBadge severity={u.msrcSeverity} />
+                      {u.knownExploited && <KnownExploitedBadge dueDate={u.kevDueDate} />}
+                    </div>
                   </td>
                   <td>
                     <div className="flex flex-col items-start gap-1">
@@ -771,6 +775,11 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
               ),
               row('Rollout delay: security updates', 'securityInstallDelayDays', delayText(p.securityInstallDelayDays ?? 0)),
               row('Rollout delay: other updates', 'installDelayDays', delayText(p.installDelayDays ?? 0)),
+              row(
+                'Known-exploited vulnerabilities',
+                'knownExploitedSkipsDelay',
+                p.knownExploitedSkipsDelay === false ? 'Wait for the rollout delay' : 'Skip the rollout delay',
+              ),
               row('Automatic installation', 'autoInstallEnabled', p.autoInstallEnabled ? 'On (inside maintenance window; installing never restarts)' : 'Off'),
               row(
                 'Maintenance window',

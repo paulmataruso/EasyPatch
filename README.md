@@ -62,8 +62,13 @@ on one computer, a site, or a whole customer, and tracks compliance across every
   records who requested it, its delivery, start and completion times, and per-update results.
 * **Verified results.** An update counts as installed only after a Windows Update scan confirms
   it. Updates waiting for a restart are tracked as such.
+* **CVE and known-exploited prioritization.** Updates show the CVEs they fix (Windows from
+  Microsoft's security update data, Debian from the Debian Security Tracker, RHEL-family and
+  Fedora from the dnf advisories; Ubuntu not yet). Updates fixing a vulnerability in the CISA
+  Known Exploited Vulnerabilities catalog are flagged, listed first and, by default, skip the
+  rollout delay. See [docs/compliance.md](docs/compliance.md#vulnerabilities-and-known-exploited-updates).
 * **Alerts and notifications.** Built-in rules (endpoint offline, failed installs, security
-  updates missing too long, stale scans, pending restarts, enrollment requests, unsupported OS)
+  updates missing too long, known-exploited vulnerabilities, stale scans, pending restarts, enrollment requests, unsupported OS)
   open alerts that resolve by themselves when the condition clears. Notifications go to email,
   Slack, Microsoft Teams or a signed JSON webhook for PSA and ticketing systems, grouped per
   channel and retried. Webhooks are restricted to public HTTPS addresses unless private ones
@@ -147,7 +152,7 @@ The full guides are [docs/installation.md](docs/installation.md),
 | [agent-installation.md](docs/agent-installation.md) | Windows agent requirements, MSI properties, RMM deployment, command line, logs, building the MSI |
 | [linux-agent.md](docs/linux-agent.md) | Linux agent: supported distributions, install script and token enrollment, how packages are scanned and installed, self-update, building the packages |
 | [architecture.md](docs/architecture.md) | Components, data model, update state model, policy, job system, agent lifecycle, deployment design |
-| [compliance.md](docs/compliance.md) | Compliance statuses and rules, required updates, OS support status, reports |
+| [compliance.md](docs/compliance.md) | Compliance statuses and rules, required updates, CVE and known-exploited data, OS support status, reports |
 | [alerts.md](docs/alerts.md) | Alert rules, notification channels (email, Slack, Teams, signed webhooks), delivery and troubleshooting |
 | [security.md](docs/security.md) | Security model, threat model, hardening checklist, known limitations |
 | [api.md](docs/api.md) | REST API (admin and agent protocol). The live OpenAPI document is served at `/api/docs` to signed-in administrators |

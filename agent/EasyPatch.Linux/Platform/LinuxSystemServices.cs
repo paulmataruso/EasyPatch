@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using EasyPatch.Agent.Core.Abstractions;
 using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Updates;
 using EasyPatch.Linux.Packages;
 using EasyPatch.Linux.Processes;
 using Microsoft.Extensions.Logging;

@@ -479,6 +479,8 @@ export interface PolicyValues {
   installDelayDays: number | null;
   /** Rollout delay for security updates (including monthly cumulative updates); 0-90, null inherits. */
   securityInstallDelayDays: number | null;
+  /** Updates fixing a CISA known-exploited vulnerability skip the rollout delay; null inherits (the global default is true). */
+  knownExploitedSkipsDelay: boolean | null;
 }
 
 export interface PolicyDto extends PolicyValues {
@@ -525,6 +527,7 @@ export interface EffectivePolicyDto {
   securityInstallDelayDays: number;
   /** For values supplied by a tag policy: field name → tag name. */
   sourceTags: Record<string, string> | null;
+  knownExploitedSkipsDelay: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -604,6 +607,8 @@ export interface EndpointSummaryDto {
   /** Allowed updates still inside their rollout delay (not counted as missing). */
   missingDeferredCount: number;
   tags: TagRefDto[];
+  /** Outstanding allowed updates that fix a CISA known-exploited vulnerability. */
+  knownExploitedMissingCount: number;
 }
 
 export const ENDPOINT_PLATFORMS = { windows: 'Windows', linux: 'Linux' } as const;
@@ -763,6 +768,12 @@ export interface EndpointUpdateDto {
   package: PackageInfoDto | null;
   /** Set while the update is inside its rollout delay (it is not required until then). */
   deferredUntil: Instant | null;
+  /** CVEs the update fixes on this endpoint (see docs/compliance.md for the sources per platform). */
+  cveIds: string[] | null;
+  /** One of the CVEs is in the CISA Known Exploited Vulnerabilities catalog. */
+  knownExploited: boolean;
+  /** Earliest CISA remediation due date of those CVEs. */
+  kevDueDate: string | null;
 }
 
 /** A Linux package update. `installedVersion` is the endpoint's current version (endpoint views only). */
@@ -891,6 +902,9 @@ export interface FleetUpdateDto {
   excludedCount: number;
   /** The Linux package behind the update; null for Windows updates. */
   package: PackageInfoDto | null;
+  cveCount: number;
+  /** Fixes a CISA known-exploited vulnerability on at least one endpoint in scope. */
+  knownExploited: boolean;
 }
 
 export interface FleetUpdateDetailDto {
@@ -902,6 +916,32 @@ export interface FleetUpdateDetailDto {
   msClassification: string | null;
   rebootLikely: boolean;
   supersededUpdateGuids: Guid[];
+  /** Known-exploited first, then by CVSS. */
+  vulnerabilities: VulnerabilityDto[] | null;
+}
+
+/** A CVE an update fixes. Title, severity and CVSS come from MSRC (Windows CVEs only); kev* from the CISA KEV catalog. */
+export interface VulnerabilityDto {
+  cveId: string;
+  title: string | null;
+  severity: string | null;
+  cvssBase: number | null;
+  msrcExploited: boolean;
+  kev: boolean;
+  kevDateAdded: string | null;
+  kevDueDate: string | null;
+  kevRansomware: boolean;
+  kevName: string | null;
+}
+
+/** Synchronization state of a vulnerability feed ("msrc", "kev" or "debian"). */
+export interface VulnerabilityFeedDto {
+  name: string;
+  lastAttemptAt: Instant | null;
+  lastSuccessAt: Instant | null;
+  lastError: string | null;
+  version: string | null;
+  itemCount: number;
 }
 
 export interface FleetUpdateEndpointDto {
@@ -1154,6 +1194,8 @@ export interface DashboardSummaryDto {
   unsupportedOs: number;
   outdatedAgents: number;
   leastCompliantOrganizations: OrganizationSummaryDto[];
+  /** Endpoints missing an update that fixes a CISA known-exploited vulnerability. */
+  knownExploitedEndpoints: number;
 }
 
 export interface ComplianceReportRow {
@@ -1273,6 +1315,8 @@ export interface ServerSettings {
   retentionJobsDays: number;
   retentionScansDays: number;
   retentionHistoryDays: number;
+  /** Download CISA KEV, MSRC and Debian Security Tracker data (worker, outbound HTTPS). */
+  vulnerabilityFeedsEnabled: boolean;
 }
 
 export interface ServerInfoDto {
@@ -1293,6 +1337,7 @@ export const ALERT_RULE_TYPES = [
   'RestartPending',
   'EnrollmentPending',
   'OsUnsupported',
+  'KnownExploitedMissing',
 ] as const;
 export type AlertRuleType = (typeof ALERT_RULE_TYPES)[number];
 
@@ -1304,6 +1349,7 @@ export const ALERT_RULE_TYPE_LABELS: Record<AlertRuleType, string> = {
   RestartPending: 'Restart pending',
   EnrollmentPending: 'Enrollment waiting for approval',
   OsUnsupported: 'Operating system unsupported',
+  KnownExploitedMissing: 'Known-exploited vulnerability unpatched',
 };
 
 export const ALERT_SEVERITIES = ['Critical', 'Warning', 'Info'] as const;

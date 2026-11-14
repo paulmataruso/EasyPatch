@@ -111,3 +111,13 @@ cancelled.
 | Deliveries stay `Pending` | The worker sends them every 30 seconds. Retries wait up to an hour between attempts. Check the worker log for `Notification … failed` |
 | `A stored notification secret cannot be decrypted` | The worker does not see the API's Data Protection keys. It must mount the `dpkeys` volume (use the current `docker-compose.yml`). If the keys were lost, enter the SMTP password and webhook URLs again |
 | Webhook `refused: private network addresses are not allowed` | The webhook host resolves to a private address. Turn on **Allow webhooks to private network addresses** if that is intended |
+
+## Vulnerability data (CVEs and known-exploited updates)
+
+| Symptom | Cause and fix |
+|---|---|
+| No CVEs or *Known exploited* badges anywhere | Check **Settings → Server → Vulnerability data**. *No feed has been downloaded yet*: the worker checks hourly, starting a few seconds after it starts. *Failed* with `Download failed (NameResolutionError)` or `(ConnectionError)`: the `worker` has no outbound access to the hosts listed in [installation.md](installation.md#requirements) (the `egress` network, a firewall or a proxy). Failed downloads are retried after an hour |
+| Windows updates have no CVEs | The CVEs come from the update's KB numbers (MSRC data of the last 12 months) and, for the monthly cumulative update, from the computer's build number. Check that the endpoint has sent its inventory (build shown on the endpoint page) |
+| Debian updates have no CVEs | Needs agent 1.4.0 or newer (it reports the source package) and Debian 12 or 13. The Debian Security Tracker is downloaded only while such endpoints exist, so the first match can take up to an hour after they report |
+| Rocky, AlmaLinux, RHEL or Fedora updates have no CVEs | Needs agent 1.4.0 or newer. The CVEs come from the repository's advisories: CentOS Stream and repositories without `updateinfo` have none. The agent log says `Could not read the CVE references…` when reading them failed |
+| Ubuntu updates have no CVEs | Not supported yet |

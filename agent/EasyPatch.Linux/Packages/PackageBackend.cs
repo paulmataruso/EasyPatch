@@ -1,4 +1,6 @@
 using System.Text.Json;
+using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Updates;
 using System.Text.RegularExpressions;
 using EasyPatch.Linux.Platform;
 using EasyPatch.Linux.Processes;
@@ -174,6 +176,28 @@ public sealed partial class AptBackend : PackageBackend
         var simulation = await QueryAsync("apt-get",
             ["-s", "-q", "-o", "Debug::NoLocking=true", "--with-new-pkgs", "upgrade"], QueryTimeout, cancellationToken, Environment);
         var upgrades = AptParsers.ParseSimulation(simulation.StandardOutput).ToList();
+        if (upgrades.Count > 0)
+        {
+            // The server looks up security tracker data by source package (agent 1.4.0 and later). Optional: a failure
+            // only means no CVEs for these upgrades.
+            try
+            {
+                var sources = await QueryAsync("dpkg-query", ["-W", "-f=${Package}\t${Architecture}\t${source:Package}\n"], QueryTimeout,
+                    cancellationToken, Environment);
+                var byKey = AptParsers.ParseSourcePackages(sources.StandardOutput);
+                for (var i = 0; i < upgrades.Count; i++)
+                {
+                    if (byKey.TryGetValue(upgrades[i].Key, out var source) || byKey.TryGetValue(upgrades[i].Name + ":all", out source))
+                    {
+                        upgrades[i] = upgrades[i] with { Source = source };
+                    }
+                }
+            }
+            catch (CommandException ex)
+            {
+                Logger.LogWarning("Could not read the source packages; updates are reported without them (no CVE matching): {Message}", ex.Message);
+            }
+        }
 
         // A point-release version can include a fix first published in the security repository: the upgrade is a
         // security update when the security repository has a version newer than the installed one.
@@ -386,6 +410,7 @@ public sealed class DnfBackend : PackageBackend
         var installed = await GetInstalledAsync(cancellationToken);
         var advisories = await GetAdvisoriesAsync(cancellationToken);
         var byPackage = advisories.ToLookup(a => a.Name + ":" + a.Architecture, StringComparer.Ordinal);
+        var cves = await GetCvesAsync(cancellationToken);
 
         var result = new List<PackageUpgrade>(upgrades.Count);
         foreach (var upgrade in upgrades)
@@ -395,12 +420,14 @@ public sealed class DnfBackend : PackageBackend
                 .Where(a => (installedVersion is null || RpmVersion.Compare(a.Version, installedVersion) > 0) && RpmVersion.Compare(a.Version, upgrade.Version) <= 0)
                 .ToList();
             var security = applicable.Where(a => a.IsSecurity).ToList();
+            var advisoryIds = applicable.Select(a => a.Id).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
             result.Add(upgrade with
             {
                 InstalledVersion = installedVersion,
                 Security = security.Count > 0,
                 Severity = security.Select(a => a.Severity).OrderByDescending(DnfParsers.SeverityRank).FirstOrDefault(),
-                Advisories = applicable.Select(a => a.Id).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList(),
+                Advisories = advisoryIds,
+                Cves = cves.For(upgrade, installedVersion, advisoryIds),
             });
         }
 
@@ -427,6 +454,61 @@ public sealed class DnfBackend : PackageBackend
             // Without advisories every upgrade is classified as Other; the upgrades themselves are still reported.
             Logger.LogWarning("Could not read the dnf5 advisory list, so no update is classified as a security update: {Message}", ex.Message);
             return [];
+        }
+    }
+
+    /// <summary>CVE IDs per upgrade. dnf4: <c>updateinfo list --with-cve</c> lists each reference of each advisory per
+    /// package (CVE IDs among other references). dnf5: <c>advisory info --json</c> gives the references per advisory. A
+    /// failure only means no CVEs are reported; the scan itself goes on.</summary>
+    private async Task<DnfCves> GetCvesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!await IsDnf5Async(cancellationToken))
+            {
+                var output = (await QueryAsync("dnf", ["-q", "-C", "updateinfo", "list", "--updates", "--with-cve"], QueryTimeout, cancellationToken))
+                    .StandardOutput;
+                return new DnfCves(DnfParsers.ParseUpdateInfo(output).Where(a => DnfParsers.IsCve(a.Id)).ToList(), null);
+            }
+
+            var json = (await QueryAsync("dnf", ["-q", "-C", "advisory", "info", "--updates", "--json"], QueryTimeout, cancellationToken)).StandardOutput;
+            return new DnfCves([], DnfParsers.ParseAdvisoryCves(json));
+        }
+        catch (Exception ex) when (ex is CommandException or JsonException)
+        {
+            Logger.LogWarning("Could not read the CVE references of the available updates; updates are reported without CVE IDs: {Message}", ex.Message);
+            return new DnfCves([], null);
+        }
+    }
+
+    /// <summary>CVE lookup for one scan: dnf4 rows are per package version, dnf5 rows per advisory.</summary>
+    private sealed class DnfCves(IReadOnlyList<DnfParsers.Advisory> perPackage, IReadOnlyDictionary<string, IReadOnlyList<string>>? perAdvisory)
+    {
+        private readonly ILookup<string, DnfParsers.Advisory> byPackage = perPackage.ToLookup(a => a.Name + ":" + a.Architecture, StringComparer.Ordinal);
+
+        public IReadOnlyList<string> For(PackageUpgrade upgrade, string? installedVersion, IReadOnlyList<string> advisories)
+        {
+            var cves = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var row in byPackage[upgrade.Key])
+            {
+                if ((installedVersion is null || RpmVersion.Compare(row.Version, installedVersion) > 0) && RpmVersion.Compare(row.Version, upgrade.Version) <= 0)
+                {
+                    cves.Add(row.Id);
+                }
+            }
+
+            if (perAdvisory is not null)
+            {
+                foreach (var advisory in advisories)
+                {
+                    if (perAdvisory.TryGetValue(advisory, out var list))
+                    {
+                        cves.UnionWith(list);
+                    }
+                }
+            }
+
+            return cves.Take(PackageUpdateInfo.MaxCves).ToList();
         }
     }
 

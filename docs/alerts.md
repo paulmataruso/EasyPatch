@@ -44,6 +44,7 @@ so they show alerts in the console only until you add channels.
 | Restart pending | An endpoint has been waiting for a restart for longer than the threshold. EasyPatch never restarts endpoints by itself: restart them, or set a restart schedule. | Info | 7 days (1-90) |
 | Enrollment waiting for approval | Computers enrolled with a deployment code wait for approval. One alert per organization. | Info | — |
 | Operating system unsupported | The OS no longer receives security updates, or its support ends within the threshold. 0 alerts only after the end. | Warning | 30 days (0-365) |
+| Known-exploited vulnerability unpatched | An endpoint is missing an allowed update that fixes a vulnerability in the CISA Known Exploited Vulnerabilities catalog (required, or still inside its rollout delay). See [compliance.md](compliance.md#vulnerabilities-and-known-exploited-updates). | Critical | — |
 
 You can edit, disable or delete these rules, and add more. A rule can be limited to one
 organization and to endpoints with a tag (for example a stricter *Security update missing*

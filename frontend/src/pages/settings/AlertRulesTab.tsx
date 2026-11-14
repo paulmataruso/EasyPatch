@@ -30,6 +30,8 @@ const RULE_HELP: Record<AlertRuleType, string> = {
   RestartPending: 'An endpoint has been waiting for a restart for longer than the threshold. EasyPatch never restarts endpoints by itself.',
   EnrollmentPending: 'Computers enrolled with a deployment code are waiting for approval (one alert per organization).',
   OsUnsupported: 'The operating system no longer receives security updates, or support ends within the threshold.',
+  KnownExploitedMissing:
+    'An endpoint is missing an allowed update that fixes a vulnerability in the CISA Known Exploited Vulnerabilities catalog (attackers are using it).',
 };
 
 function thresholdText(rule: AlertRuleDto): string {

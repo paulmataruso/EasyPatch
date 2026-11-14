@@ -59,6 +59,7 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
     rebootPending: url.get('rebootPending') || undefined,
     outdatedAgent: url.get('outdatedAgent') || undefined,
     tagId: url.get('tagId') || undefined,
+    knownExploited: url.get('knownExploited') || undefined,
   };
   const list = useList<EndpointSummaryDto>(
     '/endpoints',
@@ -150,6 +151,11 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
         <div className="flex flex-col gap-1.5 pb-1">
           <Checkbox label="Restart pending" checked={url.get('rebootPending') === 'true'} onChange={(e) => url.set({ rebootPending: e.target.checked ? 'true' : null })} />
           <Checkbox label="Outdated agent" checked={url.get('outdatedAgent') === 'true'} onChange={(e) => url.set({ outdatedAgent: e.target.checked ? 'true' : null })} />
+          <Checkbox
+            label="Known-exploited vulnerability"
+            checked={url.get('knownExploited') === 'true'}
+            onChange={(e) => url.set({ knownExploited: e.target.checked ? 'true' : null })}
+          />
         </div>
         {anyFilter && (
           <Button
@@ -157,7 +163,7 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
             size="sm"
             className="mb-1"
             onClick={() =>
-              url.set({ search: null, organizationId: null, siteId: null, compliance: null, online: null, os: null, rebootPending: null, outdatedAgent: null, tagId: null })
+              url.set({ search: null, organizationId: null, siteId: null, compliance: null, online: null, os: null, rebootPending: null, outdatedAgent: null, tagId: null, knownExploited: null })
             }
           >
             Clear filters
@@ -292,6 +298,11 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
                     <td className="text-right tabular-nums">
                       {e.missingRequiredCount > 0 ? <span className="font-medium text-warn">{e.missingRequiredCount}</span> : '0'}
                       {e.missingTotalCount > e.missingRequiredCount && <span className="text-xs text-subtle" title="Including updates not required by policy"> / {e.missingTotalCount}</span>}
+                      {e.knownExploitedMissingCount > 0 && (
+                        <div className="text-xs font-medium text-danger" title="Missing updates that fix a vulnerability in the CISA Known Exploited Vulnerabilities catalog">
+                          {e.knownExploitedMissingCount} known exploited
+                        </div>
+                      )}
                       {e.missingDeferredCount > 0 && (
                         <div className="text-xs text-subtle" title="Allowed updates still inside their rollout delay (not counted as missing yet)">
                           {e.missingDeferredCount} deferred

@@ -66,6 +66,9 @@ public sealed class Policy
     /// <summary>Rollout delay for security updates.</summary>
     public int? SecurityInstallDelayDays { get; set; }
 
+    /// <summary>Updates that fix a CISA known-exploited vulnerability are required at once, without the rollout delay.</summary>
+    public bool? KnownExploitedSkipsDelay { get; set; }
+
     /// <summary>Maintenance window days (0 = Sunday … 6 = Saturday). Window fields override as a unit.</summary>
     public List<int>? MaintenanceDays { get; set; }
     public TimeOnly? MaintenanceStart { get; set; }

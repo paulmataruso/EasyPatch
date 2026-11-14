@@ -73,6 +73,8 @@ public static class AlertRuleCatalog
         Rule("7c3e1a52-6f0e-4d7b-9a01-000000000005", "Restart pending", AlertRuleType.RestartPending, AlertSeverity.Info, at),
         Rule("7c3e1a52-6f0e-4d7b-9a01-000000000006", "Enrollment waiting for approval", AlertRuleType.EnrollmentPending, AlertSeverity.Info, at),
         Rule("7c3e1a52-6f0e-4d7b-9a01-000000000007", "Operating system unsupported", AlertRuleType.OsUnsupported, AlertSeverity.Warning, at),
+        Rule("7c3e1a52-6f0e-4d7b-9a01-000000000008", "Known-exploited vulnerability unpatched", AlertRuleType.KnownExploitedMissing,
+            AlertSeverity.Critical, at),
     ];
 
     private static AlertRule Rule(string id, string name, AlertRuleType type, AlertSeverity severity, DateTimeOffset at) => new()

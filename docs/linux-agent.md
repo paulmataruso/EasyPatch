@@ -162,6 +162,14 @@ view.
 Everything else is classified as **Other**. Policies select Linux updates by these categories,
 like Windows updates.
 
+**CVEs** (agent 1.4.0 and later). On dnf systems the agent also reads the CVE references of the
+advisories that cover each upgrade, from the local metadata cache (`dnf updateinfo list --updates
+--with-cve` on dnf 4, `dnf advisory info --updates --json` on dnf 5), and reports at most 200 per
+upgrade. On Debian and Ubuntu it reports each package's source package (`dpkg-query`), which the
+server matches against the Debian Security Tracker. Ubuntu CVEs are not matched yet. If reading
+the CVEs fails, the scan still succeeds without them. See
+[compliance.md](compliance.md#vulnerabilities-and-known-exploited-updates).
+
 **Installing.** An install job installs all of its approved packages in one apt or dnf
 transaction, at the exact versions the agent reported. The transaction runs in a transient
 systemd unit (`easypatch-packages`), so it is not interrupted if the agent restarts, and its

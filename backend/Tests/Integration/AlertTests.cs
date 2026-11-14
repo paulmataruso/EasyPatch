@@ -67,7 +67,9 @@ public sealed class AlertTests(PostgresFixture postgres) : IntegrationTest(postg
     public async Task Default_rules_are_seeded_and_only_super_admins_manage_rules_and_channels()
     {
         var rules = await root.GetAsync<List<AlertRuleDto>>("/api/v1/alert-rules");
-        Assert.Equal(7, rules.Count);
+        Assert.Equal(AlertRuleCatalog.Defaults(DateTimeOffset.UnixEpoch).Count, rules.Count);
+        Assert.Equal(8, rules.Count);
+        Assert.Equal(AlertSeverity.Critical, rules.Single(r => r.Type == AlertRuleType.KnownExploitedMissing).Severity);
         Assert.All(rules, r => Assert.True(r.Enabled));
         Assert.All(rules, r => Assert.Empty(r.ChannelIds));
         Assert.Equal(24, rules.Single(r => r.Id == OfflineRuleId).Threshold);
@@ -90,7 +92,7 @@ public sealed class AlertTests(PostgresFixture postgres) : IntegrationTest(postg
         var created = await root.SendAsync<AlertRuleDto>(HttpMethod.Post, "/api/v1/alert-rules", OfflineRule([], hours: 4, orgId: org.Id), HttpStatusCode.OK);
         Assert.Equal("hours", created.ThresholdUnit);
         await root.ExpectAsync(HttpMethod.Delete, $"/api/v1/alert-rules/{created.Id}", null, HttpStatusCode.NoContent);
-        Assert.Equal(7, (await root.GetAsync<List<AlertRuleDto>>("/api/v1/alert-rules")).Count);
+        Assert.Equal(rules.Count, (await root.GetAsync<List<AlertRuleDto>>("/api/v1/alert-rules")).Count);
     }
 
     [Fact]

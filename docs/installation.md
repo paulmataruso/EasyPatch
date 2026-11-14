@@ -12,7 +12,7 @@ installation, first sign-in, agent packages, upgrades, backup and restore.
 | Host | 64-bit Linux with Docker Engine and the Docker Compose plugin. The development override (`docker-compose.dev.yml`) uses the `!override` tag, which needs Compose 2.24.4 or later |
 | DNS | A public DNS name (A or AAAA record) pointing at the host, for example `patch.example.com` |
 | Inbound | TCP 443 from administrators and from every managed endpoint. TCP 80 from the internet, for ACME certificate validation and the HTTP to HTTPS redirect |
-| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Building the images also needs access to `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` |
+| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. Building the images also needs access to `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` |
 
 Nothing else is published. PostgreSQL is attached only to an internal Docker network and has no
 host port.
@@ -153,7 +153,10 @@ retries them, and jobs stay queued in the database.
 
 Use the `docker-compose.yml` of the new version: it may add networks or volumes. For example,
 the release with alerts gives the `worker` the `dpkeys` volume (read-only) and the outbound
-`egress` network. The upgrade adds seven default alert rules without notification channels.
+`egress` network. The upgrade adds seven default alert rules without notification channels. The
+release with vulnerability data adds an eighth, *Known-exploited vulnerability unpatched*, and the
+worker then downloads vulnerability data (see the outbound row in [Requirements](#requirements)).
+It needs no configuration change.
 
 ## Backup and restore
 

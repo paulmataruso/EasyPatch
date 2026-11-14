@@ -1,4 +1,4 @@
-namespace EasyPatch.Linux.Packages;
+namespace EasyPatch.Contracts.Updates;
 
 /// <summary>Debian package version ordering (deb-version(7): <c>[epoch:]upstream[-revision]</c>, <c>~</c> sorts first).</summary>
 public static class DebianVersion

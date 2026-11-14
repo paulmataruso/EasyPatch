@@ -1,4 +1,4 @@
-import { CircleDashed, Loader2, Power, RotateCw } from 'lucide-react';
+import { CircleDashed, Loader2, Power, RotateCw, ShieldAlert } from 'lucide-react';
 import type {
   ComplianceStatus,
   EndpointStatus,
@@ -123,6 +123,31 @@ export function SeverityBadge({ severity }: { severity: string | null }) {
   if (!severity) return <span className="text-subtle">—</span>;
   const tone: Tone = severity === 'Critical' ? 'danger' : severity === 'Important' ? 'warn' : severity === 'Moderate' ? 'info' : 'neutral';
   return <Badge tone={tone}>{severity}</Badge>;
+}
+
+/** The update fixes a vulnerability in the CISA Known Exploited Vulnerabilities catalog. */
+export function KnownExploitedBadge({ dueDate }: { dueDate?: string | null }) {
+  return (
+    <Badge
+      tone="danger"
+      icon={<ShieldAlert className="size-3" aria-hidden />}
+      title={`Fixes a vulnerability attackers are known to exploit (CISA KEV catalog)${dueDate ? `. CISA remediation due date: ${dueDate}` : ''}`}
+    >
+      Known exploited
+    </Badge>
+  );
+}
+
+/** "3 CVEs", with the IDs in the tooltip. */
+export function CveCount({ cves, count }: { cves?: string[] | null; count?: number }) {
+  const n = count ?? cves?.length ?? 0;
+  if (n === 0) return null;
+  const shown = cves && cves.length > 0 ? cves.slice(0, 20).join(', ') + (cves.length > 20 ? ', …' : '') : undefined;
+  return (
+    <span className="font-mono" title={shown}>
+      {n} CVE{n === 1 ? '' : 's'}
+    </span>
+  );
 }
 
 export function OsSupportBadge({ status }: { status: OsSupportStatus }) {

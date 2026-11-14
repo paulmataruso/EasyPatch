@@ -111,7 +111,8 @@ is `true`), `restartSchedule` (`{enabled, days[0-6], time "HH:mm", condition, mo
 deadlineMinutes, expiryMinutes}`) and `windowsUpdate`. `windowsUpdate` has one entry per group
 (`automaticUpdates`, `featureUpdates`, `qualityUpdates`, `restartBehavior`), each `null`
 (inherit), `{managed: false}` (*Not configured*) or `{managed: true, value: {…}}`.
-`securityInstallDelayDays` (0 to 90) and `installDelayDays` (0 to 365) set the rollout delay.
+`securityInstallDelayDays` (0 to 90) and `installDelayDays` (0 to 365) set the rollout delay;
+`knownExploitedSkipsDelay` (default `true`) lets updates that fix a CISA known-exploited vulnerability skip it.
 Invalid values return `400 validation_failed`.
 
 ### Tags
@@ -147,10 +148,10 @@ Invalid values return `400 validation_failed`.
 
 | Method | Route | Notes |
 |---|---|---|
-| GET | `/endpoints` | Filters: `organizationId, siteId, search, compliance, online, os, rebootPending, outdatedAgent, status, tagId`. Each item includes `tags` and `missingDeferredCount` (updates inside their rollout delay). Sort: `hostname` (default), `organization, site, os, missing, lastCheckIn, compliance, agentVersion`. |
+| GET | `/endpoints` | Filters: `organizationId, siteId, search, compliance, online, os, rebootPending, outdatedAgent, status, tagId, knownExploited`. Each item includes `tags`, `missingDeferredCount` (updates inside their rollout delay) and `knownExploitedMissingCount` (outstanding allowed updates that fix a CISA known-exploited vulnerability). Sort: `hostname` (default), `organization, site, os, missing, knownExploited, lastCheckIn, compliance, agentVersion`. |
 | GET/PUT/DELETE | `/endpoints/{id}` | GET includes `platform` (`Windows` or `Linux`) and, for Linux, `linux`: `osId`, `osVersion`, `kernelVersion`, `packageManager`, `keyProtection`. PUT: `siteId`, `notes`, `esuOverride`. DELETE revokes the credentials and removes the record. |
 | POST | `/endpoints/{id}/revoke` | `{reason?}`. Revokes all credentials; the agent can no longer call the server. |
-| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification and excluded updates, with the live state of an active job overlaid. `deferredUntil` is set while an update is inside its rollout delay. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). |
+| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification and excluded updates, with the live state of an active job overlaid. `deferredUntil` is set while an update is inside its rollout delay. `cveIds`, `knownExploited` and `kevDueDate` (the earliest CISA due date) describe the vulnerabilities the update fixes on this endpoint; known-exploited updates are listed first within each state. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). |
 | GET | `/endpoints/{id}/installed-updates` | Updates confirmed installed by a scan |
 | GET | `/endpoints/{id}/update-history` | Windows Update history (`?search=&page=&pageSize=`). Always empty for Linux endpoints |
 | GET | `/endpoints/{id}/events` | Agent and server activity (`?severity=&page=&pageSize=`) |
@@ -177,11 +178,14 @@ endpoints.
 ### Fleet updates
 
 `GET /updates` aggregates updates across endpoints with missing, failed, installed and
-pending-reboot counts. Filters: `organizationId, siteId, category, state, search`. Sort:
-`missing` (default: missing + failed), `failed`, `installed`. Without `state`, only updates that
+pending-reboot counts, `cveCount` and `knownExploited`. Filters: `organizationId, siteId, category, state, search, knownExploited`.
+Sort: by default updates that fix a known-exploited vulnerability come first, then by missing + failed;
+`missing` (missing + failed), `failed`, `installed`. Without `state`, only updates that
 are missing, failed or pending a restart somewhere are listed; `search` matches the title and KB
 numbers (Linux update titles contain the package name). Linux updates include `package`. Also `GET /updates/{updateGuid}`
-(`?organizationId=&siteId=`), `GET /updates/{updateGuid}/endpoints`
+(`?organizationId=&siteId=`; includes `vulnerabilities`: the CVEs the update fixes on the endpoints in scope, with
+MSRC title, severity and CVSS where available and the CISA KEV fields `kev`, `kevDateAdded`, `kevDueDate`,
+`kevRansomware`), `GET /updates/{updateGuid}/endpoints`
 (`?state=&organizationId=&siteId=&page=&pageSize=`) and
 `POST /updates/{updateGuid}/install` (Operator; `{organizationId?, siteId?, endpointIds?}`
 creates a `Selected` install job on each affected endpoint, at most 1000).
@@ -224,6 +228,7 @@ creates a `Selected` install job on each affected endpoint, at most 1000).
 | GET | `/audit-logs` (`userId, organizationId, action` (prefix), `from, to, page, pageSize`) | Operator. Users restricted to some organizations only see entries for those organizations. |
 | GET/PUT | `/settings` | GET Viewer, PUT SuperAdmin |
 | GET | `/server-info` (version, public URL, server time) | Viewer |
+| GET | `/vulnerability-feeds` (state of the `kev`, `msrc` and `debian` downloads: last attempt and success, sanitized error, version, entries) | Viewer |
 | GET/POST, PUT/DELETE | `/lifecycle`, `/lifecycle/{id}` (OS lifecycle table) | GET Viewer, writes SuperAdmin |
 
 CSV exports are UTF-8 with a byte-order mark. Text values that start with `=`, `+`, `-`, `@`,

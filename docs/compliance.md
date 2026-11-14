@@ -75,6 +75,44 @@ manually ignores the delay; the install preview warns when that happens.
 A long delay keeps endpoints compliant while they lack released fixes. The policy editor warns
 about delays longer than 30 days.
 
+## Vulnerabilities and known-exploited updates
+
+EasyPatch shows which CVEs each outstanding update fixes, and flags updates that fix a
+vulnerability in the CISA [Known Exploited Vulnerabilities (KEV) catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog),
+which lists vulnerabilities attackers are exploiting in the wild.
+
+| Endpoints | Where the CVEs come from |
+|---|---|
+| Windows | Microsoft Security Response Center (MSRC) security update data for the last 12 months. CVEs are matched by the update's KB numbers. The monthly security cumulative update also gets every CVE that MSRC fixed in a later revision of the computer's build (from the build number in its inventory, for example 26100.2314), so a computer several months behind shows everything the cumulative update closes. |
+| Debian 12 and 13 | The Debian Security Tracker. A package upgrade gets the CVEs fixed in its source package after the installed version, up to and including the offered version. Needs agent 1.4.0 or newer (it reports the source package). |
+| Rocky Linux, AlmaLinux, RHEL, Fedora | The dnf advisories on the computer, read by the agent (agent 1.4.0 or newer): `dnf updateinfo` on dnf 4, `dnf advisory info` on dnf 5. Only CVE references are kept. |
+| Ubuntu | Not yet. Ubuntu updates show no CVEs; they are installed and counted as usual. |
+
+The worker downloads the data (see [Vulnerability data](security.md#vulnerability-data)): the KEV
+catalog every 6 hours, MSRC data daily, and the Debian Security Tracker daily while Debian
+endpoints are managed (sooner, at most every 6 hours, when Debian endpoints report packages it
+has not covered yet). New data is applied to every active endpoint at once; scans use the data
+already downloaded. *Settings → Server → Vulnerability data* shows the state of each download and
+can turn them off. When turned off, the data already downloaded is kept but no longer refreshed.
+
+What a known-exploited update changes:
+
+* It is listed first on *Updates* and in an endpoint's update list, with a **Known exploited**
+  badge and the remediation due date CISA sets for US federal agencies. The update page lists
+  its CVEs with links to NVD (and MSRC for Windows).
+* It **skips the rollout delay** by default, so it is required as soon as it is seen. The policy
+  setting *Rollout delay → Known-exploited vulnerabilities* can make it wait like other updates.
+  Only the delay is skipped: the update must still be in an allowed category, not optional and
+  not excluded.
+* Endpoints missing one (required, or still inside a delay) are counted on the dashboard
+  (*Known-exploited exposure*), can be filtered on *Endpoints*, and raise the
+  *Known-exploited vulnerability unpatched* alert ([alerts.md](alerts.md)).
+
+Compliance itself is unchanged: an endpoint is compliant when no required update is missing,
+whatever the CVEs. Limits: at most 200 CVEs are kept per update; titles, severity and CVSS scores
+are available for Microsoft CVEs only; Microsoft's own "Exploited: Yes" is shown on the update
+page but only the CISA catalog marks an update known-exploited.
+
 ## Update states and verification
 
 Each endpoint/update pair has a state. The full model is in

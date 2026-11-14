@@ -159,6 +159,7 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
             values.AutoInstallEnabled ??= defaults.AutoInstallEnabled;
             values.InstallDelayDays ??= 0;
             values.SecurityInstallDelayDays ??= 0;
+            values.KnownExploitedSkipsDelay ??= true;
             values.MaintenanceDays ??= [];
             values.MaintenanceStart ??= defaults.MaintenanceStart;
             values.MaintenanceDurationMinutes ??= defaults.MaintenanceDurationMinutes;
@@ -190,6 +191,7 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
         existing.AutoInstallEnabled = values.AutoInstallEnabled;
         existing.InstallDelayDays = values.InstallDelayDays;
         existing.SecurityInstallDelayDays = values.SecurityInstallDelayDays;
+        existing.KnownExploitedSkipsDelay = values.KnownExploitedSkipsDelay;
         existing.MaintenanceDays = values.MaintenanceDays;
         existing.MaintenanceStart = values.MaintenanceStart;
         existing.MaintenanceDurationMinutes = values.MaintenanceDurationMinutes;

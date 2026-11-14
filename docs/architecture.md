@@ -113,8 +113,8 @@ erDiagram
 | `enrollment_tokens` | SHA-256 hash, display prefix, org (and optional site) scope, `max_uses` (default 1), `use_count`, expiry, revocation |
 | `deployment_codes` | Non-secret code for tokenless (RMM) installs. Org and optional site scope, cap on pending requests, optional source CIDR allow-list, revocation |
 | `enrollment_requests` | Pending tokenless enrollments: public key, fingerprint, reported device identity, source IP, status (Pending, Approved, Rejected, Expired) |
-| `updates` | Update catalog keyed by (`update_guid`, `revision_number`). Holds KBs, title, description, MS classification, normalized category, products, severity, `last_deployment_change_time`, size, reboot behavior, superseded IDs |
-| `endpoint_updates` | Per-endpoint state, unique by (`endpoint_id`, `update_guid`) so a revision bump never duplicates a row. Holds `state`, `is_required`, `is_excluded`, error code and message, timestamps |
+| `updates` | Update catalog keyed by (`update_guid`, `revision_number`). Holds KBs, title, description, MS classification, normalized category, products, severity, `last_deployment_change_time`, size, reboot behavior, superseded IDs; for Linux the package, version and source package; and a display summary of the CVEs and the known-exploited flag across endpoints |
+| `endpoint_updates` | Per-endpoint state, unique by (`endpoint_id`, `update_guid`) so a revision bump never duplicates a row. Holds `state`, `is_required`, `is_excluded`, error code and message, timestamps, and the CVEs the update fixes on that endpoint with `known_exploited` and the KEV due date |
 | `update_scans` | One row per scan report. `agent_scan_id` is unique per endpoint, which makes ingestion idempotent |
 | `update_history_entries` | Windows Update history (installs and uninstalls with result and HRESULT), deduplicated by fingerprint |
 | `update_exclusions` | Per-endpoint excluded updates (by GUID). Organization and site exclusions live in policy as KB lists. |
@@ -126,6 +126,7 @@ erDiagram
 | `endpoint_events` | Per-endpoint activity (scans, jobs, enrollment, reboot changes, online and offline transitions) |
 | `audit_logs` | Every administrative action, with user, IP and correlation ID |
 | `compliance_snapshots` | Daily per-organization counters for trend reporting |
+| `vulnerabilities`, `msrc_kb_cves`, `msrc_build_fixes`, `debian_fixes`, `vulnerability_feeds` | Downloaded vulnerability data (see [section 8](#8-vulnerability-data)) and the state of each download |
 
 ### Update state model (two layers)
 
@@ -481,7 +482,8 @@ update policies are present, because those can take precedence over the registry
 
 * **Networks.** `edge` connects Caddy and the API. `data` is internal (no egress) and connects
   the API, worker, migrate and PostgreSQL. PostgreSQL publishes no ports. `egress` gives the
-  worker outbound connections for notifications (SMTP and webhooks); nothing is published on it.
+  worker outbound connections for notifications (SMTP and webhooks) and vulnerability data;
+  nothing is published on it.
   The diagram above omits it.
 * **Volumes.**
   * `pgdata`: the database.
@@ -528,3 +530,29 @@ like the other worker tasks.
   checks every address and connects only to allowed ones (see [security.md](security.md#notifications-and-webhooks)).
 
 See [alerts.md](alerts.md) for the rules and the channel formats.
+
+## 8. Vulnerability data
+
+The worker task `vulnerability-feeds` runs hourly under an advisory lock and downloads what is
+due (`VulnerabilityFeedService`):
+
+| Feed | Interval | Stored as |
+|---|---|---|
+| CISA KEV catalog (`www.cisa.gov`, fallback `raw.githubusercontent.com/cisagov/kev-data`) | 6 hours | `vulnerabilities.kev`, dates, ransomware flag |
+| MSRC CVRF documents of the last 12 months (`api.msrc.microsoft.com`) | daily; only documents whose `CurrentReleaseDate` changed are downloaded again | `vulnerabilities` (title, severity, CVSS, exploited), `msrc_kb_cves`, `msrc_build_fixes` (lowest fixed revision per build and CVE) |
+| Debian Security Tracker (`security-tracker.debian.org`, about 90 MB, streamed) | daily while Debian 12/13 endpoints are managed; sooner (at most every 6 hours) when they report new source packages | `debian_fixes`, only for the releases and source packages in use |
+
+A failure is stored in `vulnerability_feeds.last_error` (host and HTTP status only) and retried
+after an hour; the previous data stays in use. When a feed brings new data, every active endpoint
+is recomputed.
+
+`VulnerabilityMatcher` sets `endpoint_updates.cve_ids`, `known_exploited` and `kev_due_date` for
+open rows (missing, failed, pending verification, excluded). It runs in scan ingestion and in
+`ComplianceService.RecomputeAsync`, before the requirement flags, because a known-exploited update
+can skip the rollout delay (`UpdateRequirement`, policy `knownExploitedSkipsDelay`). Windows rows
+get the CVEs of their KB numbers, and the security cumulative update also those fixed in a later
+revision of the endpoint's build; Debian rows those fixed in their source package between the
+installed and the offered version (`DebianVersion.Compare`); RHEL-family and Fedora rows keep the
+CVEs the agent read from the dnf advisories. `endpoints.known_exploited_missing_count` and the
+catalog summary on `updates` are then refreshed.
+

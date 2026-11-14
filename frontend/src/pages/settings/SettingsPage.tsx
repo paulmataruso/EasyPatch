@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Save } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApi, useApiMutation, usePolicy } from '../../api/hooks';
-import type { PolicyRequest, ServerInfoDto, ServerSettings } from '../../api/types';
+import type { PolicyRequest, ServerInfoDto, ServerSettings, VulnerabilityFeedDto } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PolicyEditor } from '../../components/PolicyEditor';
 import { useToast } from '../../components/Toast';
-import { Alert, Button, Card, ErrorState, InlineError, Input, KeyValueList, Mono, PageHeader, Spinner, Tabs } from '../../components/ui';
-import { formatDateTime } from '../../lib/format';
+import { Alert, Badge, Button, Card, ErrorState, InlineError, Input, KeyValueList, Mono, PageHeader, Spinner, TableWrap, Tabs } from '../../components/ui';
+import { formatDateTime, formatNumber, formatRelative } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 import { AlertRulesTab } from './AlertRulesTab';
 import { AuditTab } from './AuditTab';
@@ -173,6 +173,26 @@ function ServerSettingsTab() {
           </Alert>
         )}
       </Card>
+      <Card title="Vulnerability data">
+        <label className="flex items-start gap-2.5">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4"
+            checked={form.vulnerabilityFeedsEnabled}
+            disabled={readOnly}
+            onChange={(e) => setForm({ ...form, vulnerabilityFeedsEnabled: e.target.checked })}
+          />
+          <span>
+            <span className="text-sm font-medium">Download public vulnerability data</span>
+            <span className="block text-xs text-muted">
+              The worker downloads the CISA Known Exploited Vulnerabilities catalog (every 6 hours), Microsoft security update data (daily) and, while Debian
+              endpoints are managed, the Debian Security Tracker (daily). EasyPatch uses them to show which CVEs each update fixes and to flag known-exploited
+              ones. Nothing about your endpoints is sent. When turned off, the data already downloaded is kept but no longer refreshed.
+            </span>
+          </span>
+        </label>
+        <FeedStatus />
+      </Card>
       {GROUPS.map((g) => (
         <Card key={g.title} title={g.title}>
           <div className="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
@@ -214,5 +234,60 @@ function ServerSettingsTab() {
         </div>
       )}
     </form>
+  );
+}
+
+const FEED_LABELS: Record<string, string> = {
+  kev: 'CISA Known Exploited Vulnerabilities',
+  msrc: 'Microsoft Security Response Center',
+  debian: 'Debian Security Tracker',
+};
+
+function FeedStatus() {
+  const feeds = useApi<VulnerabilityFeedDto[]>('/vulnerability-feeds', undefined, { refetchInterval: 60_000 });
+  if (feeds.isPending) return null;
+  if (feeds.isError) return <ErrorState error={feeds.error} onRetry={() => void feeds.refetch()} />;
+  if (feeds.data.length === 0) {
+    return <p className="mt-3 text-sm text-muted">No feed has been downloaded yet. The worker checks every hour (the first check runs shortly after it starts).</p>;
+  }
+  return (
+    <TableWrap className="mt-3">
+      <table className="table-base">
+        <thead>
+          <tr>
+            <th>Feed</th>
+            <th>Last update</th>
+            <th>Version</th>
+            <th className="text-right">Entries</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {feeds.data.map((f) => (
+            <tr key={f.name}>
+              <td>{FEED_LABELS[f.name] ?? f.name}</td>
+              <td className="whitespace-nowrap" title={f.lastSuccessAt ? formatDateTime(f.lastSuccessAt) : undefined}>
+                {f.lastSuccessAt ? formatRelative(f.lastSuccessAt) : 'Never'}
+              </td>
+              <td className="text-muted">{f.version ?? '—'}</td>
+              <td className="text-right tabular-nums">{formatNumber(f.itemCount)}</td>
+              <td>
+                {f.lastError ? (
+                  <span className="flex flex-col items-start gap-1">
+                    <Badge tone="danger">Failed</Badge>
+                    <span className="text-xs text-danger">{f.lastError}</span>
+                    {f.lastAttemptAt && <span className="text-xs text-muted">Last attempt {formatRelative(f.lastAttemptAt)}; retried after an hour.</span>}
+                  </span>
+                ) : f.lastSuccessAt ? (
+                  <Badge tone="ok">OK</Badge>
+                ) : (
+                  <Badge>Pending</Badge>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableWrap>
   );
 }

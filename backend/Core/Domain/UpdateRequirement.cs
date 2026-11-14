@@ -28,7 +28,8 @@ public static class UpdateRequirement
                string.Equals(update.MsClassification, SecurityClassification, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Rollout delay that applies to an update. Definition updates (antivirus signatures) are never delayed.</summary>
+    /// <summary>Rollout delay that applies to an update. Definition updates (antivirus signatures) are never delayed, nor
+    /// (see <see cref="Evaluate"/>) are fixes for known-exploited vulnerabilities when the policy says so.</summary>
     public static int DelayDays(Update update, EffectivePolicy policy)
     {
         ArgumentNullException.ThrowIfNull(update);
@@ -53,7 +54,7 @@ public static class UpdateRequirement
             return new RequirementDecision(excluded, false, null);
         }
 
-        var delay = DelayDays(update, policy);
+        var delay = row.KnownExploited && policy.KnownExploitedSkipsDelay ? 0 : DelayDays(update, policy);
         if (delay <= 0)
         {
             return new RequirementDecision(false, true, null);

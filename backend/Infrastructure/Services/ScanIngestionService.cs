@@ -5,6 +5,7 @@ using EasyPatch.Core.Domain;
 using EasyPatch.Core.Entities;
 using EasyPatch.Infrastructure.Data;
 using EasyPatch.Infrastructure.Security;
+using EasyPatch.Infrastructure.Vulnerabilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -15,6 +16,7 @@ namespace EasyPatch.Infrastructure.Services;
 public sealed class ScanIngestionService(
     EasyPatchDbContext db,
     PolicyService policies,
+    VulnerabilityMatcher vulnerabilities,
     TimeProvider clock,
     ILogger<ScanIngestionService> logger)
 {
@@ -113,20 +115,32 @@ public sealed class ScanIngestionService(
             now);
         db.EndpointUpdates.AddRange(result.Added);
 
-        // Linux: remember which version each endpoint had installed (the catalog row is shared by every endpoint).
+        // Linux: remember which version each endpoint had installed (the catalog row is shared by every endpoint), and
+        // the CVEs the agent read from the dnf advisories (Debian CVEs come from the Debian Security Tracker instead).
+        var cveChanges = new HashSet<Guid>();
         foreach (var reported in report.Missing.Concat(report.Installed))
         {
             if (reported.Package is { } package && rows.TryGetValue(reported.UpdateGuid, out var packageRow))
             {
                 packageRow.InstalledVersion = Truncate(package.InstalledVersion, 255);
+                var cves = VulnerabilityRules.Normalize(package.Cves);
+                if (endpoint.OsId != "debian" && !cves.SequenceEqual(packageRow.CveIds))
+                {
+                    packageRow.CveIds = cves;
+                    cveChanges.Add(packageRow.UpdateId);
+                }
             }
         }
 
-        // Requirement flags (policy, exclusions and rollout delay) come from the one shared evaluation.
         foreach (var row in result.Added)
         {
             row.Update ??= byId.GetValueOrDefault(row.UpdateId);
         }
+
+        // CVE exposure and known-exploited flags first: a known-exploited update can skip the rollout delay.
+        cveChanges.UnionWith(await vulnerabilities.ApplyAsync([endpoint], rows.Values.ToLookup(r => r.EndpointId), ct));
+
+        // Requirement flags (policy, exclusions and rollout delay) come from the one shared evaluation.
 
         ComplianceService.ApplyRequirementFlags(rows.Values, excludedGuids, policy, now);
         var previousMissing = endpoint.MissingRequiredCount;
@@ -138,6 +152,7 @@ public sealed class ScanIngestionService(
 
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
+        await vulnerabilities.RefreshUpdateSummariesAsync(cveChanges, ct);
         logger.LogInformation("Ingested scan {ScanId} for endpoint {EndpointId}: {Missing} missing / {Installed} installed",
             report.ScanId, endpointId, scan.TotalMissing, scan.TotalInstalled);
     }
@@ -374,10 +389,11 @@ public sealed class ScanIngestionService(
         var packageVersion = Truncate(package?.Version, 255);
         var packageArch = Truncate(package?.Architecture, 32);
         var repository = Truncate(package?.Repository, 255);
+        var source = Truncate(package?.SourcePackage?.Trim(), 255);
         var advisories = package?.Advisories.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => Truncate(a.Trim(), 64)!).Distinct().Take(50).ToList() ?? [];
         var changed = row.Title != title || (description is not null && row.Description != description) ||
                       row.PackageName != packageName || row.PackageVersion != packageVersion || row.PackageArchitecture != packageArch ||
-                      row.PackageRepository != repository || !row.Advisories.SequenceEqual(advisories) ||
+                      row.PackageRepository != repository || row.PackageSource != source || !row.Advisories.SequenceEqual(advisories) ||
                       !row.KbNumbers.SequenceEqual(kbs) || row.Category != category || row.MsClassification != classification ||
                       !row.Products.SequenceEqual(products) || row.MaxDownloadSizeBytes != r.MaxDownloadSize ||
                       row.ReleaseDate != r.LastDeploymentChangeTime || row.IsOptional != r.BrowseOnly ||
@@ -411,6 +427,7 @@ public sealed class ScanIngestionService(
         row.PackageVersion = packageVersion;
         row.PackageArchitecture = packageArch;
         row.PackageRepository = repository;
+        row.PackageSource = source;
         row.Advisories = advisories;
         row.UpdatedAt = now;
     }

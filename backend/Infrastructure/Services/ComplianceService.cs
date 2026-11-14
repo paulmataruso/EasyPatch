@@ -2,14 +2,16 @@ using EasyPatch.Contracts.Updates;
 using EasyPatch.Core.Domain;
 using EasyPatch.Core.Entities;
 using EasyPatch.Infrastructure.Data;
+using EasyPatch.Infrastructure.Vulnerabilities;
 using Microsoft.EntityFrameworkCore;
 
 namespace EasyPatch.Infrastructure.Services;
 
 /// <summary>Recomputes per-update requirement flags, endpoint compliance counters and OS support status.</summary>
-public sealed class ComplianceService(EasyPatchDbContext db, PolicyService policies, TimeProvider clock)
+public sealed class ComplianceService(EasyPatchDbContext db, PolicyService policies, VulnerabilityMatcher vulnerabilities, TimeProvider clock)
 {
-    /// <summary>Recomputes and saves (per chunk) the given endpoints. Callers save their own pending changes first.</summary>
+    /// <summary>Recomputes and saves (per chunk) the given endpoints: CVE exposure and known-exploited flags, requirement
+    /// flags, counters and OS support status. Callers save their own pending changes first.</summary>
     public async Task RecomputeAsync(IReadOnlyCollection<Guid> endpointIds, CancellationToken ct = default)
     {
         if (endpointIds.Count == 0)
@@ -20,6 +22,7 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
         var resolver = await policies.CreateResolverAsync(ct);
         var lifecycle = await db.OsLifecycleEntries.AsNoTracking().ToListAsync(ct);
         var now = clock.GetUtcNow();
+        var changedUpdates = new HashSet<Guid>();
         foreach (var chunk in endpointIds.Distinct().Chunk(200))
         {
             var endpoints = await db.Endpoints.Where(e => chunk.Contains(e.Id)).ToListAsync(ct);
@@ -29,6 +32,7 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
                 .Where(x => chunk.Contains(x.EndpointId)).Select(x => new { x.EndpointId, x.UpdateGuid }).ToListAsync(ct);
             var updatesByEndpoint = updates.ToLookup(u => u.EndpointId);
             var exclusionsByEndpoint = exclusions.ToLookup(x => x.EndpointId, x => x.UpdateGuid);
+            changedUpdates.UnionWith(await vulnerabilities.ApplyAsync(endpoints, updatesByEndpoint, ct));
             foreach (var endpoint in endpoints)
             {
                 var policy = resolver(endpoint.OrganizationId, endpoint.SiteId, endpoint.Id);
@@ -39,6 +43,8 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
 
             await db.SaveChangesAsync(ct);
         }
+
+        await vulnerabilities.RefreshUpdateSummariesAsync(changedUpdates, ct);
     }
 
     /// <summary>Recomputes all endpoints in an organization (or site) after a policy change.</summary>
@@ -103,6 +109,7 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
         endpoint.InstalledCount = counts.Installed;
         endpoint.PendingRebootUpdateCount = counts.PendingReboot;
         endpoint.MissingDeferredCount = counts.MissingDeferred;
+        endpoint.KnownExploitedMissingCount = counts.KnownExploitedMissing;
         endpoint.ComplianceStatus = ComplianceCalculator.Evaluate(endpoint.LastScanAt, endpoint.RebootPending, counts, policy.ScanStaleAfterHours, now);
         endpoint.ComplianceEvaluatedAt = now;
     }

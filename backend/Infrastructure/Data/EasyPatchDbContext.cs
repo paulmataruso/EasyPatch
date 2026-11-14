@@ -38,6 +38,11 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
     public DbSet<UpdateHistoryEntry> UpdateHistoryEntries => Set<UpdateHistoryEntry>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<JobUpdate> JobUpdates => Set<JobUpdate>();
+    public DbSet<Vulnerability> Vulnerabilities => Set<Vulnerability>();
+    public DbSet<MsrcKbCve> MsrcKbCves => Set<MsrcKbCve>();
+    public DbSet<MsrcBuildFix> MsrcBuildFixes => Set<MsrcBuildFix>();
+    public DbSet<DebianFix> DebianFixes => Set<DebianFix>();
+    public DbSet<VulnerabilityFeedState> VulnerabilityFeeds => Set<VulnerabilityFeedState>();
     public DbSet<NotificationSettingsRow> NotificationSettings => Set<NotificationSettingsRow>();
     public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
     public DbSet<AlertRule> AlertRules => Set<AlertRule>();
@@ -85,6 +90,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
         ConfigureUpdates(modelBuilder);
         ConfigureJobs(modelBuilder);
         ConfigureNotifications(modelBuilder);
+        ConfigureVulnerabilities(modelBuilder);
         Seed(modelBuilder);
         ApplySnakeCaseNames(modelBuilder);
     }
@@ -338,7 +344,10 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.PackageArchitecture).HasMaxLength(32);
             e.Property(x => x.PackageRepository).HasMaxLength(255);
             e.Property(x => x.Advisories).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.PackageSource).HasMaxLength(255);
+            e.Property(x => x.CveIds).HasDefaultValueSql("'{}'::text[]");
             e.HasIndex(x => new { x.UpdateGuid, x.RevisionNumber }).IsUnique();
+            e.HasIndex(x => x.KnownExploited).HasFilter("known_exploited");
             e.HasIndex(x => x.Category);
             e.Ignore(x => x.PrimaryKb);
         });
@@ -352,6 +361,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.HasIndex(x => new { x.EndpointId, x.State });
             e.HasIndex(x => new { x.UpdateGuid, x.State });
             e.HasIndex(x => x.DeferredUntil).HasFilter("deferred_until IS NOT NULL");
+            e.Property(x => x.CveIds).HasDefaultValueSql("'{}'::text[]");
             e.HasOne(x => x.Update).WithMany().HasForeignKey(x => x.UpdateId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<Endpoint>().WithMany().HasForeignKey(x => x.EndpointId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -439,6 +449,53 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
                 (a, b) => JsonSerializer.Serialize(a, ContractJson.Options) == JsonSerializer.Serialize(b, ContractJson.Options),
                 v => v == null ? 0 : JsonSerializer.Serialize(v, ContractJson.Options).GetHashCode(StringComparison.Ordinal),
                 v => v == null ? null : JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(v, ContractJson.Options), ContractJson.Options)));
+    }
+
+    private static void ConfigureVulnerabilities(ModelBuilder b)
+    {
+        b.Entity<Vulnerability>(e =>
+        {
+            e.ToTable("vulnerabilities");
+            e.HasKey(x => x.CveId);
+            e.Property(x => x.CveId).HasMaxLength(32);
+            e.Property(x => x.Title).HasMaxLength(500);
+            e.Property(x => x.Severity).HasMaxLength(16);
+            e.Property(x => x.CvssBase).HasPrecision(3, 1);
+            e.Property(x => x.KevName).HasMaxLength(500);
+            e.HasIndex(x => x.CveId).HasFilter("kev").HasDatabaseName("ix_vulnerabilities_kev");
+        });
+        b.Entity<MsrcKbCve>(e =>
+        {
+            e.ToTable("msrc_kb_cves");
+            e.HasKey(x => new { x.Kb, x.CveId });
+            e.Property(x => x.Kb).HasMaxLength(16);
+            e.Property(x => x.CveId).HasMaxLength(32);
+        });
+        b.Entity<MsrcBuildFix>(e =>
+        {
+            e.ToTable("msrc_build_fixes");
+            e.HasKey(x => new { x.Build, x.CveId });
+            e.Property(x => x.CveId).HasMaxLength(32);
+            e.HasIndex(x => new { x.Build, x.FixedRevision });
+        });
+        b.Entity<DebianFix>(e =>
+        {
+            e.ToTable("debian_fixes");
+            e.HasKey(x => new { x.Release, x.Source, x.CveId });
+            e.Property(x => x.Release).HasMaxLength(32);
+            e.Property(x => x.Source).HasMaxLength(255);
+            e.Property(x => x.CveId).HasMaxLength(32);
+            e.Property(x => x.FixedVersion).HasMaxLength(200);
+        });
+        b.Entity<VulnerabilityFeedState>(e =>
+        {
+            e.ToTable("vulnerability_feeds");
+            e.HasKey(x => x.Name);
+            e.Property(x => x.Name).HasMaxLength(32);
+            e.Property(x => x.LastError).HasMaxLength(1000);
+            e.Property(x => x.Version).HasMaxLength(64);
+            e.Property(x => x.StateJson).HasColumnType("jsonb");
+        });
     }
 
     private static void ConfigureNotifications(ModelBuilder b)

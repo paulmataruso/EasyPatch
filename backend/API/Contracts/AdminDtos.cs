@@ -158,7 +158,8 @@ public sealed record PolicyDto(
     bool? AgentAutoUpdateEnabled = null,
     int? InstallDelayDays = null,
     int? SecurityInstallDelayDays = null,
-    Guid? TagId = null);
+    Guid? TagId = null,
+    bool? KnownExploitedSkipsDelay = null);
 
 /// <summary>Recurring restart. <c>Time</c> is "HH:mm" in the site (or organization) time zone; days use 0 = Sunday … 6 = Saturday.</summary>
 public sealed record RestartScheduleDto(
@@ -195,7 +196,8 @@ public sealed record PolicyRequest(
     PolicyWindowsUpdate? WindowsUpdate = null,
     bool? AgentAutoUpdateEnabled = null,
     int? InstallDelayDays = null,
-    int? SecurityInstallDelayDays = null);
+    int? SecurityInstallDelayDays = null,
+    bool? KnownExploitedSkipsDelay = null);
 
 public sealed record EffectivePolicyDto(
     int CheckInIntervalSeconds,
@@ -222,7 +224,8 @@ public sealed record EffectivePolicyDto(
     bool AgentAutoUpdateEnabled = true,
     int InstallDelayDays = 0,
     int SecurityInstallDelayDays = 0,
-    IReadOnlyDictionary<string, string>? SourceTags = null);
+    IReadOnlyDictionary<string, string>? SourceTags = null,
+    bool KnownExploitedSkipsDelay = true);
 
 // ---------------------------------------------------------------------------------------------
 // Tags
@@ -275,7 +278,8 @@ public sealed record EndpointSummaryDto(
     string? LastSeenIp,
     string Platform = "Windows",
     int MissingDeferredCount = 0,
-    IReadOnlyList<TagRefDto>? Tags = null);
+    IReadOnlyList<TagRefDto>? Tags = null,
+    int KnownExploitedMissingCount = 0);
 
 public sealed record CredentialDto(string CredentialId, string KeyFingerprint, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, DateTimeOffset? RevokedAt,
     string? RevokedReason, DateTimeOffset? LastUsedAt);
@@ -381,7 +385,10 @@ public sealed record EndpointUpdateDto(
     string? ErrorMessage,
     JobOverlayDto? ActiveJob,
     PackageInfoDto? Package = null,
-    DateTimeOffset? DeferredUntil = null);
+    DateTimeOffset? DeferredUntil = null,
+    IReadOnlyList<string>? CveIds = null,
+    bool KnownExploited = false,
+    DateOnly? KevDueDate = null);
 
 /// <summary>Linux package behind an update. <c>InstalledVersion</c> is the endpoint's version (endpoint views only).</summary>
 public sealed record PackageInfoDto(string Name, string? Architecture, string? Version, string? InstalledVersion, string? Repository,
@@ -444,10 +451,22 @@ public sealed record FleetUpdateDto(
     int InstalledCount,
     int PendingRebootCount,
     int ExcludedCount,
-    PackageInfoDto? Package = null);
+    PackageInfoDto? Package = null,
+    int CveCount = 0,
+    bool KnownExploited = false);
 
 public sealed record FleetUpdateDetailDto(FleetUpdateDto Summary, string? Description, string? SupportUrl, IReadOnlyList<string> KbNumbers,
-    IReadOnlyList<string> Products, string? MsClassification, bool RebootLikely, IReadOnlyList<Guid> SupersededUpdateGuids);
+    IReadOnlyList<string> Products, string? MsClassification, bool RebootLikely, IReadOnlyList<Guid> SupersededUpdateGuids,
+    IReadOnlyList<VulnerabilityDto>? Vulnerabilities = null);
+
+/// <summary>A CVE an update fixes. <c>Kev</c>: in the CISA Known Exploited Vulnerabilities catalog; <c>KevDueDate</c> is the
+/// remediation date CISA sets for US federal agencies. Title, severity and CVSS come from MSRC (Windows CVEs only).</summary>
+public sealed record VulnerabilityDto(string CveId, string? Title, string? Severity, decimal? CvssBase, bool MsrcExploited, bool Kev,
+    DateOnly? KevDateAdded, DateOnly? KevDueDate, bool KevRansomware, string? KevName);
+
+/// <summary>Synchronization state of a vulnerability feed (msrc, kev, debian).</summary>
+public sealed record VulnerabilityFeedDto(string Name, DateTimeOffset? LastAttemptAt, DateTimeOffset? LastSuccessAt, string? LastError, string? Version,
+    int ItemCount);
 
 public sealed record FleetUpdateEndpointDto(
     Guid EndpointId,
@@ -636,7 +655,8 @@ public sealed record DashboardSummaryDto(
     int PendingApprovals,
     int UnsupportedOs,
     int OutdatedAgents,
-    IReadOnlyList<OrganizationSummaryDto> LeastCompliantOrganizations);
+    IReadOnlyList<OrganizationSummaryDto> LeastCompliantOrganizations,
+    int KnownExploitedEndpoints = 0);
 
 public sealed record ComplianceReportRow(
     Guid EndpointId,

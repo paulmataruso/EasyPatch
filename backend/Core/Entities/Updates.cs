@@ -41,6 +41,16 @@ public sealed class Update
 
     /// <summary>Linux: distribution advisories (e.g. RHSA-2024:1234).</summary>
     public List<string> Advisories { get; set; } = [];
+
+    /// <summary>Debian and Ubuntu: source package (reported by agent 1.4.0 and later).</summary>
+    public string? PackageSource { get; set; }
+
+    /// <summary>CVEs the update fixes on at least one endpoint (for display; at most 200). Exposure is tracked per endpoint
+    /// in <see cref="EndpointUpdate.CveIds"/>.</summary>
+    public List<string> CveIds { get; set; } = [];
+
+    /// <summary>The update fixes a CISA known-exploited vulnerability on at least one endpoint.</summary>
+    public bool KnownExploited { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
@@ -82,6 +92,16 @@ public sealed class EndpointUpdate
 
     /// <summary>Set while policy allows the update but its rollout delay has not passed; it is not required until then.</summary>
     public DateTimeOffset? DeferredUntil { get; set; }
+
+    /// <summary>CVEs this update fixes on this endpoint (at most 200): from MSRC for Windows, from the agent's dnf
+    /// advisories for RHEL-family and Fedora, from the Debian Security Tracker for Debian.</summary>
+    public List<string> CveIds { get; set; } = [];
+
+    /// <summary>One of <see cref="CveIds"/> is in the CISA KEV catalog.</summary>
+    public bool KnownExploited { get; set; }
+
+    /// <summary>Earliest CISA due date among the known-exploited CVEs.</summary>
+    public DateOnly? KevDueDate { get; set; }
 }
 
 public sealed class UpdateExclusion

@@ -2,7 +2,8 @@ using EasyPatch.Core.Entities;
 
 namespace EasyPatch.Core.Domain;
 
-public readonly record struct UpdateCounts(int MissingRequired, int MissingTotal, int Failed, int Installed, int PendingReboot, int MissingDeferred = 0);
+public readonly record struct UpdateCounts(
+    int MissingRequired, int MissingTotal, int Failed, int Installed, int PendingReboot, int MissingDeferred = 0, int KnownExploitedMissing = 0);
 
 /// <summary>
 /// Patch compliance rules (documented in docs/compliance.md):
@@ -21,9 +22,15 @@ public static class ComplianceCalculator
     public static UpdateCounts Count(IEnumerable<EndpointUpdate> updates)
     {
         ArgumentNullException.ThrowIfNull(updates);
-        int missingRequired = 0, missingTotal = 0, failed = 0, installed = 0, pendingReboot = 0, deferred = 0;
+        int missingRequired = 0, missingTotal = 0, failed = 0, installed = 0, pendingReboot = 0, deferred = 0, knownExploited = 0;
         foreach (var u in updates)
         {
+            if (u.KnownExploited && (u.IsRequired || u.DeferredUntil is not null) &&
+                u.State is EndpointUpdateState.Missing or EndpointUpdateState.PendingVerification or EndpointUpdateState.Failed)
+            {
+                knownExploited++;
+            }
+
             switch (u.State)
             {
                 case EndpointUpdateState.Installed:
@@ -61,7 +68,7 @@ public static class ComplianceCalculator
             }
         }
 
-        return new UpdateCounts(missingRequired, missingTotal, failed, installed, pendingReboot, deferred);
+        return new UpdateCounts(missingRequired, missingTotal, failed, installed, pendingReboot, deferred, knownExploited);
     }
 
     public static ComplianceStatus Evaluate(

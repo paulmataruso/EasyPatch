@@ -125,6 +125,7 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
             services.AddScoped<RetentionTask>();
             services.AddScoped<AlertEvaluationTask>();
             services.AddScoped<NotificationDeliveryTask>();
+            services.AddScoped<VulnerabilityFeedTask>();
             services.AddSingleton<INotificationTransport>(Transport);
         });
     }

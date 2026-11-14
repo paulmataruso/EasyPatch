@@ -315,6 +315,16 @@ public sealed class AlertEngine(
                     $"Pending since {Format(r.RebootPendingSince)}. EasyPatch restarts endpoints only when asked or on a restart schedule.", !r.IsOnline)).ToList();
             }
 
+            case AlertRuleType.KnownExploitedMissing:
+            {
+                var rows = await endpoints.Where(e => e.KnownExploitedMissingCount > 0)
+                    .Select(e => new { e.Id, e.OrganizationId, e.Hostname, e.KnownExploitedMissingCount, e.IsOnline }).ToListAsync(ct);
+                return rows.Select(r => new AlertMatch(r.OrganizationId, r.Id,
+                    $"{r.Hostname}: {Plural(r.KnownExploitedMissingCount, "update")} fixing known-exploited vulnerabilities missing",
+                    "The CISA Known Exploited Vulnerabilities catalog lists vulnerabilities these updates fix as exploited in the wild. Install them first.",
+                    !r.IsOnline)).ToList();
+            }
+
             case AlertRuleType.OsUnsupported:
             {
                 var today = DateOnly.FromDateTime(now.UtcDateTime);
@@ -350,7 +360,7 @@ public sealed class AlertEngine(
                                 (u.Update!.Category == UpdateCategory.Security || u.Update.MsClassification == UpdateRequirement.SecurityClassification)
                           select new
                           {
-                              e.Id, e.OrganizationId, e.SiteId, e.Hostname, e.IsOnline, u.FirstDetectedAt, u.DelayBasisAt,
+                              e.Id, e.OrganizationId, e.SiteId, e.Hostname, e.IsOnline, u.FirstDetectedAt, u.DelayBasisAt, u.KnownExploited,
                               u.Update!.Title,
                           }).ToListAsync(ct);
         if (rows.Count == 0)
@@ -366,7 +376,8 @@ public sealed class AlertEngine(
             var policy = resolver(first.OrganizationId, first.SiteId, first.Id);
             var overdue = g.Where(r =>
             {
-                var requiredSince = (r.DelayBasisAt ?? r.FirstDetectedAt).AddDays(policy.SecurityInstallDelayDays);
+                var delay = r.KnownExploited && policy.KnownExploitedSkipsDelay ? 0 : policy.SecurityInstallDelayDays;
+                var requiredSince = (r.DelayBasisAt ?? r.FirstDetectedAt).AddDays(delay);
                 return (requiredSince > r.FirstDetectedAt ? requiredSince : r.FirstDetectedAt) <= cutoff;
             }).ToList();
             if (overdue.Count == 0)

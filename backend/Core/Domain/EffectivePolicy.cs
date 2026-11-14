@@ -30,6 +30,9 @@ public sealed record EffectivePolicy
     /// <summary>Rollout delay (days) for security updates.</summary>
     public int SecurityInstallDelayDays { get; init; }
 
+    /// <summary>Updates fixing a CISA known-exploited vulnerability skip the rollout delay.</summary>
+    public bool KnownExploitedSkipsDelay { get; init; } = true;
+
     public bool HasInstallDelay => InstallDelayDays > 0 || SecurityInstallDelayDays > 0;
     public MaintenanceWindowSettings? MaintenanceWindow { get; init; }
     public int ScanStaleAfterHours { get; init; }
@@ -88,6 +91,7 @@ public static class PolicyDefaults
         AutoInstallEnabled = false,
         InstallDelayDays = 0,
         SecurityInstallDelayDays = 0,
+        KnownExploitedSkipsDelay = true,
         MaintenanceDays = [],
         MaintenanceStart = new TimeOnly(2, 0),
         MaintenanceDurationMinutes = 180,
@@ -251,6 +255,7 @@ public static class PolicyResolver
             AutoInstallEnabled = Pick(nameof(EffectivePolicy.AutoInstallEnabled), p => p.AutoInstallEnabled, false),
             InstallDelayDays = Pick(nameof(EffectivePolicy.InstallDelayDays), p => p.InstallDelayDays, 0),
             SecurityInstallDelayDays = Pick(nameof(EffectivePolicy.SecurityInstallDelayDays), p => p.SecurityInstallDelayDays, 0),
+            KnownExploitedSkipsDelay = Pick(nameof(EffectivePolicy.KnownExploitedSkipsDelay), p => p.KnownExploitedSkipsDelay, true),
             MaintenanceWindow = window is { IsConfigured: true } ? window : null,
             ScanStaleAfterHours = Pick(nameof(EffectivePolicy.ScanStaleAfterHours), p => p.ScanStaleAfterHours, 48),
             MaxConcurrentInstallsPerSite = Pick(nameof(EffectivePolicy.MaxConcurrentInstallsPerSite), p => p.MaxConcurrentInstallsPerSite, 10),

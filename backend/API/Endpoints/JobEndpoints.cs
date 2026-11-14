@@ -4,6 +4,7 @@ using EasyPatch.Api.Security;
 using EasyPatch.Contracts;
 using EasyPatch.Contracts.Agent;
 using EasyPatch.Contracts.Json;
+using EasyPatch.Core.Domain;
 using EasyPatch.Core.Entities;
 using EasyPatch.Infrastructure.Data;
 using EasyPatch.Infrastructure.Services;
@@ -130,7 +131,7 @@ public static class JobEndpoints
 }
 
 public sealed record FleetUpdateQuery(Guid? OrganizationId, Guid? SiteId, UpdateCategory? Category, EndpointUpdateState? State, string? Search, string? Sort,
-    string? Dir, int? Page, int? PageSize);
+    string? Dir, int? Page, int? PageSize, bool? KnownExploited = null);
 
 public static class FleetUpdateEndpoints
 {
@@ -160,7 +161,13 @@ public static class FleetUpdateEndpoints
                 Installed = gr.Count(u => u.State == EndpointUpdateState.Installed),
                 PendingReboot = gr.Count(u => u.State == EndpointUpdateState.PendingReboot || u.State == EndpointUpdateState.PendingVerification),
                 Excluded = gr.Count(u => u.State == EndpointUpdateState.Excluded || u.IsExcluded),
+                KnownExploited = gr.Count(u => u.KnownExploited),
             });
+            if (q.KnownExploited is { } exploited)
+            {
+                grouped = exploited ? grouped.Where(x => x.KnownExploited > 0) : grouped.Where(x => x.KnownExploited == 0);
+            }
+
             grouped = q.State switch
             {
                 EndpointUpdateState.Missing => grouped.Where(x => x.Missing > 0),
@@ -175,7 +182,11 @@ public static class FleetUpdateEndpoints
             {
                 "failed" => desc ? grouped.OrderByDescending(x => x.Failed) : grouped.OrderBy(x => x.Failed),
                 "installed" => desc ? grouped.OrderByDescending(x => x.Installed) : grouped.OrderBy(x => x.Installed),
-                _ => desc ? grouped.OrderByDescending(x => x.Missing + x.Failed) : grouped.OrderBy(x => x.Missing + x.Failed),
+                "missing" => desc ? grouped.OrderByDescending(x => x.Missing + x.Failed) : grouped.OrderBy(x => x.Missing + x.Failed),
+                // Default: updates fixing known-exploited vulnerabilities first, then by how many endpoints need them.
+                _ => desc
+                    ? grouped.OrderByDescending(x => x.KnownExploited > 0).ThenByDescending(x => x.Missing + x.Failed)
+                    : grouped.OrderBy(x => x.KnownExploited > 0).ThenBy(x => x.Missing + x.Failed),
             };
             var page = PageRequest.From(q.Page, q.PageSize);
             var total = await grouped.CountAsync(ct);
@@ -186,7 +197,7 @@ public static class FleetUpdateEndpoints
             {
                 var u = catalog[r.UpdateGuid];
                 return new FleetUpdateDto(r.UpdateGuid, u.Title, u.PrimaryKb, u.Category, u.MsrcSeverity, u.ReleaseDate, u.MaxDownloadSizeBytes, r.Missing,
-                    r.Failed, r.Installed, r.PendingReboot, r.Excluded, Mapping.Package(u, null));
+                    r.Failed, r.Installed, r.PendingReboot, r.Excluded, Mapping.Package(u, null), u.CveIds.Count, r.KnownExploited > 0);
             }).ToList();
             return TypedResults.Ok(new PagedResult<FleetUpdateDto>(items, page.Page, page.PageSize, total));
         });
@@ -208,12 +219,27 @@ public static class FleetUpdateEndpoints
                     Installed = gr.Count(x => x.State == EndpointUpdateState.Installed),
                     PendingReboot = gr.Count(x => x.State == EndpointUpdateState.PendingReboot || x.State == EndpointUpdateState.PendingVerification),
                     Excluded = gr.Count(x => x.State == EndpointUpdateState.Excluded || x.IsExcluded),
+                    KnownExploited = gr.Count(x => x.KnownExploited),
                 }).FirstOrDefaultAsync(ct);
+
+            // CVEs on the endpoints in scope (the catalog summary covers every organization).
+            var cveLists = await Scope(db, tenant, organizationId, siteId).Where(x => x.UpdateGuid == updateGuid && x.CveIds.Count > 0)
+                .Select(x => x.CveIds).Take(5000).ToListAsync(ct);
+            var cves = VulnerabilityRules.Normalize(cveLists.SelectMany(c => c));
+            var known = cves.Count == 0
+                ? []
+                : await db.Vulnerabilities.AsNoTracking().Where(v => cves.Contains(v.CveId)).ToDictionaryAsync(v => v.CveId, ct);
+            var vulnerabilities = cves
+                .Select(id => known.TryGetValue(id, out var v)
+                    ? new VulnerabilityDto(id, v.Title, v.Severity, v.CvssBase, v.MsrcExploited, v.Kev, v.KevDateAdded, v.KevDueDate, v.KevRansomware, v.KevName)
+                    : new VulnerabilityDto(id, null, null, null, false, false, null, null, false, null))
+                .OrderByDescending(v => v.Kev).ThenByDescending(v => v.MsrcExploited).ThenByDescending(v => v.CvssBase ?? 0).ThenBy(v => v.CveId, StringComparer.Ordinal)
+                .ToList();
             var summary = new FleetUpdateDto(updateGuid, u.Title, u.PrimaryKb, u.Category, u.MsrcSeverity, u.ReleaseDate, u.MaxDownloadSizeBytes,
                 states?.Missing ?? 0, states?.Failed ?? 0, states?.Installed ?? 0, states?.PendingReboot ?? 0, states?.Excluded ?? 0,
-                Mapping.Package(u, null));
+                Mapping.Package(u, null), cves.Count, (states?.KnownExploited ?? 0) > 0);
             return TypedResults.Ok(new FleetUpdateDetailDto(summary, u.Description, u.SupportUrl, u.KbNumbers, u.Products, u.MsClassification,
-                u.RebootBehavior is > 0, u.SupersededUpdateGuids));
+                u.RebootBehavior is > 0, u.SupersededUpdateGuids, vulnerabilities));
         });
 
         g.MapGet("/{updateGuid:guid}/endpoints", async (Guid updateGuid, EndpointUpdateState? state, Guid? organizationId, Guid? siteId, int? page,
@@ -284,6 +310,11 @@ public static class FleetUpdateEndpoints
     private static async Task<Dictionary<Guid, Update>> LatestCatalogAsync(EasyPatchDbContext db, IReadOnlyCollection<Guid> guids, CancellationToken ct)
     {
         var rows = await db.Updates.AsNoTracking().Where(u => guids.Contains(u.UpdateGuid)).ToListAsync(ct);
-        return rows.GroupBy(u => u.UpdateGuid).ToDictionary(g => g.Key, g => g.OrderByDescending(u => u.RevisionNumber).First());
+        return rows.GroupBy(u => u.UpdateGuid).ToDictionary(g => g.Key, g =>
+        {
+            var latest = g.OrderByDescending(u => u.RevisionNumber).First();
+            latest.CveIds = VulnerabilityRules.Normalize(g.SelectMany(u => u.CveIds)); // endpoints may still be on an older revision
+            return latest;
+        });
     }
 }

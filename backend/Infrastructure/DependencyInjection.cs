@@ -3,6 +3,7 @@ using EasyPatch.Infrastructure.Maintenance;
 using EasyPatch.Infrastructure.Notifications;
 using EasyPatch.Infrastructure.Security;
 using EasyPatch.Infrastructure.Services;
+using EasyPatch.Infrastructure.Vulnerabilities;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -31,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<SettingsService>();
         services.AddScoped<PolicyService>();
         services.AddScoped<AuditService>();
+        services.AddScoped<VulnerabilityMatcher>();
         services.AddScoped<ComplianceService>();
         services.AddScoped<ScanIngestionService>();
         services.AddScoped<InstallPreviewService>();
@@ -55,6 +57,22 @@ public static class DependencyInjection
             })
             .ConfigurePrimaryHttpMessageHandler(WebhookHttp.CreateHandler)
             .RemoveAllLoggers(); // request logging would write webhook URLs (which contain secrets) to the log
+
+        // Public vulnerability feeds (worker only). No redirects: the feed hosts are fixed HTTPS URLs.
+        services.AddScoped<VulnerabilityFeedService>();
+        services.AddHttpClient(VulnerabilityFeedService.HttpClientName, c =>
+            {
+                c.Timeout = TimeSpan.FromMinutes(10);
+                c.DefaultRequestHeaders.UserAgent.ParseAdd($"EasyPatch/{version}");
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                UseCookies = false,
+                AutomaticDecompression = System.Net.DecompressionMethods.All,
+                ConnectTimeout = TimeSpan.FromSeconds(20),
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            });
         return services;
     }
 
@@ -91,6 +109,7 @@ public static class DependencyInjection
         services.AddScoped<DeferralExpiryTask>();
         services.AddScoped<AlertEvaluationTask>();
         services.AddScoped<NotificationDeliveryTask>();
+        services.AddScoped<VulnerabilityFeedTask>();
         services.AddSingleton<MaintenanceHeartbeat>();
         services.AddHostedService<MaintenanceLoop<JobMaintenanceTask>>();
         services.AddHostedService<MaintenanceLoop<PresenceMonitorTask>>();
@@ -102,6 +121,7 @@ public static class DependencyInjection
         services.AddHostedService<MaintenanceLoop<DeferralExpiryTask>>();
         services.AddHostedService<MaintenanceLoop<AlertEvaluationTask>>();
         services.AddHostedService<MaintenanceLoop<NotificationDeliveryTask>>();
+        services.AddHostedService<MaintenanceLoop<VulnerabilityFeedTask>>();
         return services;
     }
 }

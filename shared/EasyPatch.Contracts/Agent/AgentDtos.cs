@@ -368,6 +368,16 @@ public sealed record PackageUpdateInfo
 
     /// <summary>Distribution advisories the upgrade resolves, e.g. <c>RLSA-2024:1234</c> (dnf only).</summary>
     public IReadOnlyList<string> Advisories { get; init; } = [];
+
+    /// <summary>CVE IDs fixed between the installed version and this version, from the distribution's advisories (dnf,
+    /// agent 1.4.0 and later; at most <see cref="MaxCves"/>). Empty when unknown.</summary>
+    public IReadOnlyList<string> Cves { get; init; } = [];
+
+    /// <summary>Debian and Ubuntu: the source package the binary package is built from (e.g. <c>openssl</c> for
+    /// <c>libssl3</c>), used to look up security tracker data (agent 1.4.0 and later).</summary>
+    public string? SourcePackage { get; init; }
+
+    public const int MaxCves = 200;
 }
 
 public sealed record UpdateCategoryRef

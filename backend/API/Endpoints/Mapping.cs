@@ -48,20 +48,20 @@ internal static class Mapping
         string? OperatingSystem, string? OsVersion, string? OsBuild, int? OsBuildNumber, string? OsProductType, string? Architecture, string? AgentVersion,
         bool IsOnline, DateTimeOffset? LastCheckInAt, DateTimeOffset? LastScanAt, ComplianceStatus ComplianceStatus, int MissingRequiredCount,
         int MissingTotalCount, int FailedCount, bool RebootPending, OsSupportStatus OsSupportStatus, string? CurrentActivity, string? LastSeenIp,
-        string Platform, string? AgentPackageFormat, int MissingDeferredCount = 0);
+        string Platform, string? AgentPackageFormat, int MissingDeferredCount = 0, int KnownExploitedMissingCount = 0);
 
     public static readonly Expression<Func<EasyPatch.Core.Entities.Endpoint, EndpointRow>> EndpointRowProjection = e => new EndpointRow(
         e.Id, e.Hostname, e.OrganizationId, e.Organization!.Name, e.SiteId, e.Site != null ? e.Site.Name : null, e.Status, e.OperatingSystem,
         e.OsVersion, e.OsBuild, e.OsBuildNumber, e.OsProductType, e.Architecture, e.AgentVersion, e.IsOnline, e.LastCheckInAt, e.LastScanAt,
         e.ComplianceStatus, e.MissingRequiredCount, e.MissingTotalCount, e.FailedCount, e.RebootPending, e.OsSupportStatus, e.CurrentActivity,
-        e.LastSeenIp, e.Platform, e.AgentPackageFormat, e.MissingDeferredCount);
+        e.LastSeenIp, e.Platform, e.AgentPackageFormat, e.MissingDeferredCount, e.KnownExploitedMissingCount);
 
     public static EndpointSummaryDto ToSummary(EndpointRow r, LatestAgentVersions latest, IReadOnlyList<TagRefDto>? tags = null) => new(
         r.Id, r.Hostname, r.OrganizationId, r.OrganizationName, r.SiteId, r.SiteName, r.Status,
         OsNaming.Describe(r.OperatingSystem, r.OsBuildNumber, r.OsProductType), r.OsVersion, r.OsBuild, r.Architecture, r.AgentVersion,
         latest.IsOutdated(r.AgentVersion, r.AgentPackageFormat), r.IsOnline, r.LastCheckInAt, r.LastScanAt, r.ComplianceStatus, r.MissingRequiredCount,
         r.MissingTotalCount, r.FailedCount, r.RebootPending, r.OsSupportStatus, r.CurrentActivity, r.LastSeenIp, r.Platform, r.MissingDeferredCount,
-        tags ?? []);
+        tags ?? [], r.KnownExploitedMissingCount);
 
     /// <summary>Tags of the given endpoints (for list and detail views).</summary>
     public static async Task<Dictionary<Guid, List<TagRefDto>>> LoadTagsAsync(EasyPatch.Infrastructure.Data.EasyPatchDbContext db,

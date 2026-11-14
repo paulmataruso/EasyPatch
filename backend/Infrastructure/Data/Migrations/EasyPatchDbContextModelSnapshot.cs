@@ -402,6 +402,34 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.ToTable("compliance_snapshots", (string)null);
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.DebianFix", b =>
+                {
+                    b.Property<string>("Release")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("release");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("source");
+
+                    b.Property<string>("CveId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("cve_id");
+
+                    b.Property<string>("FixedVersion")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("fixed_version");
+
+                    b.HasKey("Release", "Source", "CveId");
+
+                    b.ToTable("debian_fixes", (string)null);
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.DeploymentCode", b =>
                 {
                     b.Property<Guid>("Id")
@@ -604,6 +632,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("key_protection");
+
+                    b.Property<int>("KnownExploitedMissingCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("known_exploited_missing_count");
 
                     b.Property<DateTimeOffset?>("LastBootAt")
                         .HasColumnType("timestamp with time zone")
@@ -948,6 +980,13 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.PrimitiveCollection<List<string>>("CveIds")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("cve_ids")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<DateTimeOffset?>("DeferredUntil")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("deferred_until");
@@ -994,6 +1033,14 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.Property<bool>("IsRequired")
                         .HasColumnType("boolean")
                         .HasColumnName("is_required");
+
+                    b.Property<DateOnly?>("KevDueDate")
+                        .HasColumnType("date")
+                        .HasColumnName("kev_due_date");
+
+                    b.Property<bool>("KnownExploited")
+                        .HasColumnType("boolean")
+                        .HasColumnName("known_exploited");
 
                     b.Property<DateTimeOffset?>("LastAttemptAt")
                         .HasColumnType("timestamp with time zone")
@@ -1512,6 +1559,45 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("job_updates", (string)null);
+                });
+
+            modelBuilder.Entity("EasyPatch.Core.Entities.MsrcBuildFix", b =>
+                {
+                    b.Property<int>("Build")
+                        .HasColumnType("integer")
+                        .HasColumnName("build");
+
+                    b.Property<string>("CveId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("cve_id");
+
+                    b.Property<int>("FixedRevision")
+                        .HasColumnType("integer")
+                        .HasColumnName("fixed_revision");
+
+                    b.HasKey("Build", "CveId");
+
+                    b.HasIndex("Build", "FixedRevision");
+
+                    b.ToTable("msrc_build_fixes", (string)null);
+                });
+
+            modelBuilder.Entity("EasyPatch.Core.Entities.MsrcKbCve", b =>
+                {
+                    b.Property<string>("Kb")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("kb");
+
+                    b.Property<string>("CveId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("cve_id");
+
+                    b.HasKey("Kb", "CveId");
+
+                    b.ToTable("msrc_kb_cves", (string)null);
                 });
 
             modelBuilder.Entity("EasyPatch.Core.Entities.NotificationChannel", b =>
@@ -2432,6 +2518,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("jitter_percent");
 
+                    b.Property<bool?>("KnownExploitedSkipsDelay")
+                        .HasColumnType("boolean")
+                        .HasColumnName("known_exploited_skips_delay");
+
                     b.PrimitiveCollection<List<int>>("MaintenanceDays")
                         .HasColumnType("integer[]")
                         .HasColumnName("maintenance_days");
@@ -2680,6 +2770,13 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.PrimitiveCollection<List<string>>("CveIds")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("cve_ids")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<string>("Description")
                         .HasMaxLength(8000)
                         .HasColumnType("character varying(8000)")
@@ -2701,6 +2798,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text[]")
                         .HasColumnName("kb_numbers");
+
+                    b.Property<bool>("KnownExploited")
+                        .HasColumnType("boolean")
+                        .HasColumnName("known_exploited");
 
                     b.Property<long?>("MaxDownloadSizeBytes")
                         .HasColumnType("bigint")
@@ -2730,6 +2831,11 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
                         .HasColumnName("package_repository");
+
+                    b.Property<string>("PackageSource")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("package_source");
 
                     b.Property<string>("PackageVersion")
                         .HasMaxLength(255)
@@ -2780,6 +2886,9 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Category");
+
+                    b.HasIndex("KnownExploited")
+                        .HasFilter("known_exploited");
 
                     b.HasIndex("UpdateGuid", "RevisionNumber")
                         .IsUnique();
@@ -3140,6 +3249,104 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("user_sessions", (string)null);
+                });
+
+            modelBuilder.Entity("EasyPatch.Core.Entities.Vulnerability", b =>
+                {
+                    b.Property<string>("CveId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("cve_id");
+
+                    b.Property<decimal?>("CvssBase")
+                        .HasPrecision(3, 1)
+                        .HasColumnType("numeric(3,1)")
+                        .HasColumnName("cvss_base");
+
+                    b.Property<bool>("Kev")
+                        .HasColumnType("boolean")
+                        .HasColumnName("kev");
+
+                    b.Property<DateOnly?>("KevDateAdded")
+                        .HasColumnType("date")
+                        .HasColumnName("kev_date_added");
+
+                    b.Property<DateOnly?>("KevDueDate")
+                        .HasColumnType("date")
+                        .HasColumnName("kev_due_date");
+
+                    b.Property<string>("KevName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("kev_name");
+
+                    b.Property<bool>("KevRansomware")
+                        .HasColumnType("boolean")
+                        .HasColumnName("kev_ransomware");
+
+                    b.Property<bool>("MsrcExploited")
+                        .HasColumnType("boolean")
+                        .HasColumnName("msrc_exploited");
+
+                    b.Property<string>("Severity")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("severity");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("CveId");
+
+                    b.HasIndex("CveId")
+                        .HasDatabaseName("ix_vulnerabilities_kev")
+                        .HasFilter("kev");
+
+                    b.ToTable("vulnerabilities", (string)null);
+                });
+
+            modelBuilder.Entity("EasyPatch.Core.Entities.VulnerabilityFeedState", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("ItemCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("item_count");
+
+                    b.Property<DateTimeOffset?>("LastAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_attempt_at");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset?>("LastSuccessAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_success_at");
+
+                    b.Property<string>("StateJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("state_json");
+
+                    b.Property<string>("Version")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("version");
+
+                    b.HasKey("Name");
+
+                    b.ToTable("vulnerability_feeds", (string)null);
                 });
 
             modelBuilder.Entity("EasyPatch.Core.Entities.AgentCredential", b =>
