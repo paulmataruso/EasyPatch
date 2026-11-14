@@ -8,13 +8,17 @@ public static class AgentCapabilities
     public const string WindowsUpdatePolicy = "windows-update-policy";
     public const string Tray = "tray";
 
-    public static IReadOnlyList<string> All { get; } = [Restart, NotifyUser, WindowsUpdatePolicy, Tray];
+    /// <summary>The agent can install signed agent updates (it was built with at least one release key).</summary>
+    public const string SelfUpdate = "self-update";
+
+    public static IReadOnlyList<string> All { get; } = [Restart, NotifyUser, WindowsUpdatePolicy, Tray, SelfUpdate];
 
     /// <summary>The capability a job type needs, or null when every agent supports it.</summary>
     public static string? RequiredFor(JobType type) => type switch
     {
         JobType.Restart => Restart,
         JobType.NotifyUser => NotifyUser,
+        JobType.AgentUpdate => SelfUpdate,
         _ => null,
     };
 }

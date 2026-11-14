@@ -92,6 +92,13 @@ public sealed record CheckInRequest
 
     /// <summary>Windows Update policy enforcement status; sent only when it has changed.</summary>
     public WindowsUpdatePolicyReport? WindowsUpdatePolicy { get; init; }
+
+    /// <summary>Package architecture of this agent build (<c>x64</c> or <c>arm64</c>): agent updates use the same one.</summary>
+    public string? AgentArchitecture { get; init; }
+
+    /// <summary>IDs of the release keys this agent accepts updates from (see <see cref="AgentRelease.KeyId"/>).
+    /// Empty when the agent cannot update itself.</summary>
+    public IReadOnlyList<string> ReleaseKeyIds { get; init; } = [];
 }
 
 public sealed record CheckInResponse
@@ -138,6 +145,9 @@ public sealed record AgentJob
 
     /// <summary>Present for <see cref="JobType.NotifyUser"/>.</summary>
     public NotifyUserPayload? Notify { get; init; }
+
+    /// <summary>Present for <see cref="JobType.AgentUpdate"/>.</summary>
+    public AgentUpdatePayload? AgentUpdate { get; init; }
 }
 
 public sealed record InstallUpdatesPayload

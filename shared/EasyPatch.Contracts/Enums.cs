@@ -24,6 +24,10 @@ public enum JobType
     Restart,
     /// <summary>Show a preset message to the signed-in users. Never executes anything.</summary>
     NotifyUser,
+
+    /// <summary>Install a newer EasyPatch agent MSI. The agent installs it only when its release signature verifies
+    /// against a release key built into the agent.</summary>
+    AgentUpdate,
 }
 
 /// <summary>How a <see cref="JobType.Restart"/> job treats signed-in users. With nobody signed in, every mode restarts at once.</summary>
