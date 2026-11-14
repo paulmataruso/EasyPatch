@@ -186,3 +186,50 @@ Under **Reports**, and through the API (see [api.md](api.md#dashboard-reports-au
 
 Tenant-restricted users only see the organizations they are assigned to, in reports and in CSV
 exports.
+
+## Monthly reports
+
+**Reports → Monthly reports** produces a PDF per organization and calendar month, for example to
+send to a customer. It contains:
+
+* a title block with the organization, the month and, when set, a *Prepared by* line (**Settings
+  → Server → Monthly reports**, for example your MSP's name);
+* a summary: compliant endpoints now; compliance on the first and last daily snapshot of the
+  month; updates installed during the month (counted only when a scan confirmed them); failed
+  installation attempts during the month; required updates outstanding, endpoints missing a fix
+  for a known-exploited vulnerability, endpoints waiting for a restart, endpoints with an
+  unsupported operating system and endpoints not seen for more than 7 days (all now);
+* the compliance trend of the month from the daily snapshots (at least two are needed);
+* a table per site, the 15 most widely missing required updates (known-exploited first) and the
+  operating systems in use;
+* optionally, a table of every endpoint (up to 5,000) on separate pages.
+
+Values marked *now* are taken when the report is generated: a report for an earlier month shows
+the current state for those. Months use UTC dates, like the snapshots. The current month can be
+generated as *month to date*; months more than 10 years back cannot.
+
+**On demand.** Administrators (Admin and SuperAdmin) choose an organization and a month and select
+**Generate PDF**. Read-only users can download existing reports. Any report can be emailed from the
+list (**Email this report**); the recipients default to the organization's report recipients.
+
+**Scheduled email.** Per organization, off by default: turn on *Email last month's report
+automatically*, enter up to 20 recipients (plain addresses) and choose the day of the month (1 to
+28, in the organization's time zone). From that day on, the worker generates the previous month's
+report once and emails it with the PDF attached. Months that ended before the schedule was turned
+on are not sent automatically. A deleted scheduled report is not generated or sent again.
+Organizations east of UTC wait until the month has also ended in UTC. Archived and inactive
+organizations get no scheduled reports. The schedule shows the next report and its date.
+
+**Email delivery** uses the SMTP server under **Settings → Notifications**, and only with
+STARTTLS or TLS: with *None* the console refuses to queue reports and the worker refuses to send
+them. Failed sends are retried (after 1 minute, doubling up to 1 hour) and given up after 24 hours;
+the list shows *Queued*, *Retrying*, *Sent* or *Not sent* with the error. Reports larger than
+15 MB are not emailed. The worker checks for due reports and queued emails every minute.
+
+**Storage.** The PDFs are stored in the database and deleted after **Settings → Server → Data
+retention → Monthly reports** (default 24 months). They are part of the database backup.
+
+The PDFs use the embedded Liberation Sans font (SIL Open Font License), which covers Latin, Greek
+and Cyrillic; characters of other scripts (for example Chinese or Japanese organization names)
+appear as empty boxes. They are produced with PDFsharp/MigraDoc 6.2.4 (MIT license; later
+versions are AGPL-licensed).

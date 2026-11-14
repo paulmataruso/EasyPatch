@@ -26,6 +26,12 @@ public sealed record ServerSettings
     /// without internet access.</summary>
     public bool VulnerabilityFeedsEnabled { get; init; } = true;
 
+    /// <summary>Monthly reports are kept this long (months).</summary>
+    public int RetentionReportsMonths { get; init; } = 24;
+
+    /// <summary>Optional "Prepared by" line on monthly reports (your company name).</summary>
+    public string? ReportBrandName { get; init; }
+
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
@@ -54,6 +60,12 @@ public sealed record ServerSettings
         Range(nameof(RetentionJobsDays), RetentionJobsDays, 7, 3650);
         Range(nameof(RetentionScansDays), RetentionScansDays, 7, 3650);
         Range(nameof(RetentionHistoryDays), RetentionHistoryDays, 30, 3650);
+        Range(nameof(RetentionReportsMonths), RetentionReportsMonths, 1, 120);
+        if (ReportBrandName is { } brand && (brand.Length > 100 || brand.Any(char.IsControl)))
+        {
+            errors.Add("ReportBrandName must be at most 100 characters, without control characters.");
+        }
+
         if (CredentialRotateBeforeDays >= CredentialLifetimeDays)
         {
             errors.Add("CredentialRotateBeforeDays must be less than CredentialLifetimeDays.");

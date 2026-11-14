@@ -52,13 +52,16 @@ public sealed class NotificationSecrets(IDataProtectionProvider provider, IConfi
 }
 
 /// <summary>A delivery failure with a message that is safe to store and show (no URLs, tokens or passwords).</summary>
-public sealed class NotificationException(string message, Exception? inner = null) : Exception(message, inner);
+public class NotificationException(string message, Exception? inner = null) : Exception(message, inner);
+
+/// <summary>A file attached to an email (monthly report PDFs).</summary>
+public sealed record EmailAttachment(string FileName, string ContentType, byte[] Content);
 
 /// <summary>Sends email and webhook requests. Replaced by a fake in tests.</summary>
 public interface INotificationTransport
 {
     Task SendEmailAsync(NotificationSettingsRow smtp, string? password, IReadOnlyList<string> recipients, string subject, string text, string html,
-        CancellationToken ct);
+        IReadOnlyList<EmailAttachment>? attachments, CancellationToken ct);
 
     Task PostWebhookAsync(Uri url, string body, IReadOnlyDictionary<string, string> headers, bool allowPrivateNetworks, CancellationToken ct);
 }
@@ -69,7 +72,7 @@ public sealed partial class NotificationTransport(IHttpClientFactory httpClients
     public const int MaxResponseBytes = 64 * 1024;
 
     public async Task SendEmailAsync(NotificationSettingsRow smtp, string? password, IReadOnlyList<string> recipients, string subject, string text,
-        string html, CancellationToken ct)
+        string html, IReadOnlyList<EmailAttachment>? attachments, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(smtp);
         ArgumentNullException.ThrowIfNull(recipients);
@@ -86,7 +89,13 @@ public sealed partial class NotificationTransport(IHttpClientFactory httpClients
         }
 
         message.Subject = subject;
-        message.Body = new BodyBuilder { TextBody = text, HtmlBody = html }.ToMessageBody();
+        var body = new BodyBuilder { TextBody = text, HtmlBody = html };
+        foreach (var attachment in attachments ?? [])
+        {
+            body.Attachments.Add(attachment.FileName, attachment.Content, ContentType.Parse(attachment.ContentType));
+        }
+
+        message.Body = body.ToMessageBody();
 
         using var client = new SmtpClient { Timeout = 30_000 };
         var security = smtp.SmtpSecurity switch

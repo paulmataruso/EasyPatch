@@ -15,6 +15,9 @@
     <PackageReference Include="MailKit" />
     <PackageReference Include="MimeKit" />
     <PackageReference Include="BouncyCastle.Cryptography" />
+    <PackageReference Include="PDFsharp-MigraDoc" />
+    <PackageReference Include="PDFsharp" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -22,5 +25,10 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Core\EasyPatch.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Liberation Sans (SIL OFL 1.1, see Reports/Fonts/LICENSE-LiberationSans.txt) for the PDF reports. -->
+    <EmbeddedResource Include="Reports/Fonts/*.ttf" LogicalName="EasyPatch.Fonts.%(Filename)%(Extension)" />
+    <None Include="Reports/Fonts/LICENSE-LiberationSans.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -112,6 +112,17 @@ cancelled.
 | `A stored notification secret cannot be decrypted` | The worker does not see the API's Data Protection keys. It must mount the `dpkeys` volume (use the current `docker-compose.yml`). If the keys were lost, enter the SMTP password and webhook URLs again |
 | Webhook `refused: private network addresses are not allowed` | The webhook host resolves to a private address. Turn on **Allow webhooks to private network addresses** if that is intended |
 
+## Monthly reports
+
+| Symptom | Cause and fix |
+|---|---|
+| `Reports are emailed only over STARTTLS or TLS` | The SMTP security setting is *None*. Choose STARTTLS or TLS under **Settings → Notifications** (and use a port the server offers it on, usually 587 or 465) |
+| `Configure SMTP first` | No SMTP server or sender address is set under **Settings → Notifications** |
+| A scheduled report was not sent | Check that the schedule is on and has recipients, and the *Next* line on the schedule. Months that ended before the schedule was turned on are skipped: generate the report and send it from the list. The worker checks every minute; organizations east of UTC wait until the month has also ended in UTC |
+| *Retrying* or *Not sent* | Hover the badge for the error (the same messages as for notifications, see [alerts.md](alerts.md#troubleshooting)). Sends are retried for 24 hours; after that, send the report again from the list |
+| Names show as empty boxes in the PDF | The embedded font covers Latin, Greek and Cyrillic only |
+| `The report is too large to email` | Reports over 15 MB are not emailed. Generate it without the endpoint list, or download it |
+
 ## Vulnerability data (CVEs and known-exploited updates)
 
 | Symptom | Cause and fix |

@@ -556,3 +556,23 @@ installed and the offered version (`DebianVersion.Compare`); RHEL-family and Fed
 CVEs the agent read from the dnf advisories. `endpoints.known_exploited_missing_count` and the
 catalog summary on `updates` are then refreshed.
 
+## 9. Monthly reports
+
+`MonthlyReportDataBuilder` reads one organization's data for a `ReportPeriod` (a calendar month in
+UTC dates; the current month ends today): endpoint rows, `endpoint_updates` installed in the month,
+failed `job_updates` completed in the month, and the month's `compliance_snapshots`.
+`ReportPdfRenderer` lays it out with MigraDoc (PDFsharp 6.2.4, MIT) on A4 with the embedded
+Liberation Sans font (`ReportFontResolver`; the server needs no installed fonts).
+
+| Table | Contents |
+|---|---|
+| `report_schedules` | One row per organization: `enabled`, `recipients`, `day_of_month` (1-28, organization time zone), `include_endpoint_list`, `enabled_at`, `last_scheduled_period` |
+| `generated_reports` | The PDF (`content`, `sha256`, `file_name`), the period, `scheduled`, `generated_by`, and its email state (`delivery_status`, `recipients`, `attempts`, `next_attempt_at`, `queued_at`, `sent_at`, `last_error`). A unique index allows one scheduled report per organization and month |
+
+The API generates on-demand reports synchronously (`POST /monthly-reports`). The worker task
+`monthly-reports` (every minute, advisory lock) creates due scheduled reports
+(`MonthlyReportService.NextScheduled`: the previous month, from the chosen day, skipping months
+that ended before `enabled_at` or are already recorded in `last_scheduled_period`), then sends
+pending emails through `INotificationTransport` with the PDF attached. Report emails use their own
+outbox fields rather than `notification_deliveries`, which are bound to channels. The retention
+task deletes reports older than `RetentionReportsMonths`.

@@ -108,7 +108,7 @@ public sealed class NotificationDispatcher(
 
             var password = settings.SmtpPasswordProtected is null ? null : secrets.Unprotect(settings.SmtpPasswordProtected);
             await transport.SendEmailAsync(settings, password, channel.EmailRecipients, delivery.Subject,
-                NotificationRenderer.Text(message), NotificationRenderer.Html(message), ct);
+                NotificationRenderer.Text(message), NotificationRenderer.Html(message), null, ct);
             return;
         }
 

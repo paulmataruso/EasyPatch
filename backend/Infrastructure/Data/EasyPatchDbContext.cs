@@ -43,6 +43,8 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
     public DbSet<MsrcBuildFix> MsrcBuildFixes => Set<MsrcBuildFix>();
     public DbSet<DebianFix> DebianFixes => Set<DebianFix>();
     public DbSet<VulnerabilityFeedState> VulnerabilityFeeds => Set<VulnerabilityFeedState>();
+    public DbSet<ReportSchedule> ReportSchedules => Set<ReportSchedule>();
+    public DbSet<GeneratedReport> GeneratedReports => Set<GeneratedReport>();
     public DbSet<NotificationSettingsRow> NotificationSettings => Set<NotificationSettingsRow>();
     public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
     public DbSet<AlertRule> AlertRules => Set<AlertRule>();
@@ -91,6 +93,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
         ConfigureJobs(modelBuilder);
         ConfigureNotifications(modelBuilder);
         ConfigureVulnerabilities(modelBuilder);
+        ConfigureReports(modelBuilder);
         Seed(modelBuilder);
         ApplySnakeCaseNames(modelBuilder);
     }
@@ -449,6 +452,31 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
                 (a, b) => JsonSerializer.Serialize(a, ContractJson.Options) == JsonSerializer.Serialize(b, ContractJson.Options),
                 v => v == null ? 0 : JsonSerializer.Serialize(v, ContractJson.Options).GetHashCode(StringComparison.Ordinal),
                 v => v == null ? null : JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(v, ContractJson.Options), ContractJson.Options)));
+    }
+
+    private static void ConfigureReports(ModelBuilder b)
+    {
+        b.Entity<ReportSchedule>(e =>
+        {
+            e.ToTable("report_schedules");
+            e.HasKey(x => x.OrganizationId);
+            e.Property(x => x.Recipients).HasDefaultValueSql("'{}'::text[]");
+            e.HasOne<Organization>().WithOne().HasForeignKey<ReportSchedule>(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<GeneratedReport>(e =>
+        {
+            e.ToTable("generated_reports");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.FileName).HasMaxLength(200);
+            e.Property(x => x.Sha256).HasMaxLength(64);
+            e.Property(x => x.GeneratedBy).HasMaxLength(255);
+            e.Property(x => x.LastError).HasMaxLength(1000);
+            e.Property(x => x.Recipients).HasDefaultValueSql("'{}'::text[]");
+            e.HasIndex(x => new { x.OrganizationId, x.PeriodStart }).IsUnique().HasFilter("scheduled").HasDatabaseName("ux_generated_reports_scheduled");
+            e.HasIndex(x => new { x.OrganizationId, x.GeneratedAt });
+            e.HasIndex(x => x.NextAttemptAt).HasFilter("delivery_status = 'Pending'");
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
     }
 
     private static void ConfigureVulnerabilities(ModelBuilder b)

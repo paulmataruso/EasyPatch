@@ -234,6 +234,23 @@ creates a `Selected` install job on each affected endpoint, at most 1000).
 CSV exports are UTF-8 with a byte-order mark. Text values that start with `=`, `+`, `-`, `@`,
 tab or carriage return are prefixed with `'` so spreadsheets do not evaluate them as formulas.
 
+### Monthly reports
+
+| Method | Route | Role |
+|---|---|---|
+| GET | `/organizations/{id}/report-schedule` (`enabled, recipients[], dayOfMonth, includeEndpointList, enabledAt, lastScheduledPeriod, nextReportDate, nextReportPeriod, timeZone`) | Viewer |
+| PUT | `/organizations/{id}/report-schedule` `{enabled, recipients[], dayOfMonth, includeEndpointList}`: up to 20 plain addresses (at least one when enabled), day 1-28 | Operator |
+| GET | `/monthly-reports` (`organizationId, page, pageSize`): newest first, without the PDF | Viewer |
+| POST | `/monthly-reports` `{organizationId, year, month, includeEndpointList?}`: generates and stores the PDF (201). `includeEndpointList` defaults to the schedule's setting. `invalid_period` for months that have not started or are more than 10 years old | Operator |
+| GET | `/monthly-reports/{id}` and `/monthly-reports/{id}/pdf` (`application/pdf` attachment) | Viewer |
+| POST | `/monthly-reports/{id}/send` `{recipients?}`: queues an email with the PDF; recipients default to the schedule's. 409 `smtp_not_configured`, `smtp_not_encrypted` (SMTP security *None*) or `report_too_large` (over 15 MB) | Operator |
+| DELETE | `/monthly-reports/{id}` | Operator |
+
+`deliveryStatus` is `null` (not emailed), `Pending`, `Sent` or `Failed`, with `attempts`,
+`queuedAt`, `sentAt` and `lastError`. The audit log records `report_schedule.update`,
+`report.generate`, `report.send` and `report.delete`. Server settings add `retentionReportsMonths`
+(1-120, default 24) and `reportBrandName` (up to 100 characters, or `null`).
+
 ### Health
 
 `GET /health/live` reports that the process is up. `GET /health/ready` reports that the

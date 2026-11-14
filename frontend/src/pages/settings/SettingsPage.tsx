@@ -6,7 +6,7 @@ import type { PolicyRequest, ServerInfoDto, ServerSettings, VulnerabilityFeedDto
 import { useAuth } from '../../auth/AuthContext';
 import { PolicyEditor } from '../../components/PolicyEditor';
 import { useToast } from '../../components/Toast';
-import { Alert, Badge, Button, Card, ErrorState, InlineError, Input, KeyValueList, Mono, PageHeader, Spinner, TableWrap, Tabs } from '../../components/ui';
+import { Alert, Badge, Button, Card, ErrorState, InlineError, Input, KeyValueList, Mono, PageHeader, Spinner, TableWrap, Tabs, TextField } from '../../components/ui';
 import { formatDateTime, formatNumber, formatRelative } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 import { AlertRulesTab } from './AlertRulesTab';
@@ -112,6 +112,7 @@ const GROUPS: { title: string; fields: SettingSpec[] }[] = [
       { key: 'retentionJobsDays', label: 'Finished jobs', unit: 'days', hint: '', min: 1 },
       { key: 'retentionScansDays', label: 'Scan records', unit: 'days', hint: '', min: 1 },
       { key: 'retentionHistoryDays', label: 'Windows Update history', unit: 'days', hint: '', min: 1 },
+      { key: 'retentionReportsMonths', label: 'Monthly reports (PDF)', unit: 'months', hint: '', min: 1, max: 120 },
     ],
   },
 ];
@@ -192,6 +193,17 @@ function ServerSettingsTab() {
           </span>
         </label>
         <FeedStatus />
+      </Card>
+      <Card title="Monthly reports">
+        <TextField
+          label="Prepared by"
+          maxLength={100}
+          disabled={readOnly}
+          placeholder="Your company name"
+          hint="Shown on the title page of monthly compliance reports, e.g. your MSP's name. Leave empty to leave it out."
+          value={form.reportBrandName ?? ''}
+          onChange={(e) => setForm({ ...form, reportBrandName: e.target.value.trim() ? e.target.value : null })}
+        />
       </Card>
       {GROUPS.map((g) => (
         <Card key={g.title} title={g.title}>

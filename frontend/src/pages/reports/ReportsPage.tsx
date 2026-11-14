@@ -33,6 +33,7 @@ import {
 import { dayBoundary, describeSkipReason, formatDate, formatDateTime, formatPercent, formatRelative, humanize, isLinux } from '../../lib/format';
 import { aggregateTrend, daysAgo, isoDate } from '../../lib/trend';
 import { useUrlState } from '../../lib/urlState';
+import { MonthlyReportsTab } from './MonthlyReportsTab';
 
 function CsvLink({ path, params }: { path: string; params: QueryParams }) {
   return (
@@ -48,19 +49,21 @@ export function ReportsPage() {
   const tab = url.get('tab', 'compliance');
   return (
     <>
-      <PageHeader title="Reports" subtitle="Compliance and installation reporting. CSV exports respect the current filters." />
+      <PageHeader title="Reports" subtitle="Compliance and installation reporting, and monthly PDF reports per customer. CSV exports respect the current filters." />
       <Tabs
         active={tab}
-        onChange={(t) => url.set({ tab: t === 'compliance' ? null : t, status: null, result: null, from: null, to: null })}
+        onChange={(t) => url.set({ tab: t === 'compliance' ? null : t, status: null, result: null, from: null, to: null, page: null })}
         tabs={[
           { id: 'compliance', label: 'Compliance' },
           { id: 'installations', label: 'Installations' },
           { id: 'trend', label: 'Trend' },
+          { id: 'monthly', label: 'Monthly reports' },
         ]}
       />
       {tab === 'compliance' && <ComplianceReport />}
       {tab === 'installations' && <InstallationsReport />}
       {tab === 'trend' && <TrendReport />}
+      {tab === 'monthly' && <MonthlyReportsTab />}
     </>
   );
 }

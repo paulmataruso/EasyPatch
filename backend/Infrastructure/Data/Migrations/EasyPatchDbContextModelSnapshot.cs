@@ -1282,6 +1282,107 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.ToTable("enrollment_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.GeneratedReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("content");
+
+                    b.Property<string>("DeliveryStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("delivery_status");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("file_name");
+
+                    b.Property<DateTimeOffset>("GeneratedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("generated_at");
+
+                    b.Property<string>("GeneratedBy")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("generated_by");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateOnly>("PeriodEnd")
+                        .HasColumnType("date")
+                        .HasColumnName("period_end");
+
+                    b.Property<DateOnly>("PeriodStart")
+                        .HasColumnType("date")
+                        .HasColumnName("period_start");
+
+                    b.Property<DateTimeOffset?>("QueuedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("queued_at");
+
+                    b.PrimitiveCollection<List<string>>("Recipients")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("recipients")
+                        .HasDefaultValueSql("'{}'::text[]");
+
+                    b.Property<bool>("Scheduled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("scheduled");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sent_at");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("sha256");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NextAttemptAt")
+                        .HasFilter("delivery_status = 'Pending'");
+
+                    b.HasIndex("OrganizationId", "GeneratedAt");
+
+                    b.HasIndex("OrganizationId", "PeriodStart")
+                        .IsUnique()
+                        .HasDatabaseName("ux_generated_reports_scheduled")
+                        .HasFilter("scheduled");
+
+                    b.ToTable("generated_reports", (string)null);
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.Job", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2613,6 +2714,48 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.ToTable("policies", (string)null);
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.ReportSchedule", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<int>("DayOfMonth")
+                        .HasColumnType("integer")
+                        .HasColumnName("day_of_month");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<DateTimeOffset?>("EnabledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("enabled_at");
+
+                    b.Property<bool>("IncludeEndpointList")
+                        .HasColumnType("boolean")
+                        .HasColumnName("include_endpoint_list");
+
+                    b.Property<DateOnly?>("LastScheduledPeriod")
+                        .HasColumnType("date")
+                        .HasColumnName("last_scheduled_period");
+
+                    b.PrimitiveCollection<List<string>>("Recipients")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("recipients")
+                        .HasDefaultValueSql("'{}'::text[]");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("OrganizationId");
+
+                    b.ToTable("report_schedules", (string)null);
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.ServerSettingsRow", b =>
                 {
                     b.Property<int>("Id")
@@ -3497,6 +3640,15 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.GeneratedReport", b =>
+                {
+                    b.HasOne("EasyPatch.Core.Entities.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.Job", b =>
                 {
                     b.HasOne("EasyPatch.Core.Entities.Endpoint", "Endpoint")
@@ -3556,6 +3708,15 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .WithMany()
                         .HasForeignKey("TagId")
                         .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("EasyPatch.Core.Entities.ReportSchedule", b =>
+                {
+                    b.HasOne("EasyPatch.Core.Entities.Organization", null)
+                        .WithOne()
+                        .HasForeignKey("EasyPatch.Core.Entities.ReportSchedule", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("EasyPatch.Core.Entities.Site", b =>

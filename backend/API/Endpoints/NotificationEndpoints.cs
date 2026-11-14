@@ -486,7 +486,7 @@ public static class NotificationEndpoints
         return newSecret;
     }
 
-    private static bool IsEmail(string value) =>
+    internal static bool IsEmail(string value) =>
         value.Length <= 254 && MailboxAddress.TryParse(value, out var mailbox) && mailbox.Address.Contains('@', StringComparison.Ordinal) &&
         string.Equals(mailbox.Address, value, StringComparison.OrdinalIgnoreCase);
 

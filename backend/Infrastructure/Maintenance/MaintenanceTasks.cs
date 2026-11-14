@@ -527,10 +527,11 @@ public sealed class RetentionTask(EasyPatchDbContext db, SettingsService setting
         var alerts = await db.Alerts.Where(a => a.Status == AlertStatus.Resolved && a.ResolvedAt < now.AddDays(-s.RetentionEventsDays)).ExecuteDeleteAsync(ct);
         var deliveries = await db.NotificationDeliveries
             .Where(d => d.Status != DeliveryStatus.Pending && d.CreatedAt < now.AddDays(-s.RetentionEventsDays)).ExecuteDeleteAsync(ct);
+        var reports = await db.GeneratedReports.Where(r => r.GeneratedAt < now.AddMonths(-s.RetentionReportsMonths)).ExecuteDeleteAsync(ct);
         logger.LogInformation(
             "Retention: deleted {Events} events, {Audit} audit records, {Jobs} jobs, {Scans} scans, {History} history entries, {Sessions} sessions, " +
             "{Resets} reset tokens, {Old} old enrollment requests, {Obsolete} obsolete update states, {Snapshots} snapshots, {Alerts} resolved alerts, " +
-            "{Deliveries} notifications; expired {Requests} requests",
-            events, auditRows, jobRows, scans, history, sessions, resets, oldRequests, obsolete, snapshots, alerts, deliveries, requests);
+            "{Deliveries} notifications, {Reports} monthly reports; expired {Requests} requests",
+            events, auditRows, jobRows, scans, history, sessions, resets, oldRequests, obsolete, snapshots, alerts, deliveries, reports, requests);
     }
 }

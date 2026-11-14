@@ -131,6 +131,7 @@ app.MapFleetUpdateEndpoints();
 app.MapAgentManagementEndpoints();
 app.MapDownloadEndpoints();
 app.MapReportingEndpoints();
+app.MapMonthlyReportEndpoints();
 app.MapSettingsEndpoints();
 
 app.MapFallback("/api/{**path}", (HttpContext ctx) =>

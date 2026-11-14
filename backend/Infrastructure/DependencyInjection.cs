@@ -1,6 +1,7 @@
 using EasyPatch.Infrastructure.Data;
 using EasyPatch.Infrastructure.Maintenance;
 using EasyPatch.Infrastructure.Notifications;
+using EasyPatch.Infrastructure.Reports;
 using EasyPatch.Infrastructure.Security;
 using EasyPatch.Infrastructure.Services;
 using EasyPatch.Infrastructure.Vulnerabilities;
@@ -48,6 +49,8 @@ public static class DependencyInjection
         services.AddScoped<NotificationSecrets>();
         services.AddScoped<AlertEngine>();
         services.AddScoped<NotificationDispatcher>();
+        services.AddScoped<MonthlyReportDataBuilder>();
+        services.AddScoped<MonthlyReportService>();
         services.AddSingleton<INotificationTransport, NotificationTransport>();
         var version = typeof(DependencyInjection).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
         services.AddHttpClient(NotificationTransport.WebhookClient, c =>
@@ -110,6 +113,7 @@ public static class DependencyInjection
         services.AddScoped<AlertEvaluationTask>();
         services.AddScoped<NotificationDeliveryTask>();
         services.AddScoped<VulnerabilityFeedTask>();
+        services.AddScoped<MonthlyReportTask>();
         services.AddSingleton<MaintenanceHeartbeat>();
         services.AddHostedService<MaintenanceLoop<JobMaintenanceTask>>();
         services.AddHostedService<MaintenanceLoop<PresenceMonitorTask>>();
@@ -122,6 +126,7 @@ public static class DependencyInjection
         services.AddHostedService<MaintenanceLoop<AlertEvaluationTask>>();
         services.AddHostedService<MaintenanceLoop<NotificationDeliveryTask>>();
         services.AddHostedService<MaintenanceLoop<VulnerabilityFeedTask>>();
+        services.AddHostedService<MaintenanceLoop<MonthlyReportTask>>();
         return services;
     }
 }

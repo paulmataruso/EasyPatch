@@ -1317,6 +1317,10 @@ export interface ServerSettings {
   retentionHistoryDays: number;
   /** Download CISA KEV, MSRC and Debian Security Tracker data (worker, outbound HTTPS). */
   vulnerabilityFeedsEnabled: boolean;
+  /** Monthly reports older than this are deleted (1-120). */
+  retentionReportsMonths: number;
+  /** "Prepared by" line on monthly reports; null to leave it out. */
+  reportBrandName: string | null;
 }
 
 export interface ServerInfoDto {
@@ -1515,4 +1519,65 @@ export interface AlertRuleTypeDto {
   thresholdMax: number | null;
   thresholdDefault: number | null;
   supportsTag: boolean;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Monthly reports (backend/API/Contracts/AdminDtos.cs)
+// ---------------------------------------------------------------------------------------------
+
+export interface ReportScheduleDto {
+  organizationId: Guid;
+  enabled: boolean;
+  recipients: string[];
+  /** 1-28, in the organization's time zone. */
+  dayOfMonth: number;
+  includeEndpointList: boolean;
+  enabledAt: Instant | null;
+  lastScheduledPeriod: DateOnly | null;
+  /** Date (organization time zone) the next report is sent; null when off or without recipients. */
+  nextReportDate: DateOnly | null;
+  /** First day of the month the next report covers. */
+  nextReportPeriod: DateOnly | null;
+  timeZone: string;
+  updatedAt: Instant | null;
+}
+
+export interface ReportScheduleRequest {
+  enabled: boolean;
+  recipients: string[];
+  dayOfMonth: number;
+  includeEndpointList: boolean;
+}
+
+export interface MonthlyReportDto {
+  id: Guid;
+  organizationId: Guid;
+  organizationName: string;
+  periodStart: DateOnly;
+  periodEnd: DateOnly;
+  monthToDate: boolean;
+  scheduled: boolean;
+  generatedAt: Instant;
+  generatedBy: string | null;
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+  /** Null: not emailed. */
+  deliveryStatus: DeliveryStatus | null;
+  recipients: string[];
+  attempts: number;
+  queuedAt: Instant | null;
+  sentAt: Instant | null;
+  lastError: string | null;
+}
+
+export interface GenerateReportRequest {
+  organizationId: Guid;
+  year: number;
+  month: number;
+  includeEndpointList?: boolean | null;
+}
+
+export interface SendReportRequest {
+  recipients?: string[] | null;
 }

@@ -353,6 +353,24 @@ known-exploited ones ([compliance.md](compliance.md#vulnerabilities-and-known-ex
 The CVEs Linux agents report come from the computer's own package manager (dnf advisories) and
 are validated the same way.
 
+## Monthly reports
+
+Monthly report PDFs ([compliance.md](compliance.md#monthly-reports)) describe a customer's
+exposure: hostnames, missing updates and known-exploited vulnerabilities.
+
+* **Opt-in recipients.** Reports are emailed only to addresses entered for the organization's
+  schedule or when sending a report; there is no default recipient. Changing a schedule, generating,
+  sending and deleting a report need the Operator role and are audited (the audit entry records the
+  number of recipients, not the addresses).
+* **Encrypted transport only.** Reports are emailed only when the SMTP security setting is STARTTLS
+  or TLS. The console refuses to queue them and the worker refuses to send them over a plain
+  connection. The SMTP password is handled as for notifications (encrypted at rest, never returned).
+* **Tenant isolation.** Listing, downloading, sending and deleting reports, and reading or changing
+  schedules, are limited to the user's organizations.
+* **Storage.** The PDFs are stored in the database (and therefore in backups) and deleted after the
+  report retention period. Generating a report makes no outbound connection: the font is embedded
+  in the server.
+
 ## Threat model (STRIDE summary)
 
 | # | Threat | Mitigation |
@@ -369,6 +387,7 @@ are validated the same way.
 | I2 | Secrets appear in logs | The server and agent never log tokens or keys. The MSI token property is hidden and registry values are not echoed to MSI logs (see above for limits). Structured logs leave out request bodies. |
 | I3 | Database exposure | No published port, internal Docker network, Compose secret for the password |
 | I4 | A notification channel is used to reach internal services (SSRF) or leak secrets | Super administrator only; https only; no redirects or proxy; every connected address is checked against blocked ranges (private ranges only when explicitly allowed); secrets encrypted at rest and never returned; sanitized errors. See [Notifications and webhooks](#notifications-and-webhooks). |
+| I5 | A monthly report reaches the wrong people or is read in transit | Recipients are entered per organization (no default), changes are audited, Operator role required; email only over STARTTLS or TLS; tenant-scoped API. See [Monthly reports](#monthly-reports). |
 | D1 | Check-in floods | Per-credential and per-IP rate limits, request size limits, jitter |
 | D2 | Enrollment queue spam | A deployment code is required, pending requests are capped and expire, per-IP rate limit |
 | E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability. Windows updates come from the sources Windows is configured for, and Linux packages from the repositories the computer is configured for. Agent updates install only packages whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |

@@ -156,7 +156,9 @@ the release with alerts gives the `worker` the `dpkeys` volume (read-only) and t
 `egress` network. The upgrade adds seven default alert rules without notification channels. The
 release with vulnerability data adds an eighth, *Known-exploited vulnerability unpatched*, and the
 worker then downloads vulnerability data (see the outbound row in [Requirements](#requirements)).
-It needs no configuration change.
+It needs no configuration change. The release with monthly reports adds two tables; reports are
+off until you set up a schedule (**Reports → Monthly reports**), and emailing them needs SMTP with
+STARTTLS or TLS.
 
 ## Backup and restore
 

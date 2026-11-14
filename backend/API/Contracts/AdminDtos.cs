@@ -714,3 +714,19 @@ public sealed record OsLifecycleRequest(string Product, string EditionGroup, int
     string? Notes);
 
 public sealed record ServerInfoDto(string Version, string PublicUrl, DateTimeOffset ServerTime);
+
+/// <summary>Monthly report schedule of an organization. <c>NextReportDate</c> is a date in the organization's time zone.</summary>
+public sealed record ReportScheduleDto(
+    Guid OrganizationId, bool Enabled, IReadOnlyList<string> Recipients, int DayOfMonth, bool IncludeEndpointList, DateTimeOffset? EnabledAt,
+    DateOnly? LastScheduledPeriod, DateOnly? NextReportDate, DateOnly? NextReportPeriod, string TimeZone, DateTimeOffset? UpdatedAt);
+
+public sealed record ReportScheduleRequest(bool Enabled, IReadOnlyList<string>? Recipients, int DayOfMonth, bool IncludeEndpointList);
+
+public sealed record MonthlyReportDto(
+    Guid Id, Guid OrganizationId, string OrganizationName, DateOnly PeriodStart, DateOnly PeriodEnd, bool MonthToDate, bool Scheduled,
+    DateTimeOffset GeneratedAt, string? GeneratedBy, string FileName, long SizeBytes, string Sha256, DeliveryStatus? DeliveryStatus,
+    IReadOnlyList<string> Recipients, int Attempts, DateTimeOffset? QueuedAt, DateTimeOffset? SentAt, string? LastError);
+
+public sealed record GenerateReportRequest(Guid OrganizationId, int Year, int Month, bool? IncludeEndpointList = null);
+
+public sealed record SendReportRequest(IReadOnlyList<string>? Recipients = null);

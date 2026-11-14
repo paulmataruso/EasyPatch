@@ -21,3 +21,17 @@ public sealed class NotificationDeliveryTask(NotificationDispatcher dispatcher) 
 
     public Task RunOnceAsync(CancellationToken ct) => dispatcher.DeliverPendingAsync(ct);
 }
+
+/// <summary>Creates scheduled monthly reports when they are due and emails queued reports.</summary>
+public sealed class MonthlyReportTask(EasyPatch.Infrastructure.Reports.MonthlyReportService reports) : IMaintenanceTask
+{
+    public string Name => "monthly-reports";
+    public long LockKey => 0x4550_000C;
+    public TimeSpan Interval => TimeSpan.FromMinutes(1);
+
+    public async Task RunOnceAsync(CancellationToken ct)
+    {
+        await reports.GenerateDueAsync(ct);
+        await reports.DeliverPendingAsync(ct);
+    }
+}

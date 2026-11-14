@@ -126,6 +126,7 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
             services.AddScoped<AlertEvaluationTask>();
             services.AddScoped<NotificationDeliveryTask>();
             services.AddScoped<VulnerabilityFeedTask>();
+            services.AddScoped<MonthlyReportTask>();
             services.AddSingleton<INotificationTransport>(Transport);
         });
     }
@@ -480,7 +481,8 @@ public abstract class IntegrationTest(PostgresFixture postgres) : IAsyncLifetime
 /// <summary>Fake notification transport: records what would have been sent; can be told to fail.</summary>
 public sealed class CapturingTransport : INotificationTransport
 {
-    public sealed record Email(IReadOnlyList<string> Recipients, string Subject, string Text, string Html, string? Password, NotificationSettingsRow Smtp);
+    public sealed record Email(IReadOnlyList<string> Recipients, string Subject, string Text, string Html, string? Password, NotificationSettingsRow Smtp,
+        IReadOnlyList<EmailAttachment> Attachments);
 
     public sealed record Webhook(Uri Url, string Body, IReadOnlyDictionary<string, string> Headers, bool AllowPrivate);
 
@@ -489,14 +491,14 @@ public sealed class CapturingTransport : INotificationTransport
     public string? FailWith { get; set; }
 
     public Task SendEmailAsync(NotificationSettingsRow smtp, string? password, IReadOnlyList<string> recipients, string subject, string text, string html,
-        CancellationToken ct)
+        IReadOnlyList<EmailAttachment>? attachments, CancellationToken ct)
     {
         if (FailWith is not null)
         {
             throw new NotificationException(FailWith);
         }
 
-        Emails.Enqueue(new Email(recipients, subject, text, html, password, smtp));
+        Emails.Enqueue(new Email(recipients, subject, text, html, password, smtp, attachments ?? []));
         return Task.CompletedTask;
     }
 
