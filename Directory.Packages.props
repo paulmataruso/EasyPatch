@@ -13,6 +13,7 @@
     <PackageVersion Include="QRCoder" Version="1.8.1" />
     <!-- Agent -->
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.15" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.15" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.15" />
     <PackageVersion Include="Microsoft.Extensions.Logging.EventLog" Version="10.0.15" />
