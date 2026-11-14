@@ -43,7 +43,7 @@ public static class LinuxInstallScriptBuilder
             case " $os_id $os_like " in
               *" debian "*|*" ubuntu "*) format=deb ;;
               *" rhel "*|*" fedora "*|*" centos "*) format=rpm ;;
-              *) fail "unsupported distribution '$os_id' (supported: Debian, Ubuntu, RHEL, Rocky Linux, AlmaLinux, Oracle Linux)." ;;
+              *) fail "unsupported distribution '$os_id' (supported: Debian, Ubuntu, RHEL, Rocky Linux, AlmaLinux, Oracle Linux, CentOS Stream, Fedora)." ;;
             esac
             case "$(uname -m)" in
               x86_64|amd64) arch=x64 ;;
@@ -63,8 +63,16 @@ public static class LinuxInstallScriptBuilder
         sb.Append("""
               *) fail "the server has no $format agent package for $arch." ;;
             esac
-            if [ -e /etc/easypatch/agent.conf ] && [ -e /var/lib/easypatch/state/agent-state.json ]; then
-              echo "easypatch: the agent is already installed; the package is reinstalled or upgraded and its enrollment is kept."
+            # An installed agent that is enrolled (or waiting for approval) keeps its enrollment; an installed agent that never
+            # enrolled gets the settings below and is restarted so that it enrolls now.
+            preinstalled=no
+            enrolled=no
+            if [ -x /usr/sbin/easypatch-agent ]; then
+              preinstalled=yes
+              if /usr/sbin/easypatch-agent status 2>/dev/null | grep -Eq "^Status: +(PendingApproval|Active)"; then
+                enrolled=yes
+                echo "easypatch: this computer is already enrolled or waiting for approval; the package is upgraded if needed and the enrollment is kept."
+              fi
             fi
             work=$(mktemp -d)
             trap 'rm -rf "$work"' EXIT
@@ -81,7 +89,7 @@ public static class LinuxInstallScriptBuilder
             actual=$(sha256sum "$work/$file" | cut -d ' ' -f 1)
             [ "$actual" = "$sha256" ] || fail "package hash $actual does not match the expected $sha256. Aborting."
             chmod 644 "$work/$file"
-            if [ ! -e /var/lib/easypatch/state/agent-state.json ]; then
+            if [ "$enrolled" = no ]; then
               umask 077
               mkdir -p /etc/easypatch
               chmod 700 /etc/easypatch
@@ -102,6 +110,9 @@ public static class LinuxInstallScriptBuilder
               dnf install -y -q "$work/$file" || fail "dnf could not install the package."
             else
               fail "dnf is required (RHEL 8 or later)."
+            fi
+            if [ "$enrolled" = no ] && [ "$preinstalled" = yes ]; then
+              systemctl restart easypatch-agent.service || fail "could not restart the easypatch-agent service."
             fi
             i=0
             while [ $i -lt 12 ]; do

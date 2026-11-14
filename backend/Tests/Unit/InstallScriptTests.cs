@@ -97,6 +97,11 @@ public sealed class LinuxInstallScriptTests
         Assert.Contains("--proto '=https'", script, StringComparison.Ordinal);
         Assert.Contains("deb-x64) file='EasyPatchAgent-1.3.0-x64.deb'; sha256='" + new string('a', 64) + "'", script, StringComparison.Ordinal);
         Assert.Contains("chmod 600 /etc/easypatch/agent.conf.new", script, StringComparison.Ordinal);
+        // An installed agent keeps its enrollment only when it is enrolled or waiting for approval; one that never enrolled
+        // gets the settings and is restarted.
+        Assert.Contains("grep -Eq \"^Status: +(PendingApproval|Active)\"", script, StringComparison.Ordinal);
+        Assert.Contains("systemctl restart easypatch-agent.service", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("agent-state.json", script, StringComparison.Ordinal);
         Assert.DoesNotContain("EnrollmentToken", script, StringComparison.Ordinal);
         Assert.DoesNotContain("reboot", script, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("shutdown", script, StringComparison.OrdinalIgnoreCase);

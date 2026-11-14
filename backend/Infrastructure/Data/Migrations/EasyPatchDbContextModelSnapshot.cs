@@ -1877,6 +1877,52 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                             Notes = "End of Premier Support.",
                             Product = "Oracle Linux",
                             VersionLabel = "9"
+                        },
+                        new
+                        {
+                            Id = new Guid("666b087d-3db8-00e4-a3af-2cd893a7dbcf"),
+                            BuildNumber = 10,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2035, 6, 30),
+                            Notes = "End of Premier Support (Oracle Lifetime Support Policy: June 2035).",
+                            Product = "Oracle Linux",
+                            VersionLabel = "10"
+                        },
+                        new
+                        {
+                            Id = new Guid("4f178184-5e0b-fc2b-0a47-c949f84868d0"),
+                            BuildNumber = 9,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2027, 5, 31),
+                            Product = "CentOS Stream",
+                            VersionLabel = "9"
+                        },
+                        new
+                        {
+                            Id = new Guid("4e7b46d0-d0ea-5845-4460-a1f05cc31da5"),
+                            BuildNumber = 10,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2030, 5, 31),
+                            Product = "CentOS Stream",
+                            VersionLabel = "10"
+                        },
+                        new
+                        {
+                            Id = new Guid("19aff03a-9ee7-6c23-dc52-9cb2c78fcaf1"),
+                            BuildNumber = 44,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2027, 5, 19),
+                            Product = "Fedora",
+                            VersionLabel = "44"
+                        },
+                        new
+                        {
+                            Id = new Guid("e98444e6-145c-af34-ecd3-f0ada06071f7"),
+                            BuildNumber = 45,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2027, 12, 8),
+                            Product = "Fedora",
+                            VersionLabel = "45"
                         });
                 });
 

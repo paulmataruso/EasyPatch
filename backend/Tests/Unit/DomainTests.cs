@@ -337,6 +337,29 @@ public sealed class LifecycleEvaluatorTests
             LifecycleEvaluator.Evaluate(Table, 26100, "Enterprise", "WorkStation", false, EsuOverride.Auto, new DateOnly(2026, 10, 14)).Status);
     }
 
+    [Theory]
+    [InlineData("almalinux", "10.2", "AlmaLinux", OsSupportStatus.Supported)]
+    [InlineData("ol", "10.1", "Oracle Linux", OsSupportStatus.Supported)]
+    [InlineData("centos", "10", "CentOS Stream", OsSupportStatus.Supported)]
+    [InlineData("centos", "9", "CentOS Stream", OsSupportStatus.Supported)]
+    [InlineData("fedora", "45", "Fedora", OsSupportStatus.Supported)]
+    [InlineData("ubuntu", "26.04", "Ubuntu", OsSupportStatus.Supported)]
+    [InlineData("ubuntu", "26.10", "Ubuntu", OsSupportStatus.Unknown)]
+    [InlineData("fedora", "46", "Fedora", OsSupportStatus.Unknown)]
+    [InlineData("centos", "7", null, OsSupportStatus.Unknown)]
+    public void Newer_linux_releases_have_a_support_status(string osId, string osVersion, string? product, OsSupportStatus expected)
+    {
+        var r = LifecycleEvaluator.EvaluateLinux(Table, osId, osVersion, esuLicenseDetected: false, EsuOverride.Auto, new DateOnly(2026, 11, 14));
+
+        Assert.Equal(expected, r.Status);
+        Assert.Equal(product, r.Product);
+    }
+
+    [Fact]
+    public void Fedora_is_unsupported_after_the_end_date_in_its_os_release() =>
+        Assert.Equal(OsSupportStatus.Unsupported,
+            LifecycleEvaluator.EvaluateLinux(Table, "fedora", "44", false, EsuOverride.Auto, new DateOnly(2027, 5, 20)).Status);
+
     [Fact]
     public void Unknown_builds_are_reported_as_unknown() =>
         Assert.Equal(OsSupportStatus.Unknown, LifecycleEvaluator.Evaluate(Table, 12345, "Professional", "WorkStation", false, EsuOverride.Auto,

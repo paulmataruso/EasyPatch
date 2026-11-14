@@ -88,6 +88,8 @@ public static class LifecycleEvaluator
         "rocky" => "Rocky Linux",
         "almalinux" => "AlmaLinux",
         "ol" => "Oracle Linux",
+        "fedora" => "Fedora",
+        "centos" => "CentOS Stream",
         _ => null,
     };
 
@@ -121,8 +123,9 @@ public static class LifecycleEvaluator
         IReadOnlyList<OsLifecycleEntry> table, string? osId, string? osVersion, bool esuLicenseDetected, EsuOverride esuOverride, DateOnly today)
     {
         ArgumentNullException.ThrowIfNull(table);
-        var product = LinuxProduct(osId);
         var release = LinuxReleaseKey(osId, osVersion);
+        // os-release ID "centos" is CentOS Linux up to 8 and CentOS Stream from 9 on (there was no CentOS Linux 9).
+        var product = string.Equals(osId, "centos", StringComparison.OrdinalIgnoreCase) && release < 9 ? null : LinuxProduct(osId);
         if (product is null || release is null)
         {
             return new LifecycleResult(OsSupportStatus.Unknown, null, product, "Any", null);
@@ -227,6 +230,13 @@ public static class LifecycleEvaluator
         Add("AlmaLinux", "Any", 10, "10", "2035-05-31");
         Add("Oracle Linux", "Any", 8, "8", "2029-07-31", null, "End of Premier Support.");
         Add("Oracle Linux", "Any", 9, "9", "2032-06-30", null, "End of Premier Support.");
+        Add("Oracle Linux", "Any", 10, "10", "2035-06-30", null, "End of Premier Support (Oracle Lifetime Support Policy: June 2035).");
+        // https://www.centos.org/download/: each CentOS Stream release ends with the full support phase of its RHEL release.
+        Add("CentOS Stream", "Any", 9, "9", "2027-05-31");
+        Add("CentOS Stream", "Any", 10, "10", "2030-05-31");
+        // SUPPORT_END in each release's /etc/os-release. A new Fedora release comes out every six months: add it in Settings → OS lifecycle.
+        Add("Fedora", "Any", 44, "44", "2027-05-19");
+        Add("Fedora", "Any", 45, "45", "2027-12-08");
         return list;
     }
 
