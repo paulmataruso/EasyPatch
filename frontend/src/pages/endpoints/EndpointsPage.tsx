@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Download, MessageSquare, Monitor, Power, RefreshCw } from 'lucide-react';
+import { ArrowUpCircle, Download, MessageSquare, Monitor, Power, RefreshCw } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApiMutation, useList } from '../../api/hooks';
 import { COMPLIANCE_STATUSES, type BulkResultDto, type EndpointSummaryDto } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
+import { AgentUpdateDialog } from '../../components/AgentUpdateDialog';
 import { Dialog } from '../../components/Dialog';
 import { EnumSelect, OrganizationSelect, SearchInput, SiteSelect } from '../../components/Filters';
 import { MessageDialog, RestartDialog } from '../../components/RestartDialogs';
@@ -65,7 +66,7 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmInstall, setConfirmInstall] = useState(false);
   const [result, setResult] = useState<{ title: string; data: BulkResultDto } | null>(null);
-  const [bulkDialog, setBulkDialog] = useState<'restart' | 'message' | null>(null);
+  const [bulkDialog, setBulkDialog] = useState<'restart' | 'message' | 'agent-update' | null>(null);
   const items = list.page.items;
   const selectable = useMemo(() => items.filter((e) => e.status === 'Active'), [items]);
   const allSelected = selectable.length > 0 && selectable.every((e) => selected.has(e.id));
@@ -151,6 +152,9 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
           </Button>
           <Button size="sm" icon={<MessageSquare className="size-3.5" aria-hidden />} onClick={() => setBulkDialog('message')}>
             Send message…
+          </Button>
+          <Button size="sm" icon={<ArrowUpCircle className="size-3.5" aria-hidden />} onClick={() => setBulkDialog('agent-update')}>
+            Update agent…
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
             Clear selection
@@ -275,6 +279,11 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
       />
       <RestartDialog
         target={bulkDialog === 'restart' ? { kind: 'bulk', ids: [...selected] } : null}
+        onClose={() => setBulkDialog(null)}
+        onBulkResult={(title, data) => setResult({ title, data })}
+      />
+      <AgentUpdateDialog
+        target={bulkDialog === 'agent-update' ? { kind: 'bulk', ids: [...selected] } : null}
         onClose={() => setBulkDialog(null)}
         onBulkResult={(title, data) => setResult({ title, data })}
       />

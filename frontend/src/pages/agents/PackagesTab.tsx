@@ -15,7 +15,8 @@ export function PackagesTab() {
       <Card title="Agent packages" padded={false}>
         <p className="px-4 pt-3 text-sm text-muted">
           MSI packages found in the server’s agent-packages directory (named <span className="font-mono">EasyPatchAgent-&lt;version&gt;-&lt;x64|arm64&gt;.msi</span>).
-          Publish a new agent version by copying its signed MSI there.
+          Publish a new agent version by copying the MSI and its <span className="font-mono">.sig</span> release signature there. Agents update themselves
+          only to signed packages, and check the signature against the release key built into them.
         </p>
         <div className="p-4">
           {packages.isPending ? (
@@ -36,6 +37,7 @@ export function PackagesTab() {
                     <th>Architecture</th>
                     <th className="text-right">Size</th>
                     <th>SHA-256</th>
+                    <th>Release signature</th>
                     <th>Modified</th>
                     <th className="text-right">Download</th>
                   </tr>
@@ -56,6 +58,22 @@ export function PackagesTab() {
                           </span>
                           <CopyButton text={p.sha256} label="Copy" />
                         </div>
+                      </td>
+                      <td className="whitespace-nowrap">
+                        {p.releaseKeyId ? (
+                          <span className="flex items-center gap-1.5">
+                            <Badge tone="ok">signed</Badge>
+                            <span className="font-mono text-xs text-muted" title="Release key ID">
+                              {p.releaseKeyId}
+                            </span>
+                          </span>
+                        ) : p.signatureProblem ? (
+                          <Badge tone="danger" title={p.signatureProblem}>
+                            invalid
+                          </Badge>
+                        ) : (
+                          <Badge tone="neutral">not signed</Badge>
+                        )}
                       </td>
                       <td className="whitespace-nowrap text-muted">{formatDateTime(p.modifiedAt)}</td>
                       <td className="text-right">
@@ -98,7 +116,8 @@ export function PackagesTab() {
           </ul>
         )}
         <p className="mt-4 text-xs text-muted">
-          Endpoints running an older version are flagged as outdated. Upgrade them by deploying the new MSI through your usual deployment tool.
+          Endpoints running an older version are flagged as outdated. Agents 1.2.0 and newer update themselves to the newest signed package when the
+          “Agent updates” policy is Automatic, or when you choose Update agent; older agents need the new MSI installed once.
         </p>
       </Card>
     </div>

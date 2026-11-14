@@ -153,6 +153,7 @@ describe('policy editor rules', () => {
     endpointId: null,
     trayIconEnabled: true,
     installNotificationsEnabled: true,
+    agentAutoUpdateEnabled: true,
     restartSchedule: null,
     windowsUpdate: {
       automaticUpdates: { managed: true, value: { mode: 'AutoDownloadNotifyInstall', scheduledInstallDay: 0, scheduledInstallHour: 3 } },
@@ -182,6 +183,7 @@ describe('policy editor rules', () => {
     maxConcurrentInstallsPerSite: 3,
     trayIconEnabled: false,
     installNotificationsEnabled: null,
+    agentAutoUpdateEnabled: false,
     restartSchedule: { enabled: true, days: [6], time: '04:00', condition: 'OnlyIfPending', mode: 'Countdown', countdownMinutes: 10, deadlineMinutes: 240, expiryMinutes: 120 },
     windowsUpdate: {
       automaticUpdates: { managed: false, value: null },
@@ -201,6 +203,7 @@ describe('policy editor rules', () => {
     expect(r.excludedKbs.sort()).toEqual(['KB1', 'KB2']);
     expect(r.trayIconEnabled).toBe(false);
     expect(r.installNotificationsEnabled).toBe(true);
+    expect(r.agentAutoUpdateEnabled).toBe(false);
     expect(r.restartSchedule?.mode).toBe('Countdown');
   });
 

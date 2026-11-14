@@ -653,6 +653,7 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
               row('Restart schedule', 'restartSchedule', p.restartSchedule ? `${describeRestartSchedule(p.restartSchedule)} (${p.timeZone})` : 'None'),
               row('EasyPatch icon', 'trayIconEnabled', p.trayIconEnabled ? 'Shown' : 'Hidden (shown only with a message or restart request)'),
               row('Installation notifications', 'installNotificationsEnabled', p.installNotificationsEnabled ? 'On' : 'Off'),
+              row('Agent updates', 'agentAutoUpdateEnabled', p.agentAutoUpdateEnabled ? 'Automatic' : 'Manual'),
               ['Signed-in users', <SessionSummary endpoint={endpoint} />],
               [
                 'Agent features',

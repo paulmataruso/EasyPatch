@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { Ban, Download, MessageSquare, MoreHorizontal, Pencil, Power, RefreshCw, ScanSearch, Trash2, WifiOff } from 'lucide-react';
+import { ArrowUpCircle, Ban, Download, MessageSquare, MoreHorizontal, Pencil, Power, RefreshCw, ScanSearch, Trash2, WifiOff } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
 import { useApi, useApiMutation, useSites } from '../../api/hooks';
 import { ESU_OVERRIDES, type EndpointDetailDto, type EsuOverride, type UpdateEndpointRequest } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
+import { AgentUpdateDialog } from '../../components/AgentUpdateDialog';
 import { ConfirmDialog, Dialog } from '../../components/Dialog';
 import { InstallUpdatesDialog, jobIdOf } from '../../components/InstallDialog';
 import { MessageDialog, RestartDialog } from '../../components/RestartDialogs';
@@ -116,7 +117,12 @@ export function EndpointDetailPage() {
         <StatTile label="Installed" value={e.installedCount} />
         <StatTile label="Pending restart" value={e.pendingRebootUpdateCount} tone={e.pendingRebootUpdateCount ? 'info' : undefined} />
         <StatTile label="Last scan" value={<span className="text-base">{formatRelative(s.lastScanAt)}</span>} hint={e.lastScanError ? <span className="text-danger">Last attempt failed</span> : undefined} />
-        <StatTile label="Agent" value={<span className="font-mono text-base">{s.agentVersion ?? '—'}</span>} tone={s.agentOutdated ? 'warn' : undefined} hint={s.agentOutdated ? 'Newer version available' : undefined} />
+        <StatTile
+          label="Agent"
+          value={<span className="font-mono text-base">{s.agentVersion ?? '—'}</span>}
+          tone={s.agentOutdated ? 'warn' : undefined}
+          hint={agentHint(e)}
+        />
       </div>
 
       <Tabs
@@ -151,6 +157,15 @@ export function EndpointDetailPage() {
       <RestartDialog target={restartOpen ? { kind: 'endpoint', endpoint: e } : null} onClose={() => setRestartOpen(false)} />
     </>
   );
+}
+
+/** "Updates automatically", "1.3.0 available", or why the agent cannot update itself. */
+function agentHint(e: EndpointDetailDto): ReactNode {
+  const u = e.agentUpdate;
+  if (!u?.supported) return e.summary.agentOutdated ? 'Newer version available (install the MSI once)' : undefined;
+  if (u.availableVersion) return u.automaticUpdates ? `Updating to ${u.availableVersion} automatically` : `${u.availableVersion} available`;
+  if (u.code === 'agent_up_to_date') return u.automaticUpdates ? 'Up to date, updates automatically' : 'Up to date';
+  return <span className="text-warn" title={u.message ?? undefined}>Update not possible</span>;
 }
 
 function ActiveJobCard({ job }: { job: NonNullable<EndpointDetailDto['activeJob']> }) {
@@ -193,7 +208,7 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
   const toast = useToast();
   const navigate = useNavigate();
   const [menu, setMenu] = useState(false);
-  const [dialog, setDialog] = useState<'edit' | 'revoke' | 'delete' | 'message' | null>(null);
+  const [dialog, setDialog] = useState<'edit' | 'revoke' | 'delete' | 'message' | 'agent-update' | null>(null);
 
   const queueJob = useApiMutation((kind: 'scan' | 'inventory-refresh') => api.post<unknown>(`/endpoints/${s.id}/${kind}`), {
     invalidate: [`/endpoints/${s.id}`, '/jobs'],
@@ -265,6 +280,9 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
               <MenuItem icon={<RefreshCw className="size-4" aria-hidden />} onClick={() => { setMenu(false); queueJob.mutate('inventory-refresh'); }}>
                 Refresh inventory
               </MenuItem>
+              <MenuItem icon={<ArrowUpCircle className="size-4" aria-hidden />} onClick={() => { setMenu(false); setDialog('agent-update'); }}>
+                Update agent…
+              </MenuItem>
               <MenuItem icon={<Pencil className="size-4" aria-hidden />} onClick={() => { setMenu(false); setDialog('edit'); }}>
                 Edit site, notes, ESU
               </MenuItem>
@@ -280,6 +298,7 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
       </div>
       <EditEndpointDialog endpoint={endpoint} open={dialog === 'edit'} onClose={() => setDialog(null)} />
       <MessageDialog target={dialog === 'message' ? { kind: 'endpoint', endpoint } : null} onClose={() => setDialog(null)} />
+      <AgentUpdateDialog target={dialog === 'agent-update' ? { kind: 'endpoint', endpoint } : null} onClose={() => setDialog(null)} />
       <ConfirmDialog
         open={dialog === 'revoke'}
         onClose={() => setDialog(null)}

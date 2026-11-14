@@ -35,6 +35,7 @@ const EMPTY: PolicyRequest = {
   installNotificationsEnabled: null,
   restartSchedule: null,
   windowsUpdate: null,
+  agentAutoUpdateEnabled: null,
 };
 
 export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
@@ -58,6 +59,7 @@ export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
     installNotificationsEnabled: policy.installNotificationsEnabled ?? null,
     restartSchedule: policy.restartSchedule ? { ...policy.restartSchedule, time: policy.restartSchedule.time.slice(0, 5) } : null,
     windowsUpdate: policy.windowsUpdate ?? null,
+    agentAutoUpdateEnabled: policy.agentAutoUpdateEnabled ?? null,
   };
 }
 
@@ -390,6 +392,20 @@ export function PolicyEditor({
             offLabel="Off"
           />
         </div>
+      </Card>
+
+      <Card title="EasyPatch agent">
+        <BoolRow
+          label="Agent updates"
+          hint="Automatic: computers with agent 1.2.0 or newer install a newer signed agent package as soon as it is on the server (a few at a time). Manual: only when someone clicks Update agent. Agents check the release signature themselves and never downgrade."
+          value={form.agentAutoUpdateEnabled}
+          inherited={isGlobal ? true : (inherited?.agentAutoUpdateEnabled ?? true)}
+          isGlobal={isGlobal}
+          readOnly={readOnly}
+          onChange={(v) => update('agentAutoUpdateEnabled', v)}
+          onLabel="Automatic"
+          offLabel="Manual"
+        />
       </Card>
 
       <Card title="Windows Update settings">

@@ -78,7 +78,7 @@ export const DEFAULT_INSTALL_CATEGORIES: readonly UpdateCategory[] = [
   'Other',
 ];
 
-export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh', 'Restart', 'NotifyUser'] as const;
+export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh', 'Restart', 'NotifyUser', 'AgentUpdate'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const JOB_STATUSES = [
@@ -111,7 +111,13 @@ export const USER_MESSAGE_PRESETS = ['UpdatesInstalling', 'UpdatesInstalled', 'R
 export type UserMessagePreset = (typeof USER_MESSAGE_PRESETS)[number];
 
 /** Agent features; the server only sends restart and message jobs to agents that declare them. */
-export const AGENT_CAPABILITIES = { restart: 'restart', notifyUser: 'notify-user', windowsUpdatePolicy: 'windows-update-policy', tray: 'tray' } as const;
+export const AGENT_CAPABILITIES = {
+  restart: 'restart',
+  notifyUser: 'notify-user',
+  windowsUpdatePolicy: 'windows-update-policy',
+  tray: 'tray',
+  selfUpdate: 'self-update',
+} as const;
 
 export const WINDOWS_UPDATE_POLICY_GROUPS = ['AutomaticUpdates', 'FeatureUpdates', 'QualityUpdates', 'RestartBehavior'] as const;
 export type WindowsUpdatePolicyGroup = (typeof WINDOWS_UPDATE_POLICY_GROUPS)[number];
@@ -467,6 +473,8 @@ export interface PolicyValues {
   /** Replaces the inherited schedule as a whole; null inherits. */
   restartSchedule: RestartScheduleDto | null;
   windowsUpdate: PolicyWindowsUpdate | null;
+  /** "Agent updates": true = Automatic, false = Manual, null inherits (the global default is Automatic). */
+  agentAutoUpdateEnabled: boolean | null;
 }
 
 export interface PolicyDto extends PolicyValues {
@@ -507,6 +515,7 @@ export interface EffectivePolicyDto {
   windowsUpdate: WindowsUpdatePolicySettings | null;
   /** Registry values EasyPatch sets on the endpoint for the managed groups. */
   windowsUpdateValues: PolicyRegistryValueDto[] | null;
+  agentAutoUpdateEnabled: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -601,6 +610,30 @@ export interface EndpointDetailDto {
   windowsUpdatePolicy: WindowsUpdatePolicyReport | null;
   windowsUpdatePolicyReportedAt: Instant | null;
   hasOwnPolicy: boolean;
+  agentUpdate: AgentUpdateInfoDto | null;
+}
+
+/** Whether the agent can update itself and to which version (see the "Agent updates" policy). */
+export interface AgentUpdateInfoDto {
+  /** The agent is 1.2.0 or newer and was built with a release key. */
+  supported: boolean;
+  architecture: string | null;
+  releaseKeyIds: string[];
+  /** The effective "Agent updates" policy is Automatic. */
+  automaticUpdates: boolean;
+  /** The signed package an update would install, or null with a code and message saying why not. */
+  availableVersion: string | null;
+  code: string | null;
+  message: string | null;
+}
+
+export interface AgentUpdateRequest {
+  /** A specific package version; null installs the newest signed package. */
+  version: string | null;
+}
+
+export interface BulkAgentUpdateRequest extends AgentUpdateRequest {
+  endpointIds: Guid[];
 }
 
 export interface UpdateEndpointRequest {
@@ -976,6 +1009,10 @@ export interface AgentPackageDto {
   modifiedAt: Instant;
   downloadUrl: string;
   isLatest: boolean;
+  /** The release key in the package's .sig file; null when it is not signed (agents will not update to it). */
+  releaseKeyId: string | null;
+  /** Why a .sig file next to the package was ignored. */
+  signatureProblem: string | null;
 }
 
 export interface AgentVersionCountDto {
