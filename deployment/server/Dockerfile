@@ -24,7 +24,7 @@ COPY backend/Worker/ backend/Worker/
 RUN dotnet publish backend/API/EasyPatch.Api.csproj -c Release --no-restore -o /out/api /p:UseAppHost=false \
  && dotnet publish backend/Worker/EasyPatch.Worker.csproj -c Release --no-restore -o /out/worker /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.15-alpine3.24 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-alpine3.24 AS runtime
 # tzdata: IANA time zones for maintenance windows. No other packages are added.
 RUN apk add --no-cache tzdata \
  && mkdir -p /app/keys /app/agent-packages \
