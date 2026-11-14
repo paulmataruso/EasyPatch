@@ -98,6 +98,16 @@ public sealed partial class NotificationTransport(IHttpClientFactory httpClients
         message.Body = body.ToMessageBody();
 
         using var client = new SmtpClient { Timeout = 30_000 };
+        if (smtp.SmtpSkipCertificateValidation && smtp.SmtpSecurity != SmtpSecurity.None)
+        {
+            // The administrator's explicit choice (Settings → Notifications), e.g. for an internal relay with a self-signed
+            // certificate: the connection stays encrypted, but the server's identity is not verified.
+#pragma warning disable CA5359 // Opt-in by a super administrator, off by default, audited and shown with a warning in the console.
+            client.ServerCertificateValidationCallback = static (_, _, _, _) => true;
+#pragma warning restore CA5359
+            client.CheckCertificateRevocation = false;
+        }
+
         var security = smtp.SmtpSecurity switch
         {
             SmtpSecurity.SslOnConnect => SecureSocketOptions.SslOnConnect,

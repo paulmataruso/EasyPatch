@@ -227,7 +227,8 @@ organizations get no scheduled reports. The schedule shows the next report and i
 
 **Email delivery** uses the SMTP server under **Settings → Notifications**, and only with
 STARTTLS or TLS: with *None* the console refuses to queue reports and the worker refuses to send
-them. Failed sends are retried (after 1 minute, doubling up to 1 hour) and given up after 24 hours;
+them. *Skip certificate validation* still encrypts the connection but does not verify the mail
+server's identity ([security.md](security.md#notifications-and-webhooks)). Failed sends are retried (after 1 minute, doubling up to 1 hour) and given up after 24 hours;
 the list shows *Queued*, *Retrying*, *Sent* or *Not sent* with the error. Reports larger than
 15 MB are not emailed. The worker checks for due reports and queued emails every minute.
 

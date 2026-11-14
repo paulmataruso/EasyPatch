@@ -325,9 +325,14 @@ Notifications are configured by super administrators only, under
 * **What a notification contains.** Host names, organization names, alert titles and details,
   and links to the console. No credentials or update payloads. Email and chat services see this
   content; choose channels accordingly.
-* **Email transport.** STARTTLS or TLS-on-connect with the system's certificate validation
-  (which cannot be turned off). *None* sends the password and messages unencrypted and is
-  meant only for a relay on a trusted network.
+* **Email transport.** STARTTLS or TLS-on-connect with the system's certificate validation.
+  *None* sends the password and messages unencrypted and is meant only for a relay on a trusted
+  network. A super administrator can turn on **Skip certificate validation** for an SMTP server
+  whose certificate the containers do not trust (for example a self-signed certificate on an
+  internal relay). It is off by default, recorded in the audit log and shown with a warning. The
+  connection stays encrypted, but anyone able to intercept or redirect it could impersonate the
+  server and read the SMTP password, alerts and monthly reports. A trusted certificate on the
+  mail server is the better fix.
 
 ## Vulnerability data
 
@@ -364,7 +369,9 @@ exposure: hostnames, missing updates and known-exploited vulnerabilities.
   number of recipients, not the addresses).
 * **Encrypted transport only.** Reports are emailed only when the SMTP security setting is STARTTLS
   or TLS. The console refuses to queue them and the worker refuses to send them over a plain
-  connection. The SMTP password is handled as for notifications (encrypted at rest, never returned).
+  connection. With *Skip certificate validation* turned on they are still encrypted, but the mail
+  server's identity is not verified (see [Notifications and webhooks](#notifications-and-webhooks)).
+  The SMTP password is handled as for notifications (encrypted at rest, never returned).
 * **Tenant isolation.** Listing, downloading, sending and deleting reports, and reading or changing
   schedules, are limited to the user's organizations.
 * **Storage.** The PDFs are stored in the database (and therefore in backups) and deleted after the
@@ -418,7 +425,7 @@ LocalSystem.
 | I2 | Secrets appear in logs | The server and agent never log tokens or keys. The MSI token property is hidden and registry values are not echoed to MSI logs (see above for limits). Structured logs leave out request bodies. |
 | I3 | Database exposure | No published port, internal Docker network, Compose secret for the password |
 | I4 | A notification channel is used to reach internal services (SSRF) or leak secrets | Super administrator only; https only; no redirects or proxy; every connected address is checked against blocked ranges (private ranges only when explicitly allowed); secrets encrypted at rest and never returned; sanitized errors. See [Notifications and webhooks](#notifications-and-webhooks). |
-| I5 | A monthly report reaches the wrong people or is read in transit | Recipients are entered per organization (no default), changes are audited, Operator role required; email only over STARTTLS or TLS; tenant-scoped API. See [Monthly reports](#monthly-reports). |
+| I5 | A monthly report reaches the wrong people or is read in transit | Recipients are entered per organization (no default), changes are audited, Operator role required; email only over STARTTLS or TLS (server certificate validated unless a super administrator turns that off); tenant-scoped API. See [Monthly reports](#monthly-reports). |
 | D1 | Check-in floods | Per-credential and per-IP rate limits, request size limits, jitter |
 | D2 | Enrollment queue spam | A deployment code is required, pending requests are capped and expire, per-IP rate limit |
 | E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability. Windows updates come from the sources Windows is configured for, and Linux packages from the repositories the computer is configured for. Application updates (off by default) can only upgrade an installed application to the version the winget community repository offers; a compromised server could approve more applications, but not choose versions, sources or installers. See [Application updates](#application-updates-winget). Agent updates install only packages whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |

@@ -92,6 +92,12 @@ public sealed class NotificationSettingsRow
     public string? SmtpHost { get; set; }
     public int SmtpPort { get; set; } = 587;
     public SmtpSecurity SmtpSecurity { get; set; } = SmtpSecurity.StartTls;
+
+    /// <summary>Accept any certificate from the SMTP server (e.g. an internal relay with a self-signed certificate). The
+    /// connection stays encrypted, but the server's identity is not verified. Off by default; ignored with
+    /// <see cref="SmtpSecurity.None"/>.</summary>
+    public bool SmtpSkipCertificateValidation { get; set; }
+
     public string? SmtpUsername { get; set; }
 
     /// <summary>Encrypted with ASP.NET Data Protection; never returned by the API.</summary>

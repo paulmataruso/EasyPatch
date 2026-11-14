@@ -18,12 +18,13 @@ public sealed record AcknowledgeAlertsResult(int Acknowledged);
 
 public sealed record NotificationSettingsDto(
     string? SmtpHost, int SmtpPort, SmtpSecurity SmtpSecurity, string? SmtpUsername, bool SmtpPasswordConfigured, string? FromAddress, string? FromName,
-    bool AllowPrivateNetworkWebhooks, DateTimeOffset UpdatedAt);
+    bool AllowPrivateNetworkWebhooks, DateTimeOffset UpdatedAt, bool SmtpSkipCertificateValidation = false);
 
 /// <param name="SmtpPassword">null keeps the stored password, "" removes it.</param>
+/// <param name="SmtpSkipCertificateValidation">Accept any SMTP server certificate (ignored when <paramref name="SmtpSecurity"/> is None).</param>
 public sealed record NotificationSettingsRequest(
     string? SmtpHost, int SmtpPort, SmtpSecurity SmtpSecurity, string? SmtpUsername, string? SmtpPassword, string? FromAddress, string? FromName,
-    bool AllowPrivateNetworkWebhooks);
+    bool AllowPrivateNetworkWebhooks, bool SmtpSkipCertificateValidation = false);
 
 public sealed record DeliverySummaryDto(DeliveryStatus Status, DateTimeOffset CreatedAt, string? LastError);
 

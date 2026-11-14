@@ -170,6 +170,7 @@ public static class NotificationEndpoints
             row.SmtpHost = host;
             row.SmtpPort = request.SmtpPort is > 0 and <= 65535 ? request.SmtpPort : 587;
             row.SmtpSecurity = request.SmtpSecurity;
+            row.SmtpSkipCertificateValidation = request.SmtpSkipCertificateValidation && request.SmtpSecurity != SmtpSecurity.None;
             row.SmtpUsername = string.IsNullOrWhiteSpace(request.SmtpUsername) ? null : request.SmtpUsername.Trim();
             if (request.SmtpPassword is not null)
             {
@@ -185,6 +186,7 @@ public static class NotificationEndpoints
                 SmtpHost = host,
                 row.SmtpPort,
                 row.SmtpSecurity,
+                row.SmtpSkipCertificateValidation,
                 row.SmtpUsername,
                 PasswordChanged = request.SmtpPassword is not null,
                 FromAddress = from,
@@ -501,7 +503,7 @@ public static class NotificationEndpoints
 
     private static NotificationSettingsDto ToDto(NotificationSettingsRow s) => new(
         s.SmtpHost, s.SmtpPort, s.SmtpSecurity, s.SmtpUsername, s.SmtpPasswordProtected is not null, s.FromAddress, s.FromName,
-        s.AllowPrivateNetworkWebhooks, s.UpdatedAt);
+        s.AllowPrivateNetworkWebhooks, s.UpdatedAt, s.SmtpSkipCertificateValidation);
 
     private static NotificationChannelDto ToDto(NotificationChannel c, DeliverySummaryDto? last) => new(
         c.Id, c.Name, c.Type, c.Enabled, c.EmailRecipients, c.WebhookFormat, c.WebhookHost, c.SigningSecretProtected is not null, c.CreatedAt,

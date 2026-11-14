@@ -136,6 +136,20 @@ public sealed class AlertTests(PostgresFixture postgres) : IntegrationTest(postg
             new NotificationSettingsRequest("smtp.example.com", 587, SmtpSecurity.StartTls, "mailer", null, "easypatch@example.com", null, false),
             HttpStatusCode.OK);
         Assert.True((await root.GetAsync<NotificationSettingsDto>("/api/v1/notifications/settings")).SmtpPasswordConfigured);
+        Assert.False((await root.GetAsync<NotificationSettingsDto>("/api/v1/notifications/settings")).SmtpSkipCertificateValidation); // off by default
+
+        // Skipping certificate validation is an explicit choice, kept only for an encrypted connection.
+        var skipped = await root.SendAsync<NotificationSettingsDto>(HttpMethod.Put, "/api/v1/notifications/settings",
+            new NotificationSettingsRequest("smtp.example.com", 465, SmtpSecurity.SslOnConnect, "mailer", null, "easypatch@example.com", null, false,
+                SmtpSkipCertificateValidation: true), HttpStatusCode.OK);
+        Assert.True(skipped.SmtpSkipCertificateValidation);
+        var plain = await root.SendAsync<NotificationSettingsDto>(HttpMethod.Put, "/api/v1/notifications/settings",
+            new NotificationSettingsRequest("smtp.example.com", 25, SmtpSecurity.None, "mailer", null, "easypatch@example.com", null, false,
+                SmtpSkipCertificateValidation: true), HttpStatusCode.OK);
+        Assert.False(plain.SmtpSkipCertificateValidation);
+        Assert.Contains(await WithDbAsync(db => db.AuditLogs.Where(a => a.Action == "notifications.settings_update").Select(a => a.Details).ToListAsync()),
+            d => d != null && d.Replace(" ", "", StringComparison.Ordinal).Contains("SkipCertificateValidation\":true", StringComparison.OrdinalIgnoreCase)); // jsonb
+        await ConfigureSmtpAsync();
 
         var channelsJson = await (await root.SendAsync(HttpMethod.Get, "/api/v1/notifications/channels")).Content.ReadAsStringAsync();
         Assert.DoesNotContain("T0K3N", channelsJson, StringComparison.Ordinal);

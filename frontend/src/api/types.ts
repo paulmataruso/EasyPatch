@@ -1446,6 +1446,8 @@ export interface NotificationSettingsDto {
   fromName: string | null;
   allowPrivateNetworkWebhooks: boolean;
   updatedAt: Instant;
+  /** Any certificate from the SMTP server is accepted (encrypted, but the server's identity is not verified). */
+  smtpSkipCertificateValidation: boolean;
 }
 
 /** `smtpPassword`: null keeps the stored password, "" removes it. */
@@ -1458,6 +1460,8 @@ export interface NotificationSettingsRequest {
   fromAddress: string | null;
   fromName: string | null;
   allowPrivateNetworkWebhooks: boolean;
+  /** Ignored by the server when smtpSecurity is None. */
+  smtpSkipCertificateValidation: boolean;
 }
 
 export interface DeliverySummaryDto {

@@ -56,7 +56,10 @@ work independently: an endpoint matched by two rules has two alerts.
 1. **Settings → Notifications → Email server (SMTP)** (for email channels): server, port,
    encryption (STARTTLS on 587, or TLS on connect on 465), user name and password if the server
    requires sign-in, and the sender address. The password is stored encrypted and never shown
-   again.
+   again. If the server has a certificate the containers do not trust (for example a
+   self-signed certificate on an internal relay), you can turn on **Skip certificate
+   validation**: the connection stays encrypted, but the server's identity is no longer checked
+   (see [security.md](security.md#notifications-and-webhooks)).
 2. **Channels → New channel**:
    * **Email**: up to 20 recipient addresses.
    * **Webhook, Slack**: a Slack incoming webhook URL (`https://hooks.slack.com/services/…`).
@@ -180,7 +183,7 @@ time.
 |---|---|
 | `SMTP is not configured (Settings → Notifications).` | Enter the SMTP server and the sender address. |
 | `The SMTP server refused the user name or password.` | Wrong credentials, or the account needs an app password or SMTP AUTH enabled (Microsoft 365: *Authenticated SMTP* per mailbox). |
-| `TLS connection to the SMTP server failed …` | The server's certificate is not trusted by the container, or the port and encryption do not match (587 = STARTTLS, 465 = TLS on connect). |
+| `TLS connection to the SMTP server failed …` | The server's certificate is not trusted by the container (expired, self-signed, issued by a private CA, or for a different host name), or the port and encryption do not match (587 = STARTTLS, 465 = TLS on connect). Prefer a trusted certificate on the server; on a trusted network, **Skip certificate validation** accepts it anyway. |
 | `Cannot connect to the SMTP server host:port (…)` | DNS, firewall or port. Only the `worker` container needs outbound access. |
 | `Webhook to host refused: private network addresses are not allowed …` | The host resolves to a private address. Allow private addresses, or use the public URL. |
 | `Webhook to host refused: loopback, link-local …` | The address is never allowed. |

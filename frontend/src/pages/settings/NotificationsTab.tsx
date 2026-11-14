@@ -84,6 +84,7 @@ function SmtpCard() {
       fromAddress: s.fromAddress,
       fromName: s.fromName,
       allowPrivateNetworkWebhooks: s.allowPrivateNetworkWebhooks,
+      smtpSkipCertificateValidation: s.smtpSkipCertificateValidation ?? false,
     });
     setChangePassword(false);
   }, [settings.data]);
@@ -175,8 +176,24 @@ function SmtpCard() {
           />
           <TextField label="From name" placeholder="EasyPatch" maxLength={100} value={form.fromName ?? ''} onChange={(e) => setForm({ ...form, fromName: e.target.value })} />
         </div>
-        {form.smtpSecurity === 'None' && (
+        {form.smtpSecurity === 'None' ? (
           <Alert tone="warn">Without encryption the password and the messages cross the network in clear text. Use this only with a relay on a trusted network.</Alert>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <Checkbox
+              label="Skip certificate validation"
+              hint="Accept any certificate from the SMTP server, for example a self-signed certificate on an internal relay. Off by default."
+              checked={form.smtpSkipCertificateValidation}
+              onChange={(e) => setForm({ ...form, smtpSkipCertificateValidation: e.target.checked })}
+            />
+            {form.smtpSkipCertificateValidation && (
+              <Alert tone="warn">
+                The connection is still encrypted, but EasyPatch no longer checks that it is talking to your mail server. Anyone who can intercept or redirect
+                the connection can read the SMTP password, alerts and monthly reports. Use this only on a network you trust, and prefer installing a trusted
+                certificate on the server.
+              </Alert>
+            )}
+          </div>
         )}
         <div className="border-t border-line pt-3">
           <Checkbox

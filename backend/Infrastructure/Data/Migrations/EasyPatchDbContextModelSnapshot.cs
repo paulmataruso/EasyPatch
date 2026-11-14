@@ -1886,6 +1886,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("smtp_security");
 
+                    b.Property<bool>("SmtpSkipCertificateValidation")
+                        .HasColumnType("boolean")
+                        .HasColumnName("smtp_skip_certificate_validation");
+
                     b.Property<string>("SmtpUsername")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)")
@@ -1906,6 +1910,7 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                             AllowPrivateNetworkWebhooks = false,
                             SmtpPort = 587,
                             SmtpSecurity = "StartTls",
+                            SmtpSkipCertificateValidation = false,
                             UpdatedAt = new DateTimeOffset(new DateTime(2026, 11, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
                         });
                 });
