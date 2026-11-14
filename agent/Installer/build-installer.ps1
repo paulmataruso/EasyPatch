@@ -150,9 +150,11 @@ if (-not (Test-Path $builtMsi)) { throw "WiX did not produce $builtMsi" }
 
 # The package must be for the requested architecture: the Template summary property is "<platform>;<languages>".
 $expectedPlatform = @{ 'x64' = 'x64'; 'arm64' = 'Arm64' }[$Architecture]
+# Arguments are cast to plain .NET types: PowerShell-wrapped values (e.g. Join-Path output) fail with DISP_E_TYPEMISMATCH.
 $installer = New-Object -ComObject WindowsInstaller.Installer
-$summary = $installer.GetType().InvokeMember('SummaryInformation', 'GetProperty', $null, $installer, @($builtMsi, 0))
-$template = [string]$summary.GetType().InvokeMember('Property', 'GetProperty', $null, $summary, @(7))
+$summary = $installer.GetType().InvokeMember('SummaryInformation', 'GetProperty', $null, $installer,
+    [object[]]@([string]$builtMsi, [int]0))
+$template = [string]$summary.GetType().InvokeMember('Property', 'GetProperty', $null, $summary, [object[]]@([int]7))
 [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($summary)
 [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($installer)
 if (($template -split ';')[0] -ne $expectedPlatform) {
