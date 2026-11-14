@@ -295,10 +295,30 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
-      - name: Verify release signatures and write SHA256SUMS
+      - name: Verify architectures, release signatures and write SHA256SUMS
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           mkdir release
           cp dist/windows-agent/* dist/linux-agent/* release/
+          # Each MSI must be built for its own architecture (summary Template "<platform>;<languages>").
+          if cmp -s "release/EasyPatchAgent-${VERSION}-x64.msi" "release/EasyPatchAgent-${VERSION}-arm64.msi"; then
+            echo "::error::The x64 and arm64 MSIs are identical"
+            exit 1
+          fi
+          grep -a -q -E 'x64;[0-9]+' "release/EasyPatchAgent-${VERSION}-x64.msi"
+          grep -a -q -E 'Arm64;[0-9]+' "release/EasyPatchAgent-${VERSION}-arm64.msi"
+          # The same for the Linux packages: package metadata and the agent executable's machine type.
+          command -v rpm > /dev/null || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends rpm; }
+          for spec in x64:amd64:x86_64:x86-64 arm64:arm64:aarch64:aarch64; do
+            IFS=: read -r name deb_arch rpm_arch elf <<< "$spec"
+            deb="release/EasyPatchAgent-${VERSION}-${name}.deb"
+            rpm="release/EasyPatchAgent-${VERSION}-${name}.rpm"
+            [ "$(dpkg-deb -f "$deb" Architecture)" = "$deb_arch" ] || { echo "::error::$deb is not $deb_arch"; exit 1; }
+            dpkg-deb --fsys-tarfile "$deb" | tar -xO ./opt/easypatch/easypatch-agent > "$RUNNER_TEMP/agent-$name"
+            file -b "$RUNNER_TEMP/agent-$name" | grep -q "$elf" || { echo "::error::$deb does not contain a $elf agent"; exit 1; }
+            [ "$(rpm -qp --qf '%{ARCH}' "$rpm")" = "$rpm_arch" ] || { echo "::error::$rpm is not $rpm_arch"; exit 1; }
+          done
           dotnet run --project tools/EasyPatch.ReleaseSigner -c Release -- \
             verify --public-key "$PUBLIC_KEY" release/*.msi release/*.deb release/*.rpm
           cp "$PUBLIC_KEY" release/

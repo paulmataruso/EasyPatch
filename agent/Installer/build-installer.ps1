@@ -137,13 +137,28 @@ Invoke-Sign $exe 'EasyPatch Agent'
 
 Write-Host "==> Building MSI"
 $wixOut = Join-Path $repoRoot "artifacts\obj\installer\$Architecture"
+if (Test-Path $wixOut) { Remove-Item $wixOut -Recurse -Force }
+# --no-incremental: the architecture and version are properties, not input files, so an incremental build would
+# treat the MSI from a previous build (another architecture or version) as up to date and reuse it.
 Invoke-Checked 'dotnet' @(
-    'build', (Join-Path $PSScriptRoot 'EasyPatch.Agent.Installer.wixproj'),
+    'build', (Join-Path $PSScriptRoot 'EasyPatch.Agent.Installer.wixproj'), '--no-incremental',
     '-c', $Configuration, '-o', $wixOut,
     "-p:ProductVersion=$Version", "-p:InstallerPlatform=$Architecture", "-p:PublishDir=$publishDir\")
 
 $builtMsi = Join-Path $wixOut 'EasyPatchAgent.msi'
 if (-not (Test-Path $builtMsi)) { throw "WiX did not produce $builtMsi" }
+
+# The package must be for the requested architecture: the Template summary property is "<platform>;<languages>".
+$expectedPlatform = @{ 'x64' = 'x64'; 'arm64' = 'Arm64' }[$Architecture]
+$installer = New-Object -ComObject WindowsInstaller.Installer
+$summary = $installer.GetType().InvokeMember('SummaryInformation', 'GetProperty', $null, $installer, @($builtMsi, 0))
+$template = [string]$summary.GetType().InvokeMember('Property', 'GetProperty', $null, $summary, @(7))
+[void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($summary)
+[void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($installer)
+if (($template -split ';')[0] -ne $expectedPlatform) {
+    throw "WiX built a package for '$template', expected $expectedPlatform."
+}
+Write-Host "    Platform $template"
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $msi = Join-Path $OutputDirectory $msiName
