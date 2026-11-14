@@ -37,11 +37,12 @@ public static class EndpointEndpoints
             })
             .WithTags("Endpoints").RequireAuthorization(Policies.Viewer);
 
-        g.MapGet("/{id:guid}", async (Guid id, EasyPatchDbContext db, ITenantContext tenant, AgentPackageService packages, CancellationToken ct) =>
-            TypedResults.Ok(await LoadDetailAsync(id, db, tenant, packages, ct)));
+        g.MapGet("/{id:guid}", async (Guid id, EasyPatchDbContext db, ITenantContext tenant, AgentPackageService packages, PolicyService policies,
+                CancellationToken ct) =>
+            TypedResults.Ok(await LoadDetailAsync(id, db, tenant, packages, policies, ct)));
 
         g.MapPut("/{id:guid}", async (Guid id, UpdateEndpointRequest request, EasyPatchDbContext db, ITenantContext tenant, AuditService audit,
-            ComplianceService compliance, AgentPackageService packages, TimeProvider clock, CancellationToken ct) =>
+            ComplianceService compliance, AgentPackageService packages, PolicyService policies, TimeProvider clock, CancellationToken ct) =>
         {
             var endpoint = await LoadForUpdateAsync(db, tenant, id, ct);
             new Validator().Optional("notes", request.Notes, 4000).ThrowIfInvalid();
@@ -63,7 +64,7 @@ public static class EndpointEndpoints
                 await compliance.RecomputeAsync([id], ct);
             }
 
-            return TypedResults.Ok(await LoadDetailAsync(id, db, tenant, packages, ct));
+            return TypedResults.Ok(await LoadDetailAsync(id, db, tenant, packages, policies, ct));
         }).RequireAuthorization(Policies.Operator);
 
         g.MapDelete("/{id:guid}", async (Guid id, EasyPatchDbContext db, ITenantContext tenant, EnrollmentService enrollment, AuditService audit,
@@ -83,11 +84,11 @@ public static class EndpointEndpoints
         }).RequireAuthorization(Policies.Operator);
 
         g.MapPost("/{id:guid}/revoke", async (Guid id, RevokeEndpointRequest? request, EasyPatchDbContext db, ITenantContext tenant,
-            EnrollmentService enrollment, AgentPackageService packages, CancellationToken ct) =>
+            EnrollmentService enrollment, AgentPackageService packages, PolicyService policies, CancellationToken ct) =>
         {
             await LoadForUpdateAsync(db, tenant, id, ct);
             await enrollment.RevokeEndpointAsync(id, Validator.Clean(request?.Reason) ?? "Revoked by administrator", EndpointStatus.Revoked, ct);
-            return TypedResults.Ok(await LoadDetailAsync(id, db, tenant, packages, ct));
+            return TypedResults.Ok(await LoadDetailAsync(id, db, tenant, packages, policies, ct));
         }).RequireAuthorization(Policies.Operator);
 
         g.MapGet("/{id:guid}/updates", async (Guid id, EndpointUpdateState? state, UpdateCategory? category, bool? requiredOnly, EasyPatchDbContext db,
@@ -187,7 +188,8 @@ public static class EndpointEndpoints
                 p.ExcludedKbs, p.AcceptEulas, p.AutoInstallEnabled, window?.Days.Select(d => (int)d).ToList(),
                 window?.Start.ToString("HH:mm", CultureInfo.InvariantCulture), window?.DurationMinutes,
                 endpoint.Site?.TimeZone ?? endpoint.Organization!.TimeZone, p.ScanStaleAfterHours, p.MaxConcurrentInstallsPerSite, p.Sources,
-                p.TrayIconEnabled, p.InstallNotificationsEnabled, OrganizationEndpoints.ToDto(p.RestartSchedule), p.WindowsUpdate, registry));
+                p.TrayIconEnabled, p.InstallNotificationsEnabled, OrganizationEndpoints.ToDto(p.RestartSchedule), p.WindowsUpdate, registry,
+                p.AgentAutoUpdateEnabled));
         });
 
         // Per-endpoint policy overrides (the most specific layer).
@@ -332,6 +334,20 @@ public static class EndpointEndpoints
             BulkAsync(new BulkEndpointsRequest(request.EndpointIds, false), db, tenant, jobs, id => NotifyJob(id, request.Message), ct))
             .RequireAuthorization(Policies.Operator);
 
+        // Agent updates install only packages whose release signature the agent verifies against its built-in key.
+        g.MapPost("/{id:guid}/agent-update", async (Guid id, AgentUpdateRequest request, EasyPatchDbContext db, ITenantContext tenant, JobService jobs,
+            CancellationToken ct) =>
+        {
+            await EnsureEndpointAccessAsync(db, tenant, id, ct);
+            var job = await jobs.CreateAsync(new CreateJobRequest(id, JobType.AgentUpdate, AgentVersion: Validator.Clean(request.Version)), ct);
+            return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await JobEndpoints.LoadSummaryAsync(db, job.Id, ct));
+        }).RequireAuthorization(Policies.Operator);
+
+        g.MapPost("/bulk/agent-update", (BulkAgentUpdateRequest request, EasyPatchDbContext db, ITenantContext tenant, JobService jobs, CancellationToken ct) =>
+            BulkAsync(new BulkEndpointsRequest(request.EndpointIds, false), db, tenant, jobs,
+                id => new CreateJobRequest(id, JobType.AgentUpdate, AgentVersion: Validator.Clean(request.Version)), ct))
+            .RequireAuthorization(Policies.Operator);
+
         app.MapGet("/api/v1/user-messages", () => TypedResults.Ok(Enum.GetValues<UserMessagePreset>()
                 .Select(p => new UserMessagePresetDto(p, UserMessages.Title(p), UserMessages.Body(p, p == UserMessagePreset.RestartScheduled ? "{time}" : null),
                     p == UserMessagePreset.RestartScheduled))
@@ -440,7 +456,7 @@ public static class EndpointEndpoints
     }
 
     private static async Task<EndpointDetailDto> LoadDetailAsync(Guid id, EasyPatchDbContext db, ITenantContext tenant, AgentPackageService packages,
-        CancellationToken ct)
+        PolicyService policies, CancellationToken ct)
     {
         var e = await db.Endpoints.AsNoTracking().Include(x => x.Organization).Include(x => x.Site).FirstOrDefaultAsync(x => x.Id == id, ct)
                 ?? throw AppException.NotFound("Endpoint");
@@ -467,7 +483,16 @@ public static class EndpointEndpoints
             e.TrayConnectedSessions,
             e.WindowsUpdatePolicyStatus is null ? null : JsonSerializer.Deserialize<WindowsUpdatePolicyReport>(e.WindowsUpdatePolicyStatus, ContractJson.Options),
             e.WindowsUpdatePolicyReportedAt,
-            await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Endpoint && p.EndpointId == id, ct));
+            await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Endpoint && p.EndpointId == id, ct),
+            await AgentUpdateInfoAsync(e, packages, policies, ct));
+    }
+
+    private static async Task<AgentUpdateInfoDto> AgentUpdateInfoAsync(EasyPatch.Core.Entities.Endpoint e, AgentPackageService packages, PolicyService policies, CancellationToken ct)
+    {
+        var target = AgentUpdatePlanner.Resolve(e, packages);
+        var automatic = (await policies.ResolveAsync(e, ct)).AgentAutoUpdateEnabled;
+        return new AgentUpdateInfoDto(e.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate), e.AgentArchitecture, e.AgentReleaseKeyIds, automatic,
+            target.Package?.Version, target.ErrorCode, target.Message);
     }
 
     internal static async Task EnsureEndpointAccessAsync(EasyPatchDbContext db, ITenantContext tenant, Guid id, CancellationToken ct)

@@ -192,7 +192,7 @@ public static class AgentManagementEndpoints
             var latest = list.GroupBy(p => p.Architecture).Select(g => g.OrderByDescending(p => Mapping.ParseVersion(p.Version)).First().FileName).ToHashSet();
             return TypedResults.Ok(list.OrderByDescending(p => Mapping.ParseVersion(p.Version)).ThenBy(p => p.Architecture)
                 .Select(p => new AgentPackageDto(p.FileName, p.Version, p.Architecture, p.SizeBytes, p.Sha256, p.ModifiedAt,
-                    "/downloads/agent/" + Uri.EscapeDataString(p.FileName), latest.Contains(p.FileName))).ToList());
+                    "/downloads/agent/" + Uri.EscapeDataString(p.FileName), latest.Contains(p.FileName), p.Release?.KeyId, p.SignatureProblem)).ToList());
         }).WithTags("Agent management").RequireAuthorization(Policies.Viewer);
 
         app.MapGet("/api/v1/agent-versions", async (Guid? organizationId, EasyPatchDbContext db, ITenantContext tenant, AgentPackageService packages,

@@ -154,7 +154,8 @@ public sealed record PolicyDto(
     bool? TrayIconEnabled = null,
     bool? InstallNotificationsEnabled = null,
     RestartScheduleDto? RestartSchedule = null,
-    PolicyWindowsUpdate? WindowsUpdate = null);
+    PolicyWindowsUpdate? WindowsUpdate = null,
+    bool? AgentAutoUpdateEnabled = null);
 
 /// <summary>Recurring restart. <c>Time</c> is "HH:mm" in the site (or organization) time zone; days use 0 = Sunday … 6 = Saturday.</summary>
 public sealed record RestartScheduleDto(
@@ -188,7 +189,8 @@ public sealed record PolicyRequest(
     bool? TrayIconEnabled = null,
     bool? InstallNotificationsEnabled = null,
     RestartScheduleDto? RestartSchedule = null,
-    PolicyWindowsUpdate? WindowsUpdate = null);
+    PolicyWindowsUpdate? WindowsUpdate = null,
+    bool? AgentAutoUpdateEnabled = null);
 
 public sealed record EffectivePolicyDto(
     int CheckInIntervalSeconds,
@@ -211,7 +213,8 @@ public sealed record EffectivePolicyDto(
     bool InstallNotificationsEnabled = true,
     RestartScheduleDto? RestartSchedule = null,
     WindowsUpdatePolicySettings? WindowsUpdate = null,
-    IReadOnlyList<PolicyRegistryValueDto>? WindowsUpdateValues = null);
+    IReadOnlyList<PolicyRegistryValueDto>? WindowsUpdateValues = null,
+    bool AgentAutoUpdateEnabled = true);
 
 // ---------------------------------------------------------------------------------------------
 // Endpoints
@@ -295,7 +298,20 @@ public sealed record EndpointDetailDto(
     int? TrayConnectedSessions,
     WindowsUpdatePolicyReport? WindowsUpdatePolicy,
     DateTimeOffset? WindowsUpdatePolicyReportedAt,
-    bool HasOwnPolicy);
+    bool HasOwnPolicy,
+    AgentUpdateInfoDto? AgentUpdate = null);
+
+/// <summary>Whether the endpoint's agent can update itself, and to what.</summary>
+/// <param name="AvailableVersion">The version an agent update would install now (null when none).</param>
+/// <param name="Code">Why no update is available (e.g. <c>agent_up_to_date</c>, <c>package_not_signed</c>).</param>
+public sealed record AgentUpdateInfoDto(
+    bool Supported,
+    string? Architecture,
+    IReadOnlyList<string> ReleaseKeyIds,
+    bool AutomaticUpdates,
+    string? AvailableVersion,
+    string? Code,
+    string? Message);
 
 public sealed record UpdateEndpointRequest(Guid? SiteId, string? Notes, EsuOverride? EsuOverride);
 
@@ -356,6 +372,11 @@ public sealed record NotifyRequest(UserMessagePreset Preset, DateTimeOffset? Res
 public sealed record BulkRestartRequest(IReadOnlyList<Guid> EndpointIds, RestartRequest Restart);
 
 public sealed record BulkNotifyRequest(IReadOnlyList<Guid> EndpointIds, NotifyRequest Message);
+
+/// <param name="Version">A specific package version; the newest suitable package when omitted.</param>
+public sealed record AgentUpdateRequest(string? Version);
+
+public sealed record BulkAgentUpdateRequest(IReadOnlyList<Guid> EndpointIds, string? Version);
 
 public sealed record UserMessagePresetDto(UserMessagePreset Preset, string Title, string Body, bool NeedsRestartTime);
 
@@ -538,8 +559,10 @@ public sealed record RejectRequest(string? Reason);
 
 public sealed record BulkApproveRequest(IReadOnlyList<Guid> Ids);
 
+/// <param name="ReleaseKeyId">The release key in the package's <c>.sig</c> file (null: not signed, so agents will not
+/// update to it).</param>
 public sealed record AgentPackageDto(string FileName, string Version, string Architecture, long SizeBytes, string Sha256, DateTimeOffset ModifiedAt,
-    string DownloadUrl, bool IsLatest);
+    string DownloadUrl, bool IsLatest, string? ReleaseKeyId = null, string? SignatureProblem = null);
 
 public sealed record AgentVersionCountDto(string Version, int Count, bool IsLatest);
 

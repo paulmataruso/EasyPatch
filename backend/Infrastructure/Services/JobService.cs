@@ -26,7 +26,8 @@ public sealed record CreateJobRequest(
     string? DedupeSuffix = null,
     RestartPayload? Restart = null,
     NotifyUserPayload? Notify = null,
-    DateTimeOffset? NotBefore = null);
+    DateTimeOffset? NotBefore = null,
+    string? AgentVersion = null);
 
 /// <summary>Durable PostgreSQL-backed job queue: creation, leasing to agents, acknowledgement, progress and cancellation.</summary>
 public sealed class JobService(
@@ -34,6 +35,7 @@ public sealed class JobService(
     SettingsService settingsService,
     PolicyService policies,
     InstallPreviewService previews,
+    AgentPackageService packages,
     AuditService audit,
     IActorContext actor,
     TimeProvider clock,
@@ -57,7 +59,9 @@ public sealed class JobService(
             throw AppException.Conflict("The endpoint is not active (its credentials were revoked or it was decommissioned).", "endpoint_not_active");
         }
 
-        if (AgentCapabilities.RequiredFor(request.Type) is { } capability && !endpoint.AgentCapabilities.Contains(capability))
+        // Agent updates explain themselves (AgentUpdatePlanner): an agent that cannot update itself needs a manual install.
+        if (request.Type != JobType.AgentUpdate && AgentCapabilities.RequiredFor(request.Type) is { } capability &&
+            !endpoint.AgentCapabilities.Contains(capability))
         {
             throw AppException.Conflict(
                 $"The EasyPatch agent on {endpoint.Hostname} (version {endpoint.AgentVersion ?? "unknown"}) cannot run this job. Upgrade the agent first.",
@@ -71,6 +75,7 @@ public sealed class JobService(
 
         var settings = await settingsService.GetAsync(ct);
         string? payloadJson = null;
+        string? agentUpdateVersion = null;
         string dedupeKey;
         List<JobUpdate> plannedItems = [];
         switch (request.Type)
@@ -161,6 +166,34 @@ public sealed class JobService(
                 break;
             }
 
+            case JobType.AgentUpdate:
+            {
+                var target = AgentUpdatePlanner.Resolve(endpoint, packages, request.AgentVersion);
+                if (target.Package?.Release is not { } release)
+                {
+                    throw AppException.Conflict(target.Message ?? "No agent update is available.", target.ErrorCode ?? AgentUpdateTarget.NoPackage);
+                }
+
+                // One agent update at a time, whatever the version.
+                var running = await db.Jobs.AsNoTracking()
+                    .Where(j => j.EndpointId == endpoint.Id && j.Type == JobType.AgentUpdate && JobTransitions.DedupeStatuses.Contains(j.Status))
+                    .Select(j => (Guid?)j.Id).FirstOrDefaultAsync(ct);
+                if (running is { } runningId)
+                {
+                    throw DuplicateJob(runningId);
+                }
+
+                agentUpdateVersion = release.Manifest.Version;
+                payloadJson = JsonSerializer.Serialize(new AgentUpdatePayload
+                {
+                    Package = release.Manifest,
+                    KeyId = release.KeyId,
+                    Signature = release.Signature,
+                }, ContractJson.Options);
+                dedupeKey = "agent-update:" + agentUpdateVersion;
+                break;
+            }
+
             default:
                 throw AppException.BadRequest("Unsupported job type.");
         }
@@ -194,15 +227,18 @@ public sealed class JobService(
             RequestedBy = request.Trigger switch
             {
                 JobTrigger.Scheduled when request.Type == JobType.Restart => "Restart schedule",
+                JobTrigger.System when request.Type == JobType.AgentUpdate => "Automatic agent updates",
                 JobTrigger.Scheduled => "Maintenance window",
                 JobTrigger.System => "System",
                 _ => actor.Username ?? "unknown",
             },
-            // Scans and inventory first, then installs, then restarts (patch, then restart). Messages are leased separately.
+            // Scans and inventory first, then installs, then restarts (patch, then restart), then agent updates. Messages are
+            // leased separately.
             Priority = request.Type switch
             {
                 JobType.InstallUpdates => 0,
                 JobType.Restart => -10,
+                JobType.AgentUpdate => -20,
                 _ => 10,
             },
             CreatedAt = now,
@@ -232,7 +268,7 @@ public sealed class JobService(
                 new
                 {
                     job.Type, mode = request.InstallMode, updates = request.UpdateGuids?.Count, request.Force, restart = request.Restart,
-                    message = request.Notify?.Preset, request.NotBefore,
+                    message = request.Notify?.Preset, request.NotBefore, agentVersion = agentUpdateVersion,
                 });
         }
 
@@ -389,7 +425,8 @@ public sealed class JobService(
         if (!deliver.Exists(j => j.Type != JobType.NotifyUser) && !busy)
         {
             var next = await LeaseNextAsync(endpoint, policy, settings, allowInstall: !waitingForReboot,
-                allowRestart: endpoint.AgentCapabilities.Contains(AgentCapabilities.Restart), ct);
+                allowRestart: endpoint.AgentCapabilities.Contains(AgentCapabilities.Restart),
+                allowAgentUpdate: endpoint.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate), ct);
             if (next is not null)
             {
                 deliver.Add(next);
@@ -439,7 +476,7 @@ public sealed class JobService(
     }
 
     private async Task<Job?> LeaseNextAsync(Endpoint endpoint, EffectivePolicy policy, ServerSettings settings, bool allowInstall, bool allowRestart,
-        CancellationToken ct)
+        bool allowAgentUpdate, CancellationToken ct)
     {
         for (var attempt = 0; attempt < 5; attempt++)
         {
@@ -449,7 +486,7 @@ public sealed class JobService(
                     SELECT *, xmin FROM jobs
                     WHERE endpoint_id = {endpoint.Id} AND status = 'Queued' AND (not_before IS NULL OR not_before <= {now})
                       AND ({allowInstall} OR type <> 'InstallUpdates')
-                      AND ({allowRestart} OR type <> 'Restart') AND type <> 'NotifyUser'
+                      AND ({allowRestart} OR type <> 'Restart') AND ({allowAgentUpdate} OR type <> 'AgentUpdate') AND type <> 'NotifyUser'
                     ORDER BY priority DESC, created_at
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -513,6 +550,7 @@ public sealed class JobService(
             Install = job.Type == JobType.InstallUpdates ? Payload<InstallUpdatesPayload>(job) : null,
             Restart = job.Type == JobType.Restart ? Payload<RestartPayload>(job) : null,
             Notify = job.Type == JobType.NotifyUser ? Payload<NotifyUserPayload>(job) : null,
+            AgentUpdate = job.Type == JobType.AgentUpdate ? Payload<AgentUpdatePayload>(job) : null,
         };
     }
 
@@ -771,6 +809,7 @@ public sealed class JobService(
         JobType.InventoryRefresh => "Inventory refresh",
         JobType.Restart => "Restart",
         JobType.NotifyUser => "Message to users",
+        JobType.AgentUpdate => "Agent update",
         _ => type.ToString(),
     };
 }

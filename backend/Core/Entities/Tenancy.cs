@@ -70,6 +70,9 @@ public sealed class Policy
     public bool? TrayIconEnabled { get; set; }
     public bool? InstallNotificationsEnabled { get; set; }
 
+    /// <summary>Agents install new signed agent versions on their own (false: only when an administrator asks).</summary>
+    public bool? AgentAutoUpdateEnabled { get; set; }
+
     /// <summary>Recurring restart, overriding the level above as a unit (null = inherit).</summary>
     public Domain.RestartScheduleSettings? RestartSchedule { get; set; }
 

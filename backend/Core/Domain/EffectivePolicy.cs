@@ -29,6 +29,9 @@ public sealed record EffectivePolicy
     public bool TrayIconEnabled { get; init; } = true;
     public bool InstallNotificationsEnabled { get; init; } = true;
 
+    /// <summary>The agent installs newer signed agent packages on its own.</summary>
+    public bool AgentAutoUpdateEnabled { get; init; } = true;
+
     /// <summary>Enabled recurring restart, or null.</summary>
     public RestartScheduleSettings? RestartSchedule { get; init; }
 
@@ -79,6 +82,7 @@ public static class PolicyDefaults
         MaxConcurrentInstallsPerSite = 10,
         TrayIconEnabled = true,
         InstallNotificationsEnabled = true,
+        AgentAutoUpdateEnabled = true,
         UpdatedAt = now,
     };
 }
@@ -210,6 +214,7 @@ public static class PolicyResolver
             MaxConcurrentInstallsPerSite = Pick(nameof(EffectivePolicy.MaxConcurrentInstallsPerSite), p => p.MaxConcurrentInstallsPerSite, 10),
             TrayIconEnabled = Pick(nameof(EffectivePolicy.TrayIconEnabled), p => p.TrayIconEnabled, true),
             InstallNotificationsEnabled = Pick(nameof(EffectivePolicy.InstallNotificationsEnabled), p => p.InstallNotificationsEnabled, true),
+            AgentAutoUpdateEnabled = Pick(nameof(EffectivePolicy.AgentAutoUpdateEnabled), p => p.AgentAutoUpdateEnabled, true),
             RestartSchedule = restart is { Enabled: true } ? restart : null,
             WindowsUpdate = windowsUpdate,
             Sources = sources,

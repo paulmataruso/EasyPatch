@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -14,16 +17,25 @@ public sealed class EasyPatchOptions
     /// <summary>Public HTTPS base URL agents and installers use, e.g. https://patches.example.com.</summary>
     public string PublicUrl { get; set; } = "https://localhost";
 
-    /// <summary>Directory containing agent MSI packages (EasyPatchAgent-&lt;version&gt;-&lt;arch&gt;.msi).</summary>
+    /// <summary>Directory containing agent MSI packages (EasyPatchAgent-&lt;version&gt;-&lt;arch&gt;.msi), each optionally
+    /// with its release signature (<c>.msi.sig</c>).</summary>
     public string AgentPackagesPath { get; set; } = "/app/agent-packages";
+
+    /// <summary>At most this many automatic agent updates run at the same time (spreads the downloads).</summary>
+    public int AutomaticAgentUpdateConcurrency { get; set; } = 25;
 }
 
-public sealed record AgentPackage(string FileName, string Version, string Architecture, long SizeBytes, string Sha256, DateTimeOffset ModifiedAt);
+/// <param name="Release">The release signature file, when present and describing exactly this file. The server never
+/// checks the signature itself (it has no release key); agents do.</param>
+/// <param name="SignatureProblem">Why a <c>.sig</c> file next to the package was ignored.</param>
+public sealed record AgentPackage(string FileName, string Version, string Architecture, long SizeBytes, string Sha256, DateTimeOffset ModifiedAt,
+    AgentReleaseSignature? Release = null, string? SignatureProblem = null);
 
 /// <summary>Lists agent MSIs placed in the packages directory (mounted read-only into the API container).</summary>
 public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> options, TimeProvider clock, ILogger<AgentPackageService> logger)
 {
     private readonly ConcurrentDictionary<string, (long Length, DateTime Modified, string Sha256)> hashes = new();
+    private readonly ConcurrentDictionary<string, string> reportedProblems = new(StringComparer.Ordinal);
     private IReadOnlyList<AgentPackage> cached = [];
     private DateTimeOffset cachedAt = DateTimeOffset.MinValue;
     private readonly Lock gate = new();
@@ -91,8 +103,9 @@ public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> optio
                     hashes[key] = entry;
                 }
 
+                var (release, problem) = ReadSignature(path, name, info.Length, entry.Sha256);
                 result.Add(new AgentPackage(name, match.Groups["version"].Value, match.Groups["arch"].Value.ToLowerInvariant(),
-                    info.Length, entry.Sha256, new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero)));
+                    info.Length, entry.Sha256, new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero), release, problem));
             }
             catch (IOException ex)
             {
@@ -101,6 +114,58 @@ public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> optio
         }
 
         return result;
+    }
+
+    /// <summary>Reads <c>&lt;package&gt;.sig</c> and checks that it describes this exact file.</summary>
+    private (AgentReleaseSignature? Release, string? Problem) ReadSignature(string packagePath, string fileName, long size, string sha256)
+    {
+        var path = packagePath + AgentRelease.SignatureExtension;
+        if (!File.Exists(path))
+        {
+            return (null, null);
+        }
+
+        string? problem;
+        try
+        {
+            var info = new FileInfo(path);
+            if (info.Length > 16 * 1024)
+            {
+                problem = "The signature file is too large.";
+            }
+            else
+            {
+                var signature = JsonSerializer.Deserialize<AgentReleaseSignature>(File.ReadAllText(path), ContractJson.Options);
+                problem = signature switch
+                {
+                    null => "The signature file is empty.",
+                    { Format: not AgentRelease.SignatureFormat } => $"Unsupported signature format {signature.Format}.",
+                    _ when !AgentRelease.IsKeyId(signature.KeyId) => "The signature file has no valid key ID.",
+                    _ when AgentRelease.Validate(signature.Manifest) is [var error, ..] => error,
+                    _ when signature.Manifest.FileName != fileName => "The signature file is for a different package.",
+                    _ when signature.Manifest.SizeBytes != size || !signature.Manifest.Sha256.Equals(sha256, StringComparison.OrdinalIgnoreCase) =>
+                        "The package does not match its signature file (it was changed or rebuilt after signing).",
+                    _ when string.IsNullOrEmpty(signature.Signature) => "The signature file has no signature.",
+                    _ => null,
+                };
+                if (problem is null)
+                {
+                    return (signature, null);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            problem = "The signature file could not be read.";
+        }
+
+        if (!reportedProblems.TryGetValue(fileName, out var reported) || reported != problem)
+        {
+            reportedProblems[fileName] = problem;
+            logger.LogWarning("Ignoring the release signature of agent package {FileName}: {Problem}", fileName, problem);
+        }
+
+        return (null, problem);
     }
 }
 

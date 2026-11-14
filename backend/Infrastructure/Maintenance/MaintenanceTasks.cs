@@ -6,6 +6,7 @@ using EasyPatch.Infrastructure.Data;
 using EasyPatch.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace EasyPatch.Infrastructure.Maintenance;
 
@@ -286,6 +287,100 @@ public sealed class ScheduledRestartTask(
         if (created > 0)
         {
             logger.LogInformation("Scheduled {Count} restart job(s) from restart schedules", created);
+        }
+    }
+}
+
+/// <summary>
+/// Automatic agent updates: queues an agent update for online endpoints whose policy has <c>AgentAutoUpdateEnabled</c>
+/// and whose agent can update to a newer signed package. At most <see cref="EasyPatchOptions.AutomaticAgentUpdateConcurrency"/>
+/// run at once, so a new package reaches the fleet in waves instead of every agent downloading it in the same minute.
+/// </summary>
+public sealed class AgentUpdateTask(
+    EasyPatchDbContext db,
+    PolicyService policies,
+    JobService jobs,
+    AgentPackageService packages,
+    IOptions<EasyPatchOptions> options,
+    TimeProvider clock,
+    ILogger<AgentUpdateTask> logger) : IMaintenanceTask
+{
+    /// <summary>After a failed or cancelled update the same version is not tried again for this long.</summary>
+    public static readonly TimeSpan RetryAfter = TimeSpan.FromHours(6);
+
+    /// <summary>A version that failed this many times is only installed when an administrator asks.</summary>
+    public const int MaxFailuresPerVersion = 3;
+
+    public string Name => "agent-updates";
+    public long LockKey => 0x4550_0007;
+    public TimeSpan Interval => TimeSpan.FromMinutes(2);
+
+    public async Task RunOnceAsync(CancellationToken ct)
+    {
+        if (!packages.List().Any(p => p.Release is not null))
+        {
+            return; // nothing is signed, so nothing can be offered
+        }
+
+        var active = await db.Jobs.CountAsync(j => j.Type == JobType.AgentUpdate && JobTransitions.DedupeStatuses.Contains(j.Status), ct);
+        var slots = options.Value.AutomaticAgentUpdateConcurrency - active;
+        if (slots <= 0)
+        {
+            return;
+        }
+
+        var now = clock.GetUtcNow();
+        var resolver = await policies.CreateResolverAsync(ct);
+        var candidates = await db.Endpoints.AsNoTracking()
+            .Where(e => e.Status == EndpointStatus.Active && e.Organization!.IsActive && e.IsOnline &&
+                        e.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate) &&
+                        !db.Jobs.Any(j => j.EndpointId == e.Id && j.Type == JobType.AgentUpdate && JobTransitions.DedupeStatuses.Contains(j.Status)))
+            .OrderBy(e => e.LastCheckInAt)
+            .ToListAsync(ct);
+
+        var created = 0;
+        foreach (var endpoint in candidates)
+        {
+            if (created >= slots)
+            {
+                break;
+            }
+
+            if (!resolver(endpoint.OrganizationId, endpoint.SiteId, endpoint.Id).AgentAutoUpdateEnabled ||
+                AgentUpdatePlanner.Resolve(endpoint, packages).Package is not { } package)
+            {
+                continue;
+            }
+
+            var key = "agent-update:" + package.Version;
+            var previous = await db.Jobs.AsNoTracking()
+                .Where(j => j.EndpointId == endpoint.Id && j.Type == JobType.AgentUpdate && j.DedupeKey == key &&
+                            (j.Status == JobStatus.Failed || j.Status == JobStatus.Cancelled))
+                .Select(j => new { j.Status, j.CompletedAt })
+                .ToListAsync(ct);
+            if (previous.Count(p => p.Status == JobStatus.Failed) >= MaxFailuresPerVersion ||
+                previous.Exists(p => p.CompletedAt > now - RetryAfter))
+            {
+                continue;
+            }
+
+            try
+            {
+                await jobs.CreateAsync(new CreateJobRequest(endpoint.Id, JobType.AgentUpdate, Trigger: JobTrigger.System,
+                    ExpiresAt: now.AddHours(24), AgentVersion: package.Version), ct);
+                created++;
+            }
+            catch (AppException ex) when (ex.Code is "duplicate_job" or "endpoint_not_active" or AgentUpdateTarget.UpgradeRequired or
+                                              AgentUpdateTarget.UpToDate or AgentUpdateTarget.NoPackage or AgentUpdateTarget.NotSigned or
+                                              AgentUpdateTarget.KeyNotTrusted)
+            {
+                db.ChangeTracker.Clear();
+            }
+        }
+
+        if (created > 0)
+        {
+            logger.LogInformation("Queued {Count} automatic agent update(s)", created);
         }
     }
 }

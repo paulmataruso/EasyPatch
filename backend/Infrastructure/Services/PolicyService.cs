@@ -114,6 +114,7 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
             values.MaxConcurrentInstallsPerSite ??= defaults.MaxConcurrentInstallsPerSite;
             values.TrayIconEnabled ??= defaults.TrayIconEnabled;
             values.InstallNotificationsEnabled ??= defaults.InstallNotificationsEnabled;
+            values.AgentAutoUpdateEnabled ??= defaults.AgentAutoUpdateEnabled;
         }
 
         if (existing is null)
@@ -142,6 +143,7 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
         existing.MaxConcurrentInstallsPerSite = values.MaxConcurrentInstallsPerSite;
         existing.TrayIconEnabled = values.TrayIconEnabled;
         existing.InstallNotificationsEnabled = values.InstallNotificationsEnabled;
+        existing.AgentAutoUpdateEnabled = values.AgentAutoUpdateEnabled;
         existing.RestartSchedule = values.RestartSchedule;
         existing.WindowsUpdate = values.WindowsUpdate;
         existing.UpdatedAt = clock.GetUtcNow();

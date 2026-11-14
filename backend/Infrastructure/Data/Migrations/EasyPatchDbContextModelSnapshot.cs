@@ -297,6 +297,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("AgentArchitecture")
+                        .HasColumnType("text")
+                        .HasColumnName("agent_architecture");
+
                     b.PrimitiveCollection<List<string>>("AgentCapabilities")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -307,6 +311,13 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("AgentInstalledAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("agent_installed_at");
+
+                    b.PrimitiveCollection<List<string>>("AgentReleaseKeyIds")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("agent_release_key_ids")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<string>("AgentVersion")
                         .HasMaxLength(255)
@@ -1704,6 +1715,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.Property<bool?>("AcceptEulas")
                         .HasColumnType("boolean")
                         .HasColumnName("accept_eulas");
+
+                    b.Property<bool?>("AgentAutoUpdateEnabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("agent_auto_update_enabled");
 
                     b.PrimitiveCollection<List<string>>("AllowedCategories")
                         .HasColumnType("text[]")

@@ -66,6 +66,12 @@ public sealed class Endpoint
 
     /// <summary><see cref="EasyPatch.Contracts.Agent.AgentCapabilities"/> from the latest check-in.</summary>
     public List<string> AgentCapabilities { get; set; } = [];
+
+    /// <summary>Package architecture of the agent build (<c>x64</c> or <c>arm64</c>), for agent updates.</summary>
+    public string? AgentArchitecture { get; set; }
+
+    /// <summary>Release keys the agent accepts updates from (<see cref="EasyPatch.Contracts.Agent.AgentRelease.KeyId"/>).</summary>
+    public List<string> AgentReleaseKeyIds { get; set; } = [];
     public int? SignedInUsers { get; set; }
     public int? TrayConnectedSessions { get; set; }
 

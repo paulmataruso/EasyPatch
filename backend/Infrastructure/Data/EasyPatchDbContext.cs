@@ -208,6 +208,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.Notes).HasMaxLength(4000);
             e.Property(x => x.WindowsUpdatePolicyStatus).HasColumnType("jsonb");
             e.Property(x => x.AgentCapabilities).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.AgentReleaseKeyIds).HasDefaultValueSql("'{}'::text[]");
             e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(x => x.OrganizationId);

@@ -252,6 +252,18 @@ public sealed class CheckInService(
             endpoint.AgentCapabilities = capabilities;
         }
 
+        var architecture = request.AgentArchitecture is { } arch && AgentRelease.Architectures.Contains(arch) ? arch : null;
+        if (endpoint.AgentArchitecture != architecture)
+        {
+            endpoint.AgentArchitecture = architecture;
+        }
+
+        var keyIds = request.ReleaseKeyIds.Where(AgentRelease.IsKeyId).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(8).ToList();
+        if (!keyIds.SequenceEqual(endpoint.AgentReleaseKeyIds))
+        {
+            endpoint.AgentReleaseKeyIds = keyIds;
+        }
+
         if (request.Sessions is { } sessions)
         {
             var signedIn = Math.Clamp(sessions.SignedInUsers, 0, 10_000);
