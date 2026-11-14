@@ -36,7 +36,6 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Logging.EventLog" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\EasyPatch.Agent.Core\EasyPatch.Agent.Core.csproj" />
