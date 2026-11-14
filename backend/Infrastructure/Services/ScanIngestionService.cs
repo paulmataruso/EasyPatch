@@ -72,7 +72,8 @@ public sealed class ScanIngestionService(
         {
             var message = report.ErrorMessage ?? WindowsUpdateErrors.DescribeCode(report.ErrorCode);
             endpoint.LastScanError = Truncate(message, 2000);
-            EndpointEvents.Add(db, endpoint, "ScanFailed", $"Windows Update scan failed: {message}", now, EventSeverity.Warning, report.JobId,
+            var what = endpoint.Platform == AgentPlatforms.Linux ? "Package update scan" : "Windows Update scan";
+            EndpointEvents.Add(db, endpoint, "ScanFailed", $"{what} failed: {message}", now, EventSeverity.Warning, report.JobId,
                 new { report.ErrorCode });
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
@@ -109,6 +110,15 @@ public sealed class ScanIngestionService(
             scan.Id,
             now);
         db.EndpointUpdates.AddRange(result.Added);
+
+        // Linux: remember which version each endpoint had installed (the catalog row is shared by every endpoint).
+        foreach (var reported in report.Missing.Concat(report.Installed))
+        {
+            if (reported.Package is { } package && rows.TryGetValue(reported.UpdateGuid, out var packageRow))
+            {
+                packageRow.InstalledVersion = Truncate(package.InstalledVersion, 255);
+            }
+        }
 
         var previousMissing = endpoint.MissingRequiredCount;
         ComplianceService.ApplyCounts(endpoint, rows.Values, policy, now);
@@ -224,6 +234,18 @@ public sealed class ScanIngestionService(
         endpoint.EsuLicenseDetected = report.EsuLicenseDetected ?? false;
         endpoint.WindowsUpdateServiceStartMode = Truncate(report.WindowsUpdateServiceStartMode, 255);
         endpoint.WindowsUpdateServiceState = Truncate(report.WindowsUpdateServiceState, 255);
+        endpoint.Platform = AgentPlatforms.Normalize(report.Platform) ?? endpoint.Platform;
+        endpoint.OsId = Truncate(report.OsId?.ToLowerInvariant(), 64);
+        endpoint.KernelVersion = Truncate(report.KernelVersion, 255);
+        endpoint.PackageManager = Truncate(report.PackageManager, 16);
+        endpoint.KeyProtection = Truncate(report.KeyProtection, 32);
+        if (endpoint.Platform == AgentPlatforms.Linux)
+        {
+            // There is no build number on Linux: the version is the release ("12.8", "24.04.1 LTS") and the "build" is the
+            // running kernel, so OsChanged records kernel changes (normally a restart after a kernel update).
+            endpoint.OsVersion = Truncate(report.OsDisplayVersion ?? report.OsVersion, 255);
+            endpoint.OsBuild = endpoint.KernelVersion;
+        }
         endpoint.AgentVersion = Truncate(report.AgentVersion, 255);
         endpoint.AgentInstalledAt = report.AgentInstalledAt ?? endpoint.AgentInstalledAt;
         endpoint.LastInventoryAt = now;
@@ -237,7 +259,9 @@ public sealed class ScanIngestionService(
 
         if (previousOs is not null && previousOs != endpoint.OsBuild)
         {
-            EndpointEvents.Add(db, endpoint, "OsChanged", $"Operating system build changed from {previousOs} to {endpoint.OsBuild}.", now);
+            EndpointEvents.Add(db, endpoint, "OsChanged", endpoint.Platform == AgentPlatforms.Linux
+                ? $"Running kernel changed from {previousOs} to {endpoint.OsBuild}."
+                : $"Operating system build changed from {previousOs} to {endpoint.OsBuild}.", now);
         }
 
         if (string.Equals(endpoint.WindowsUpdateServiceStartMode, "Disabled", StringComparison.OrdinalIgnoreCase))
@@ -336,7 +360,15 @@ public sealed class ScanIngestionService(
         var category = UpdateClassifier.Classify(r);
         var classification = Truncate(UpdateClassifier.GetMicrosoftClassificationName(r.Categories), 128);
         var products = UpdateClassifier.GetProducts(r.Categories).Select(p => Truncate(p, 200)!).Take(20).ToList();
+        var package = r.Package;
+        var packageName = Truncate(package?.Name, 255);
+        var packageVersion = Truncate(package?.Version, 255);
+        var packageArch = Truncate(package?.Architecture, 32);
+        var repository = Truncate(package?.Repository, 255);
+        var advisories = package?.Advisories.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => Truncate(a.Trim(), 64)!).Distinct().Take(50).ToList() ?? [];
         var changed = row.Title != title || (description is not null && row.Description != description) ||
+                      row.PackageName != packageName || row.PackageVersion != packageVersion || row.PackageArchitecture != packageArch ||
+                      row.PackageRepository != repository || !row.Advisories.SequenceEqual(advisories) ||
                       !row.KbNumbers.SequenceEqual(kbs) || row.Category != category || row.MsClassification != classification ||
                       !row.Products.SequenceEqual(products) || row.MaxDownloadSizeBytes != r.MaxDownloadSize ||
                       row.ReleaseDate != r.LastDeploymentChangeTime || row.IsOptional != r.BrowseOnly ||
@@ -366,6 +398,11 @@ public sealed class ScanIngestionService(
         row.RebootBehavior = r.RebootBehavior;
         row.SupportUrl = Truncate(r.SupportUrl, 1000);
         row.SupersededUpdateGuids = r.SupersededUpdateGuids.Take(500).ToList();
+        row.PackageName = packageName;
+        row.PackageVersion = packageVersion;
+        row.PackageArchitecture = packageArch;
+        row.PackageRepository = repository;
+        row.Advisories = advisories;
         row.UpdatedAt = now;
     }
 
@@ -387,9 +424,13 @@ public sealed class ScanIngestionService(
         endpoint.ManagedByMdm = source.ManagedByMdm;
     }
 
-    private static string? DescribeSource(UpdateSourceInfo? source) => source is null
-        ? null
-        : source.Type == UpdateSourceType.Wsus ? $"WSUS ({source.WsusServer})" : source.Type.ToString();
+    private static string? DescribeSource(UpdateSourceInfo? source) => source?.Type switch
+    {
+        null => null,
+        UpdateSourceType.Wsus => $"WSUS ({source.WsusServer})",
+        UpdateSourceType.PackageRepositories => "Package repositories",
+        var type => type.ToString(),
+    };
 
     private static DateTimeOffset Clamp(DateTimeOffset value, DateTimeOffset now) =>
         value == default || value > now.AddMinutes(10) ? now : value.ToUniversalTime();

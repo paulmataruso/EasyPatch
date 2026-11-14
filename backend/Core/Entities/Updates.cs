@@ -2,7 +2,8 @@ using EasyPatch.Contracts;
 
 namespace EasyPatch.Core.Entities;
 
-/// <summary>Catalog entry for one revision of a Windows update.</summary>
+/// <summary>Catalog entry for one revision of a Windows update, or one version of a Linux package for one distribution
+/// release.</summary>
 public sealed class Update
 {
     public Guid Id { get; set; }
@@ -25,6 +26,21 @@ public sealed class Update
     public int? RebootBehavior { get; set; }
     public string? SupportUrl { get; set; }
     public List<Guid> SupersededUpdateGuids { get; set; } = [];
+
+    /// <summary>Linux: package name (null for Windows updates).</summary>
+    public string? PackageName { get; set; }
+
+    /// <summary>Linux: the version this update installs.</summary>
+    public string? PackageVersion { get; set; }
+
+    /// <summary>Linux: package architecture (amd64, x86_64, noarch, …).</summary>
+    public string? PackageArchitecture { get; set; }
+
+    /// <summary>Linux: repository the version comes from.</summary>
+    public string? PackageRepository { get; set; }
+
+    /// <summary>Linux: distribution advisories (e.g. RHSA-2024:1234).</summary>
+    public List<string> Advisories { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
@@ -56,6 +72,9 @@ public sealed class EndpointUpdate
     public int FailedAttempts { get; set; }
     public string? ErrorCode { get; set; }
     public string? ErrorMessage { get; set; }
+
+    /// <summary>Linux: the package version installed at the latest scan that reported this update.</summary>
+    public string? InstalledVersion { get; set; }
 }
 
 public sealed class UpdateExclusion

@@ -199,6 +199,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
                          nameof(Endpoint.CurrentActivity), nameof(Endpoint.UpdateSourceType), nameof(Endpoint.UpdateSourceServer),
                          nameof(Endpoint.TargetReleaseVersion), nameof(Endpoint.AutomaticUpdatesMode),
                          nameof(Endpoint.WindowsUpdateServiceStartMode), nameof(Endpoint.WindowsUpdateServiceState),
+                         nameof(Endpoint.KernelVersion),
                      })
             {
                 e.Property(name).HasMaxLength(255);
@@ -209,6 +210,12 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.WindowsUpdatePolicyStatus).HasColumnType("jsonb");
             e.Property(x => x.AgentCapabilities).HasDefaultValueSql("'{}'::text[]");
             e.Property(x => x.AgentReleaseKeyIds).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Platform).HasMaxLength(16).HasDefaultValue(EasyPatch.Contracts.Agent.AgentPlatforms.Windows);
+            e.Property(x => x.OsId).HasMaxLength(64);
+            e.Property(x => x.PackageManager).HasMaxLength(16);
+            e.Property(x => x.KeyProtection).HasMaxLength(32);
+            e.Property(x => x.AgentPackageFormat).HasMaxLength(8);
+            e.HasIndex(x => x.Platform);
             e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(x => x.OrganizationId);
@@ -292,6 +299,11 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.MsClassification).HasMaxLength(128);
             e.Property(x => x.MsrcSeverity).HasMaxLength(32);
             e.Property(x => x.SupportUrl).HasMaxLength(1000);
+            e.Property(x => x.PackageName).HasMaxLength(255);
+            e.Property(x => x.PackageVersion).HasMaxLength(255);
+            e.Property(x => x.PackageArchitecture).HasMaxLength(32);
+            e.Property(x => x.PackageRepository).HasMaxLength(255);
+            e.Property(x => x.Advisories).HasDefaultValueSql("'{}'::text[]");
             e.HasIndex(x => new { x.UpdateGuid, x.RevisionNumber }).IsUnique();
             e.HasIndex(x => x.Category);
             e.Ignore(x => x.PrimaryKb);
@@ -301,6 +313,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.ToTable("endpoint_updates");
             e.Property(x => x.ErrorCode).HasMaxLength(32);
             e.Property(x => x.ErrorMessage).HasMaxLength(2000);
+            e.Property(x => x.InstalledVersion).HasMaxLength(255);
             e.HasIndex(x => new { x.EndpointId, x.UpdateGuid }).IsUnique();
             e.HasIndex(x => new { x.EndpointId, x.State });
             e.HasIndex(x => new { x.UpdateGuid, x.State });

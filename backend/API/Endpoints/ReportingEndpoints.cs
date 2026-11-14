@@ -47,12 +47,13 @@ public static class ReportingEndpoints
             var failed24 = await jobs.CountAsync(j => j.Status == JobStatus.Failed && j.CompletedAt >= dayAgo, ct);
             var pending = await db.EnrollmentRequests.AsNoTracking().ForTenant(tenant, r => r.OrganizationId)
                 .CountAsync(r => r.Status == EnrollmentRequestStatus.Pending && r.ExpiresAt > now, ct);
-            var latest = Mapping.ParseVersion(packages.GetLatest()?.Version);
+            var latest = Mapping.LatestAgentVersions.From(packages);
             var outdated = 0;
-            if (latest is not null)
+            if (latest.Any)
             {
-                var versions = await endpoints.GroupBy(e => e.AgentVersion).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
-                outdated = versions.Where(v => Mapping.IsOutdated(v.Key, latest)).Sum(v => v.Count);
+                var versions = await endpoints.GroupBy(e => new { e.AgentVersion, e.AgentPackageFormat })
+                    .Select(g => new { g.Key.AgentVersion, g.Key.AgentPackageFormat, Count = g.Count() }).ToListAsync(ct);
+                outdated = versions.Where(v => latest.IsOutdated(v.AgentVersion, v.AgentPackageFormat)).Sum(v => v.Count);
             }
 
             var orgs = await db.Organizations.AsNoTracking().ForTenant(tenant, o => o.Id).Where(o => o.IsActive).ToListAsync(ct);

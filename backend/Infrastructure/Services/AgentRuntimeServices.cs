@@ -229,7 +229,7 @@ public sealed class CheckInService(
         }
 
         var lease = await jobs.LeaseForCheckInAsync(endpoint, request.ActiveJobIds, policy, settings, ct);
-        var latest = packages.GetLatest();
+        var latest = packages.GetLatest(endpoint.AgentArchitecture ?? "x64", endpoint.AgentPackageFormat ?? AgentRelease.FormatMsi);
         return new CheckInResponse
         {
             ServerTime = now,
@@ -256,6 +256,12 @@ public sealed class CheckInService(
         if (endpoint.AgentArchitecture != architecture)
         {
             endpoint.AgentArchitecture = architecture;
+        }
+
+        var format = AgentRelease.NormalizeFormat(request.AgentPackageFormat);
+        if (endpoint.AgentPackageFormat != format)
+        {
+            endpoint.AgentPackageFormat = format;
         }
 
         var keyIds = request.ReleaseKeyIds.Where(AgentRelease.IsKeyId).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(8).ToList();

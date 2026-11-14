@@ -17,8 +17,8 @@ public sealed class EasyPatchOptions
     /// <summary>Public HTTPS base URL agents and installers use, e.g. https://patches.example.com.</summary>
     public string PublicUrl { get; set; } = "https://localhost";
 
-    /// <summary>Directory containing agent MSI packages (EasyPatchAgent-&lt;version&gt;-&lt;arch&gt;.msi), each optionally
-    /// with its release signature (<c>.msi.sig</c>).</summary>
+    /// <summary>Directory containing agent packages (EasyPatchAgent-&lt;version&gt;-&lt;arch&gt;.&lt;msi|deb|rpm&gt;), each
+    /// optionally with its release signature (<c>.sig</c>).</summary>
     public string AgentPackagesPath { get; set; } = "/app/agent-packages";
 
     /// <summary>At most this many automatic agent updates run at the same time (spreads the downloads).</summary>
@@ -28,10 +28,11 @@ public sealed class EasyPatchOptions
 /// <param name="Release">The release signature file, when present and describing exactly this file. The server never
 /// checks the signature itself (it has no release key); agents do.</param>
 /// <param name="SignatureProblem">Why a <c>.sig</c> file next to the package was ignored.</param>
+/// <param name="Format">msi, deb or rpm (<see cref="AgentRelease.PackageFormats"/>).</param>
 public sealed record AgentPackage(string FileName, string Version, string Architecture, long SizeBytes, string Sha256, DateTimeOffset ModifiedAt,
-    AgentReleaseSignature? Release = null, string? SignatureProblem = null);
+    AgentReleaseSignature? Release = null, string? SignatureProblem = null, string Format = AgentRelease.FormatMsi);
 
-/// <summary>Lists agent MSIs placed in the packages directory (mounted read-only into the API container).</summary>
+/// <summary>Lists agent packages (MSI, deb, rpm) placed in the packages directory (mounted read-only into the API container).</summary>
 public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> options, TimeProvider clock, ILogger<AgentPackageService> logger)
 {
     private readonly ConcurrentDictionary<string, (long Length, DateTime Modified, string Sha256)> hashes = new();
@@ -40,7 +41,7 @@ public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> optio
     private DateTimeOffset cachedAt = DateTimeOffset.MinValue;
     private readonly Lock gate = new();
 
-    [GeneratedRegex(@"^EasyPatchAgent-(?<version>\d+\.\d+\.\d+(?:\.\d+)?)-(?<arch>x64|arm64)\.msi$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^EasyPatchAgent-(?<version>\d+\.\d+\.\d+(?:\.\d+)?)-(?<arch>x64|arm64)\.(?<format>msi|deb|rpm)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FileNamePattern();
 
     public IReadOnlyList<AgentPackage> List()
@@ -58,9 +59,18 @@ public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> optio
         }
     }
 
-    public AgentPackage? GetLatest(string architecture = "x64") =>
-        List().Where(p => p.Architecture.Equals(architecture, StringComparison.OrdinalIgnoreCase))
+    /// <summary>The newest package for an architecture and format (by default the x64 MSI).</summary>
+    public AgentPackage? GetLatest(string architecture = "x64", string format = AgentRelease.FormatMsi) =>
+        List().Where(p => p.Architecture.Equals(architecture, StringComparison.OrdinalIgnoreCase) &&
+                          p.Format.Equals(format, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(p => Version.TryParse(p.Version, out var v) ? v : new Version(0, 0))
+            .FirstOrDefault();
+
+    /// <summary>The newest agent version among the packages of one format (the version agents of that kind should run).</summary>
+    public string? GetLatestVersion(string format = AgentRelease.FormatMsi) =>
+        List().Where(p => p.Format.Equals(format, StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.Version)
+            .OrderByDescending(v => Version.TryParse(v, out var parsed) ? parsed : new Version(0, 0))
             .FirstOrDefault();
 
     public AgentPackage? Find(string fileName) =>
@@ -82,9 +92,15 @@ public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> optio
             return result;
         }
 
-        foreach (var path in Directory.EnumerateFiles(dir, "*.msi"))
+        foreach (var path in Directory.EnumerateFiles(dir, "EasyPatchAgent-*"))
         {
             var name = Path.GetFileName(path);
+            if (name.EndsWith(AgentRelease.SignatureExtension, StringComparison.OrdinalIgnoreCase) ||
+                name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var match = FileNamePattern().Match(name);
             if (!match.Success)
             {
@@ -105,7 +121,8 @@ public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> optio
 
                 var (release, problem) = ReadSignature(path, name, info.Length, entry.Sha256);
                 result.Add(new AgentPackage(name, match.Groups["version"].Value, match.Groups["arch"].Value.ToLowerInvariant(),
-                    info.Length, entry.Sha256, new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero), release, problem));
+                    info.Length, entry.Sha256, new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero), release, problem,
+                    match.Groups["format"].Value.ToLowerInvariant()));
             }
             catch (IOException ex)
             {

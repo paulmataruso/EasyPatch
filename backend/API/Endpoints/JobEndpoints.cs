@@ -186,7 +186,7 @@ public static class FleetUpdateEndpoints
             {
                 var u = catalog[r.UpdateGuid];
                 return new FleetUpdateDto(r.UpdateGuid, u.Title, u.PrimaryKb, u.Category, u.MsrcSeverity, u.ReleaseDate, u.MaxDownloadSizeBytes, r.Missing,
-                    r.Failed, r.Installed, r.PendingReboot, r.Excluded);
+                    r.Failed, r.Installed, r.PendingReboot, r.Excluded, Mapping.Package(u, null));
             }).ToList();
             return TypedResults.Ok(new PagedResult<FleetUpdateDto>(items, page.Page, page.PageSize, total));
         });
@@ -210,7 +210,8 @@ public static class FleetUpdateEndpoints
                     Excluded = gr.Count(x => x.State == EndpointUpdateState.Excluded || x.IsExcluded),
                 }).FirstOrDefaultAsync(ct);
             var summary = new FleetUpdateDto(updateGuid, u.Title, u.PrimaryKb, u.Category, u.MsrcSeverity, u.ReleaseDate, u.MaxDownloadSizeBytes,
-                states?.Missing ?? 0, states?.Failed ?? 0, states?.Installed ?? 0, states?.PendingReboot ?? 0, states?.Excluded ?? 0);
+                states?.Missing ?? 0, states?.Failed ?? 0, states?.Installed ?? 0, states?.PendingReboot ?? 0, states?.Excluded ?? 0,
+                Mapping.Package(u, null));
             return TypedResults.Ok(new FleetUpdateDetailDto(summary, u.Description, u.SupportUrl, u.KbNumbers, u.Products, u.MsClassification,
                 u.RebootBehavior is > 0, u.SupersededUpdateGuids));
         });

@@ -422,13 +422,7 @@ public static class EndpointEndpoints
             query = query.Where(e => e.RebootPending == reboot);
         }
 
-        var latest = Mapping.ParseVersion(packages.GetLatest()?.Version);
-        if (q.OutdatedAgent == true && latest is not null)
-        {
-            // Version comparison happens in memory; restrict to endpoints not on the latest version string first.
-            var latestText = latest.ToString();
-            query = query.Where(e => e.AgentVersion != latestText);
-        }
+        var latest = Mapping.LatestAgentVersions.From(packages);
 
         var desc = PagingExtensions.IsDescending(q.Dir);
         query = (q.Sort?.ToLowerInvariant()) switch
@@ -444,9 +438,11 @@ public static class EndpointEndpoints
         };
 
         var page = PageRequest.From(q.Page, q.PageSize);
-        if (q.OutdatedAgent == true && latest is not null)
+        if (q.OutdatedAgent == true && latest.Any)
         {
-            var all = (await query.Select(Mapping.EndpointRowProjection).ToListAsync(ct)).Where(r => Mapping.IsOutdated(r.AgentVersion, latest)).ToList();
+            // Version comparison happens in memory (per package format).
+            var all = (await query.Select(Mapping.EndpointRowProjection).ToListAsync(ct))
+                .Where(r => latest.IsOutdated(r.AgentVersion, r.AgentPackageFormat)).ToList();
             return new PagedResult<EndpointSummaryDto>(all.Skip(page.Skip).Take(page.PageSize).Select(r => Mapping.ToSummary(r, latest)).ToList(),
                 page.Page, page.PageSize, all.Count);
         }
@@ -461,10 +457,11 @@ public static class EndpointEndpoints
         var e = await db.Endpoints.AsNoTracking().Include(x => x.Organization).Include(x => x.Site).FirstOrDefaultAsync(x => x.Id == id, ct)
                 ?? throw AppException.NotFound("Endpoint");
         tenant.EnsureAccess(e.OrganizationId);
-        var latest = Mapping.ParseVersion(packages.GetLatest()?.Version);
+        var latest = Mapping.LatestAgentVersions.From(packages);
         var row = new Mapping.EndpointRow(e.Id, e.Hostname, e.OrganizationId, e.Organization!.Name, e.SiteId, e.Site?.Name, e.Status, e.OperatingSystem,
             e.OsVersion, e.OsBuild, e.OsBuildNumber, e.OsProductType, e.Architecture, e.AgentVersion, e.IsOnline, e.LastCheckInAt, e.LastScanAt,
-            e.ComplianceStatus, e.MissingRequiredCount, e.MissingTotalCount, e.FailedCount, e.RebootPending, e.OsSupportStatus, e.CurrentActivity, e.LastSeenIp);
+            e.ComplianceStatus, e.MissingRequiredCount, e.MissingTotalCount, e.FailedCount, e.RebootPending, e.OsSupportStatus, e.CurrentActivity, e.LastSeenIp,
+            e.Platform, e.AgentPackageFormat);
         var credentials = await db.AgentCredentials.AsNoTracking().Where(c => c.EndpointId == id).OrderByDescending(c => c.CreatedAt).Take(10)
             .Select(c => new CredentialDto(c.CredentialId, c.KeyFingerprint, c.CreatedAt, c.ExpiresAt, c.RevokedAt, c.RevokedReason, c.LastUsedAt))
             .ToListAsync(ct);
@@ -484,7 +481,8 @@ public static class EndpointEndpoints
             e.WindowsUpdatePolicyStatus is null ? null : JsonSerializer.Deserialize<WindowsUpdatePolicyReport>(e.WindowsUpdatePolicyStatus, ContractJson.Options),
             e.WindowsUpdatePolicyReportedAt,
             await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Endpoint && p.EndpointId == id, ct),
-            await AgentUpdateInfoAsync(e, packages, policies, ct));
+            await AgentUpdateInfoAsync(e, packages, policies, ct),
+            e.Platform == AgentPlatforms.Linux ? new LinuxDetailsDto(e.OsId, e.OsVersion, e.KernelVersion, e.PackageManager, e.KeyProtection) : null);
     }
 
     private static async Task<AgentUpdateInfoDto> AgentUpdateInfoAsync(EasyPatch.Core.Entities.Endpoint e, AgentPackageService packages, PolicyService policies, CancellationToken ct)
@@ -492,7 +490,7 @@ public static class EndpointEndpoints
         var target = AgentUpdatePlanner.Resolve(e, packages);
         var automatic = (await policies.ResolveAsync(e, ct)).AgentAutoUpdateEnabled;
         return new AgentUpdateInfoDto(e.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate), e.AgentArchitecture, e.AgentReleaseKeyIds, automatic,
-            target.Package?.Version, target.ErrorCode, target.Message);
+            target.Package?.Version, target.ErrorCode, target.Message, e.AgentPackageFormat);
     }
 
     internal static async Task EnsureEndpointAccessAsync(EasyPatchDbContext db, ITenantContext tenant, Guid id, CancellationToken ct)
@@ -526,7 +524,8 @@ public static class EndpointEndpoints
     private static EndpointUpdateDto ToUpdateDto(EndpointUpdate row, Update update, JobOverlayDto? overlay) => new(
         row.UpdateGuid, update.RevisionNumber, update.Title, update.Description, update.PrimaryKb, update.KbNumbers, update.Category, update.MsClassification,
         update.MsrcSeverity, update.ReleaseDate, update.MaxDownloadSizeBytes, update.RebootBehavior is > 0, update.SupportUrl, row.State, row.IsRequired,
-        row.IsExcluded, row.FirstDetectedAt, row.StateChangedAt, row.InstalledAt, row.FailedAttempts, row.ErrorCode, row.ErrorMessage, overlay);
+        row.IsExcluded, row.FirstDetectedAt, row.StateChangedAt, row.InstalledAt, row.FailedAttempts, row.ErrorCode, row.ErrorMessage, overlay,
+        Mapping.Package(update, row.InstalledVersion));
 
     internal static List<Guid> ParseGuids(string? csv) =>
         string.IsNullOrWhiteSpace(csv)

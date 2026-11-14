@@ -43,6 +43,12 @@ public static class UpdateClassifier
     public static UpdateCategory Classify(ReportedUpdate update)
     {
         ArgumentNullException.ThrowIfNull(update);
+        if (update.Package is { } package)
+        {
+            // Linux packages: the agent decides from the repository (apt) or the distribution's advisories (dnf).
+            return package.Security ? UpdateCategory.Security : UpdateCategory.Other;
+        }
+
         return Classify(update.Title, update.IsDriver, update.Categories);
     }
 

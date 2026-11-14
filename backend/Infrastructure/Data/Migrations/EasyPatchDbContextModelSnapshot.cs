@@ -312,6 +312,11 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("agent_installed_at");
 
+                    b.Property<string>("AgentPackageFormat")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("agent_package_format");
+
                     b.PrimitiveCollection<List<string>>("AgentReleaseKeyIds")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -414,6 +419,16 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_virtual_machine");
 
+                    b.Property<string>("KernelVersion")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("kernel_version");
+
+                    b.Property<string>("KeyProtection")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("key_protection");
+
                     b.Property<DateTimeOffset?>("LastBootAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_boot_at");
@@ -502,6 +517,11 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("date")
                         .HasColumnName("os_end_of_servicing");
 
+                    b.Property<string>("OsId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("os_id");
+
                     b.Property<DateTimeOffset?>("OsInstallDate")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("os_install_date");
@@ -522,9 +542,22 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("os_version");
 
+                    b.Property<string>("PackageManager")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("package_manager");
+
                     b.Property<int>("PendingRebootUpdateCount")
                         .HasColumnType("integer")
                         .HasColumnName("pending_reboot_update_count");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Windows")
+                        .HasColumnName("platform");
 
                     b.Property<string>("ProcessorName")
                         .HasMaxLength(255)
@@ -640,6 +673,8 @@ namespace EasyPatch.Infrastructure.Data.Migrations
 
                     b.HasIndex("OrganizationId");
 
+                    b.HasIndex("Platform");
+
                     b.HasIndex("SiteId");
 
                     b.HasIndex("OrganizationId", "SmbiosUuid");
@@ -737,6 +772,11 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("InstalledAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("installed_at");
+
+                    b.Property<string>("InstalledVersion")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("installed_version");
 
                     b.Property<bool>("IsExcluded")
                         .HasColumnType("boolean")
@@ -1659,6 +1699,184 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                             EndOfServicing = new DateOnly(2034, 10, 10),
                             Product = "Windows Server",
                             VersionLabel = "2025"
+                        },
+                        new
+                        {
+                            Id = new Guid("22bb00f0-690e-326b-23d4-8705f6afc9fe"),
+                            BuildNumber = 11,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2026, 8, 31),
+                            Notes = "Regular security support ended 2024-08-14; Debian LTS until 2026-08-31.",
+                            Product = "Debian",
+                            VersionLabel = "11 (bullseye)"
+                        },
+                        new
+                        {
+                            Id = new Guid("4b5263fb-8671-2767-fc78-2a9ec3658c1b"),
+                            BuildNumber = 12,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2028, 6, 30),
+                            Notes = "Regular security support until 2026-06-10; Debian LTS until 2028-06-30.",
+                            Product = "Debian",
+                            VersionLabel = "12 (bookworm)"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0ccec08-1482-08c1-7778-1c9b63dcee85"),
+                            BuildNumber = 13,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2030, 6, 30),
+                            Notes = "Regular security support until about 2028-08; Debian LTS until 2030-06-30.",
+                            Product = "Debian",
+                            VersionLabel = "13 (trixie)"
+                        },
+                        new
+                        {
+                            Id = new Guid("31ccfcc2-4649-9a83-2ffe-c7bb0fbcb5d1"),
+                            BuildNumber = 2004,
+                            EditionGroup = "LTS",
+                            EndOfServicing = new DateOnly(2025, 5, 31),
+                            EsuEndDate = new DateOnly(2030, 4, 30),
+                            Notes = "ESU: Ubuntu Pro (ESM) until 2030-04.",
+                            Product = "Ubuntu",
+                            VersionLabel = "20.04 LTS"
+                        },
+                        new
+                        {
+                            Id = new Guid("c349ec45-8a97-feb3-8289-4072a8b49447"),
+                            BuildNumber = 2204,
+                            EditionGroup = "LTS",
+                            EndOfServicing = new DateOnly(2027, 6, 30),
+                            EsuEndDate = new DateOnly(2032, 4, 30),
+                            Notes = "ESU: Ubuntu Pro (ESM) until 2032-04.",
+                            Product = "Ubuntu",
+                            VersionLabel = "22.04 LTS"
+                        },
+                        new
+                        {
+                            Id = new Guid("84ef8613-29a0-1481-7ba3-a323a4b8f2fc"),
+                            BuildNumber = 2404,
+                            EditionGroup = "LTS",
+                            EndOfServicing = new DateOnly(2029, 5, 31),
+                            EsuEndDate = new DateOnly(2034, 4, 30),
+                            Notes = "ESU: Ubuntu Pro (ESM) until 2034-04.",
+                            Product = "Ubuntu",
+                            VersionLabel = "24.04 LTS"
+                        },
+                        new
+                        {
+                            Id = new Guid("bb7f3dc0-8931-aa7b-3574-08955eaf1154"),
+                            BuildNumber = 2604,
+                            EditionGroup = "LTS",
+                            EndOfServicing = new DateOnly(2031, 5, 31),
+                            EsuEndDate = new DateOnly(2036, 4, 30),
+                            Notes = "ESU: Ubuntu Pro (ESM) until 2036-04.",
+                            Product = "Ubuntu",
+                            VersionLabel = "26.04 LTS"
+                        },
+                        new
+                        {
+                            Id = new Guid("7aa9d747-24c3-0ed2-9acb-c983ee112d83"),
+                            BuildNumber = 8,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2029, 5, 31),
+                            Notes = "End of maintenance support; Extended Life Cycle Support is sold separately.",
+                            Product = "Red Hat Enterprise Linux",
+                            VersionLabel = "8"
+                        },
+                        new
+                        {
+                            Id = new Guid("f626d641-5329-d4fd-77b0-063a8afd630e"),
+                            BuildNumber = 9,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2032, 5, 31),
+                            Notes = "End of maintenance support; Extended Life Cycle Support is sold separately.",
+                            Product = "Red Hat Enterprise Linux",
+                            VersionLabel = "9"
+                        },
+                        new
+                        {
+                            Id = new Guid("0c96e30c-cd3e-64c4-f2e1-5f30db5d057c"),
+                            BuildNumber = 10,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2035, 5, 31),
+                            Notes = "End of maintenance support; Extended Life Cycle Support is sold separately.",
+                            Product = "Red Hat Enterprise Linux",
+                            VersionLabel = "10"
+                        },
+                        new
+                        {
+                            Id = new Guid("f2725818-966a-1354-9c18-be7fee3b1797"),
+                            BuildNumber = 8,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2029, 5, 31),
+                            Product = "Rocky Linux",
+                            VersionLabel = "8"
+                        },
+                        new
+                        {
+                            Id = new Guid("4b34aad0-fc45-22de-2fc5-ffba17777891"),
+                            BuildNumber = 9,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2032, 5, 31),
+                            Product = "Rocky Linux",
+                            VersionLabel = "9"
+                        },
+                        new
+                        {
+                            Id = new Guid("5ddeeda8-5605-7e21-d062-5d125f6fbb41"),
+                            BuildNumber = 10,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2035, 5, 31),
+                            Product = "Rocky Linux",
+                            VersionLabel = "10"
+                        },
+                        new
+                        {
+                            Id = new Guid("4a8e58e5-7f89-7930-9d07-f4ebc62cfd9c"),
+                            BuildNumber = 8,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2029, 3, 1),
+                            Product = "AlmaLinux",
+                            VersionLabel = "8"
+                        },
+                        new
+                        {
+                            Id = new Guid("71f39a06-bc62-98dc-9775-f8083fa3057c"),
+                            BuildNumber = 9,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2032, 5, 31),
+                            Product = "AlmaLinux",
+                            VersionLabel = "9"
+                        },
+                        new
+                        {
+                            Id = new Guid("38cbbda1-7af1-08a0-6f0b-debd24f91501"),
+                            BuildNumber = 10,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2035, 5, 31),
+                            Product = "AlmaLinux",
+                            VersionLabel = "10"
+                        },
+                        new
+                        {
+                            Id = new Guid("ac90225a-f807-a142-01ca-c25dd3f8b803"),
+                            BuildNumber = 8,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2029, 7, 31),
+                            Notes = "End of Premier Support.",
+                            Product = "Oracle Linux",
+                            VersionLabel = "8"
+                        },
+                        new
+                        {
+                            Id = new Guid("717490f1-3a05-f959-4061-5f0f815f77d2"),
+                            BuildNumber = 9,
+                            EditionGroup = "Any",
+                            EndOfServicing = new DateOnly(2032, 6, 30),
+                            Notes = "End of Premier Support.",
+                            Product = "Oracle Linux",
+                            VersionLabel = "9"
                         });
                 });
 
@@ -1932,6 +2150,13 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.PrimitiveCollection<List<string>>("Advisories")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("advisories")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<string>("Category")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -1977,6 +2202,26 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("msrc_severity");
+
+                    b.Property<string>("PackageArchitecture")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("package_architecture");
+
+                    b.Property<string>("PackageName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("package_name");
+
+                    b.Property<string>("PackageRepository")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("package_repository");
+
+                    b.Property<string>("PackageVersion")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("package_version");
 
                     b.PrimitiveCollection<List<string>>("Products")
                         .IsRequired()

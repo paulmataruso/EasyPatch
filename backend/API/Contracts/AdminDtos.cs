@@ -244,7 +244,8 @@ public sealed record EndpointSummaryDto(
     bool RebootPending,
     OsSupportStatus OsSupportStatus,
     string? CurrentActivity,
-    string? LastSeenIp);
+    string? LastSeenIp,
+    string Platform = "Windows");
 
 public sealed record CredentialDto(string CredentialId, string KeyFingerprint, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, DateTimeOffset? RevokedAt,
     string? RevokedReason, DateTimeOffset? LastUsedAt);
@@ -299,7 +300,12 @@ public sealed record EndpointDetailDto(
     WindowsUpdatePolicyReport? WindowsUpdatePolicy,
     DateTimeOffset? WindowsUpdatePolicyReportedAt,
     bool HasOwnPolicy,
-    AgentUpdateInfoDto? AgentUpdate = null);
+    AgentUpdateInfoDto? AgentUpdate = null,
+    LinuxDetailsDto? Linux = null);
+
+/// <summary>Linux-only endpoint details (null for Windows endpoints).</summary>
+/// <param name="KeyProtection">How the agent's private key is protected: systemd-creds-host or file-permissions.</param>
+public sealed record LinuxDetailsDto(string? OsId, string? OsVersion, string? KernelVersion, string? PackageManager, string? KeyProtection);
 
 /// <summary>Whether the endpoint's agent can update itself, and to what.</summary>
 /// <param name="AvailableVersion">The version an agent update would install now (null when none).</param>
@@ -311,7 +317,8 @@ public sealed record AgentUpdateInfoDto(
     bool AutomaticUpdates,
     string? AvailableVersion,
     string? Code,
-    string? Message);
+    string? Message,
+    string? PackageFormat = null);
 
 public sealed record UpdateEndpointRequest(Guid? SiteId, string? Notes, EsuOverride? EsuOverride);
 
@@ -342,7 +349,12 @@ public sealed record EndpointUpdateDto(
     int FailedAttempts,
     string? ErrorCode,
     string? ErrorMessage,
-    JobOverlayDto? ActiveJob);
+    JobOverlayDto? ActiveJob,
+    PackageInfoDto? Package = null);
+
+/// <summary>Linux package behind an update. <c>InstalledVersion</c> is the endpoint's version (endpoint views only).</summary>
+public sealed record PackageInfoDto(string Name, string? Architecture, string? Version, string? InstalledVersion, string? Repository,
+    IReadOnlyList<string> Advisories);
 
 public sealed record UpdateHistoryDto(long Id, Guid? UpdateGuid, string Title, string? KbNumber, string Operation, int ResultCode, string Result, string? HResult,
     string? ErrorDescription, DateTimeOffset Date);
@@ -400,7 +412,8 @@ public sealed record FleetUpdateDto(
     int FailedCount,
     int InstalledCount,
     int PendingRebootCount,
-    int ExcludedCount);
+    int ExcludedCount,
+    PackageInfoDto? Package = null);
 
 public sealed record FleetUpdateDetailDto(FleetUpdateDto Summary, string? Description, string? SupportUrl, IReadOnlyList<string> KbNumbers,
     IReadOnlyList<string> Products, string? MsClassification, bool RebootLikely, IReadOnlyList<Guid> SupersededUpdateGuids);
@@ -501,7 +514,8 @@ public sealed record EnrollmentTokenDto(
 
 public sealed record CreateTokensRequest(Guid OrganizationId, Guid? SiteId, string? Description, int ExpiresInHours, int MaxUses, int Count);
 
-public sealed record CreatedTokenDto(EnrollmentTokenDto Token, string PlaintextToken, string MsiExecCommand);
+/// <param name="LinuxEnrollCommand">Enrolls an installed Linux agent; the token is piped in so it never shows in the process list.</param>
+public sealed record CreatedTokenDto(EnrollmentTokenDto Token, string PlaintextToken, string MsiExecCommand, string? LinuxEnrollCommand = null);
 
 public sealed record DeploymentCodeDto(
     Guid Id,
@@ -520,13 +534,15 @@ public sealed record DeploymentCodeDto(
     int ApprovedCount,
     string State,
     string OneLiner,
-    string ScriptUrl);
+    string ScriptUrl,
+    string? LinuxOneLiner = null,
+    string? LinuxScriptUrl = null);
 
 public sealed record CreateDeploymentCodeRequest(Guid OrganizationId, Guid? SiteId, string Name, int? ExpiresInDays, IReadOnlyList<string>? AllowedSourceCidrs,
     int? MaxPendingRequests);
 
 public sealed record InstallScriptResponse(string Script, string OneLiner, string ScriptUrl, string PackageFileName, string PackageVersion, string Sha256,
-    bool RequireSignature);
+    bool RequireSignature, string Platform = "Windows");
 
 public sealed record EnrollmentRequestDto(
     Guid Id,
@@ -562,7 +578,7 @@ public sealed record BulkApproveRequest(IReadOnlyList<Guid> Ids);
 /// <param name="ReleaseKeyId">The release key in the package's <c>.sig</c> file (null: not signed, so agents will not
 /// update to it).</param>
 public sealed record AgentPackageDto(string FileName, string Version, string Architecture, long SizeBytes, string Sha256, DateTimeOffset ModifiedAt,
-    string DownloadUrl, bool IsLatest, string? ReleaseKeyId = null, string? SignatureProblem = null);
+    string DownloadUrl, bool IsLatest, string? ReleaseKeyId = null, string? SignatureProblem = null, string Format = "msi");
 
 public sealed record AgentVersionCountDto(string Version, int Count, bool IsLatest);
 

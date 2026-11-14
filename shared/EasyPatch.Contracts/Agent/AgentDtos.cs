@@ -24,6 +24,22 @@ public sealed record EnrollRequest
     public required DeviceIdentity Device { get; init; }
 }
 
+/// <summary>Operating system families the agent runs on.</summary>
+public static class AgentPlatforms
+{
+    public const string Windows = "Windows";
+    public const string Linux = "Linux";
+
+    /// <summary>The platform an agent reported: <see cref="Windows"/> when it did not say (agents before 1.3.0 only ran on
+    /// Windows), null for an unknown value.</summary>
+    public static string? Normalize(string? platform) => platform switch
+    {
+        null => Windows,
+        Windows or Linux => platform,
+        _ => null,
+    };
+}
+
 public sealed record DeviceIdentity
 {
     public required string Hostname { get; init; }
@@ -35,6 +51,15 @@ public sealed record DeviceIdentity
     public string? OsCaption { get; init; }
     public string? OsBuild { get; init; }
     public string? Architecture { get; init; }
+
+    /// <summary><see cref="AgentPlatforms"/> value; absent from Windows agents before 1.3.0.</summary>
+    public string? Platform { get; init; }
+
+    /// <summary>Linux: os-release <c>ID</c>, e.g. <c>ubuntu</c>, <c>debian</c>, <c>rhel</c>, <c>rocky</c>.</summary>
+    public string? OsId { get; init; }
+
+    /// <summary>Linux: os-release <c>VERSION_ID</c>, e.g. <c>24.04</c>, <c>12</c>, <c>9.4</c>.</summary>
+    public string? OsVersion { get; init; }
 }
 
 /// <summary>Returned by enroll and by the pending-enrollment status poll.</summary>
@@ -99,6 +124,10 @@ public sealed record CheckInRequest
     /// <summary>IDs of the release keys this agent accepts updates from (see <see cref="AgentRelease.KeyId"/>).
     /// Empty when the agent cannot update itself.</summary>
     public IReadOnlyList<string> ReleaseKeyIds { get; init; } = [];
+
+    /// <summary>Package format agent updates must use (<see cref="AgentRelease.FormatMsi"/>, <c>deb</c> or <c>rpm</c>).
+    /// Absent from agents before 1.3.0, which are all Windows (MSI).</summary>
+    public string? AgentPackageFormat { get; init; }
 }
 
 public sealed record CheckInResponse
@@ -310,6 +339,35 @@ public sealed record ReportedUpdate
     public long? MaxDownloadSize { get; init; }
     public string? SupportUrl { get; init; }
     public IReadOnlyList<Guid> SupersededUpdateGuids { get; init; } = [];
+
+    /// <summary>Linux: the package this update upgrades. Null for Windows updates.</summary>
+    public PackageUpdateInfo? Package { get; init; }
+}
+
+/// <summary>A newer version of an installed Linux package. The update's GUID identifies exactly this version of the
+/// package for this distribution release, so the same upgrade on two machines is the same update.</summary>
+public sealed record PackageUpdateInfo
+{
+    /// <summary>Package name without architecture, e.g. <c>openssl</c>.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Package architecture as the package manager names it (<c>amd64</c>, <c>x86_64</c>, <c>noarch</c>, …).</summary>
+    public required string Architecture { get; init; }
+
+    /// <summary>The version this upgrade installs (Debian version or RPM <c>epoch:version-release</c>).</summary>
+    public required string Version { get; init; }
+
+    /// <summary>The version installed when the scan ran.</summary>
+    public string? InstalledVersion { get; init; }
+
+    /// <summary>Where the new version comes from, e.g. <c>Debian-Security:12/bookworm-security</c> or <c>baseos</c>.</summary>
+    public string? Repository { get; init; }
+
+    /// <summary>True when the upgrade includes a security fix (a security repository or a security advisory).</summary>
+    public bool Security { get; init; }
+
+    /// <summary>Distribution advisories the upgrade resolves, e.g. <c>RLSA-2024:1234</c> (dnf only).</summary>
+    public IReadOnlyList<string> Advisories { get; init; } = [];
 }
 
 public sealed record UpdateCategoryRef
@@ -401,6 +459,25 @@ public sealed record InventoryReport
     public bool RebootPending { get; init; }
     public IReadOnlyList<string> RebootReasons { get; init; } = [];
     public UpdateSourceInfo? UpdateSource { get; init; }
+
+    /// <summary><see cref="AgentPlatforms"/> value; absent from Windows agents before 1.3.0.</summary>
+    public string? Platform { get; init; }
+
+    /// <summary>Linux: os-release <c>ID</c> (<c>ubuntu</c>, <c>debian</c>, <c>rhel</c>, <c>rocky</c>, <c>almalinux</c>, <c>ol</c>).</summary>
+    public string? OsId { get; init; }
+
+    /// <summary>Linux: os-release <c>VERSION_ID</c>.</summary>
+    public string? OsVersion { get; init; }
+
+    /// <summary>Linux: running kernel release (<c>uname -r</c>).</summary>
+    public string? KernelVersion { get; init; }
+
+    /// <summary>Linux: <c>apt</c> or <c>dnf</c>.</summary>
+    public string? PackageManager { get; init; }
+
+    /// <summary>How the agent's private key is protected at rest: <c>dpapi</c>, <c>systemd-creds-tpm2</c>,
+    /// <c>systemd-creds-host</c> or <c>file-permissions</c>.</summary>
+    public string? KeyProtection { get; init; }
 }
 
 // ---------------------------------------------------------------------------------------------

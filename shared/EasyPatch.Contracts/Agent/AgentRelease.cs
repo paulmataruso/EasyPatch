@@ -6,11 +6,12 @@ using System.Text.RegularExpressions;
 
 namespace EasyPatch.Contracts.Agent;
 
-/// <summary>What a release signature covers: one agent MSI, identified by file name, version, architecture, size and
-/// SHA-256. Changing any of them (or the file) invalidates the signature.</summary>
+/// <summary>What a release signature covers: one agent package (MSI, deb or rpm), identified by file name, version,
+/// architecture, size and SHA-256. Changing any of them (or the file) invalidates the signature.</summary>
 public sealed record AgentReleaseManifest
 {
-    /// <summary><c>EasyPatchAgent-&lt;version&gt;-&lt;architecture&gt;.msi</c></summary>
+    /// <summary><c>EasyPatchAgent-&lt;version&gt;-&lt;architecture&gt;.&lt;msi|deb|rpm&gt;</c>; the extension is the
+    /// package format.</summary>
     public required string FileName { get; init; }
 
     /// <summary>Three-part version, e.g. <c>1.2.0</c>.</summary>
@@ -19,13 +20,13 @@ public sealed record AgentReleaseManifest
     /// <summary><c>x64</c> or <c>arm64</c>.</summary>
     public required string Architecture { get; init; }
 
-    /// <summary>Lower-case hex SHA-256 of the MSI.</summary>
+    /// <summary>Lower-case hex SHA-256 of the package.</summary>
     public required string Sha256 { get; init; }
 
     public required long SizeBytes { get; init; }
 }
 
-/// <summary>The detached signature file published next to an MSI (<c>EasyPatchAgent-1.2.0-x64.msi.sig</c>, JSON).</summary>
+/// <summary>The detached signature file published next to a package (<c>EasyPatchAgent-1.2.0-x64.msi.sig</c>, JSON).</summary>
 public sealed record AgentReleaseSignature
 {
     public int Format { get; init; } = AgentRelease.SignatureFormat;
@@ -58,16 +59,27 @@ public static partial class AgentRelease
 {
     public const int SignatureFormat = 1;
 
-    /// <summary>Upper bound for a package download (the MSIs are about 55 MB).</summary>
+    /// <summary>Upper bound for a package download (the packages are about 55 MB).</summary>
     public const long MaxPackageBytes = 512L * 1024 * 1024;
 
     public const string SignatureExtension = ".sig";
 
     public static IReadOnlyList<string> Architectures { get; } = ["x64", "arm64"];
 
+    /// <summary>Windows Installer package (Windows agents, and agents that do not report a format).</summary>
+    public const string FormatMsi = "msi";
+
+    /// <summary>Debian package (Debian, Ubuntu and derivatives).</summary>
+    public const string FormatDeb = "deb";
+
+    /// <summary>RPM package (Red Hat Enterprise Linux and rebuilds).</summary>
+    public const string FormatRpm = "rpm";
+
+    public static IReadOnlyList<string> PackageFormats { get; } = [FormatMsi, FormatDeb, FormatRpm];
+
     private const string Domain = "easypatch-agent-release-v1";
 
-    [GeneratedRegex(@"^EasyPatchAgent-(?<version>\d{1,5}\.\d{1,5}\.\d{1,5})-(?<arch>x64|arm64)\.msi$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^EasyPatchAgent-(?<version>\d{1,5}\.\d{1,5}\.\d{1,5})-(?<arch>x64|arm64)\.(?<format>msi|deb|rpm)$", RegexOptions.CultureInvariant)]
     private static partial Regex FileNameRegex();
 
     [GeneratedRegex("^[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
@@ -176,7 +188,7 @@ public static partial class AgentRelease
         var match = FileNameRegex().Match(name);
         if (!match.Success)
         {
-            throw new ArgumentException($"'{name}' is not an agent package name (EasyPatchAgent-<version>-<x64|arm64>.msi).", nameof(path));
+            throw new ArgumentException($"'{name}' is not an agent package name (EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm>).", nameof(path));
         }
 
         using var stream = File.OpenRead(path);
@@ -202,7 +214,7 @@ public static partial class AgentRelease
         var match = FileNameRegex().Match(manifest.FileName ?? string.Empty);
         if (!match.Success)
         {
-            errors.Add("The package file name is not EasyPatchAgent-<version>-<x64|arm64>.msi.");
+            errors.Add("The package file name is not EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm>.");
         }
         else if (match.Groups["version"].Value != manifest.Version || match.Groups["arch"].Value != manifest.Architecture)
         {
@@ -221,6 +233,19 @@ public static partial class AgentRelease
 
         return errors;
     }
+
+    /// <summary>Package format (<see cref="FormatMsi"/>, <see cref="FormatDeb"/> or <see cref="FormatRpm"/>) of an agent
+    /// package file name, or null when it is not one.</summary>
+    public static string? FormatOf(string? fileName)
+    {
+        var match = FileNameRegex().Match(fileName ?? string.Empty);
+        return match.Success ? match.Groups["format"].Value : null;
+    }
+
+    /// <summary>The package format an agent installs updates from: <see cref="FormatMsi"/> when it did not say (agents
+    /// before 1.3.0 only ran on Windows), null when it named a format this server does not know.</summary>
+    public static string? NormalizeFormat(string? format) =>
+        format is null ? FormatMsi : PackageFormats.Contains(format) ? format : null;
 
     /// <summary>Parses the numeric part of an agent version (<c>1.2.0</c>, <c>1.2.0+abc</c> or <c>1.2.0-beta</c>).</summary>
     public static Version? ParseVersion(string? text)

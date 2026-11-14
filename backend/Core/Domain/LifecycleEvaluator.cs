@@ -76,6 +76,67 @@ public static class LifecycleEvaluator
             return new LifecycleResult(OsSupportStatus.Unknown, null, product, group, null);
         }
 
+        return FromEntry(entry, product, group, esuLicenseDetected, esuOverride, today);
+    }
+
+    /// <summary>Lifecycle product name for a Linux os-release ID (null for distributions without a lifecycle entry).</summary>
+    public static string? LinuxProduct(string? osId) => osId?.ToLowerInvariant() switch
+    {
+        "debian" => "Debian",
+        "ubuntu" => "Ubuntu",
+        "rhel" => "Red Hat Enterprise Linux",
+        "rocky" => "Rocky Linux",
+        "almalinux" => "AlmaLinux",
+        "ol" => "Oracle Linux",
+        _ => null,
+    };
+
+    /// <summary>Lifecycle "build number" of a Linux release: YYMM for Ubuntu (24.04 → 2404), the major version otherwise
+    /// (Debian 12.8 → 12, RHEL 9.4 → 9).</summary>
+    public static int? LinuxReleaseKey(string? osId, string? osVersion)
+    {
+        if (string.IsNullOrWhiteSpace(osVersion))
+        {
+            return null;
+        }
+
+        var match = System.Text.RegularExpressions.Regex.Match(osVersion, @"^\s*(\d{1,4})(?:\.(\d{1,2}))?");
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var major = int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        if (string.Equals(osId, "ubuntu", StringComparison.OrdinalIgnoreCase))
+        {
+            return match.Groups[2].Success ? major * 100 + int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) : null;
+        }
+
+        return major;
+    }
+
+    /// <summary>Support status of a Linux distribution release. "Extended security updates" means Ubuntu Pro (ESM)
+    /// after standard support ends; Debian LTS is included in the Debian end dates because it needs no subscription.</summary>
+    public static LifecycleResult EvaluateLinux(
+        IReadOnlyList<OsLifecycleEntry> table, string? osId, string? osVersion, bool esuLicenseDetected, EsuOverride esuOverride, DateOnly today)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        var product = LinuxProduct(osId);
+        var release = LinuxReleaseKey(osId, osVersion);
+        if (product is null || release is null)
+        {
+            return new LifecycleResult(OsSupportStatus.Unknown, null, product, "Any", null);
+        }
+
+        var entry = table.FirstOrDefault(e => e.Product == product && e.BuildNumber == release);
+        return entry is null
+            ? new LifecycleResult(OsSupportStatus.Unknown, null, product, "Any", null)
+            : FromEntry(entry, product, entry.EditionGroup, esuLicenseDetected, esuOverride, today);
+    }
+
+    private static LifecycleResult FromEntry(
+        OsLifecycleEntry entry, string product, string group, bool esuLicenseDetected, EsuOverride esuOverride, DateOnly today)
+    {
         if (today <= entry.EndOfServicing)
         {
             return new LifecycleResult(OsSupportStatus.Supported, entry.EndOfServicing, product, group, entry);
@@ -146,6 +207,26 @@ public static class LifecycleEvaluator
         Add("Windows Server", "Server", 17763, "2019", "2029-01-09");
         Add("Windows Server", "Server", 20348, "2022", "2031-10-14");
         Add("Windows Server", "Server", 26100, "2025", "2034-10-10");
+        // Linux (https://wiki.debian.org/LTS, https://ubuntu.com/about/release-cycle, https://access.redhat.com/support/policy/updates/errata).
+        // Debian dates include Debian LTS (free, same security repository). Ubuntu ESU = Ubuntu Pro ESM.
+        Add("Debian", "Any", 11, "11 (bullseye)", "2026-08-31", null, "Regular security support ended 2024-08-14; Debian LTS until 2026-08-31.");
+        Add("Debian", "Any", 12, "12 (bookworm)", "2028-06-30", null, "Regular security support until 2026-06-10; Debian LTS until 2028-06-30.");
+        Add("Debian", "Any", 13, "13 (trixie)", "2030-06-30", null, "Regular security support until about 2028-08; Debian LTS until 2030-06-30.");
+        Add("Ubuntu", "LTS", 2004, "20.04 LTS", "2025-05-31", "2030-04-30", "ESU: Ubuntu Pro (ESM) until 2030-04.");
+        Add("Ubuntu", "LTS", 2204, "22.04 LTS", "2027-06-30", "2032-04-30", "ESU: Ubuntu Pro (ESM) until 2032-04.");
+        Add("Ubuntu", "LTS", 2404, "24.04 LTS", "2029-05-31", "2034-04-30", "ESU: Ubuntu Pro (ESM) until 2034-04.");
+        Add("Ubuntu", "LTS", 2604, "26.04 LTS", "2031-05-31", "2036-04-30", "ESU: Ubuntu Pro (ESM) until 2036-04.");
+        Add("Red Hat Enterprise Linux", "Any", 8, "8", "2029-05-31", null, "End of maintenance support; Extended Life Cycle Support is sold separately.");
+        Add("Red Hat Enterprise Linux", "Any", 9, "9", "2032-05-31", null, "End of maintenance support; Extended Life Cycle Support is sold separately.");
+        Add("Red Hat Enterprise Linux", "Any", 10, "10", "2035-05-31", null, "End of maintenance support; Extended Life Cycle Support is sold separately.");
+        Add("Rocky Linux", "Any", 8, "8", "2029-05-31");
+        Add("Rocky Linux", "Any", 9, "9", "2032-05-31");
+        Add("Rocky Linux", "Any", 10, "10", "2035-05-31");
+        Add("AlmaLinux", "Any", 8, "8", "2029-03-01");
+        Add("AlmaLinux", "Any", 9, "9", "2032-05-31");
+        Add("AlmaLinux", "Any", 10, "10", "2035-05-31");
+        Add("Oracle Linux", "Any", 8, "8", "2029-07-31", null, "End of Premier Support.");
+        Add("Oracle Linux", "Any", 9, "9", "2032-06-30", null, "End of Premier Support.");
         return list;
     }
 

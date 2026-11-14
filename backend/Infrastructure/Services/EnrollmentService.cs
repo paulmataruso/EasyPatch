@@ -488,6 +488,7 @@ public sealed class EnrollmentService(
             }
 
             endpoint.Status = EndpointStatus.Active;
+            endpoint.Platform = AgentPlatforms.Normalize(device.Platform) ?? endpoint.Platform;
             endpoint.SiteId = siteId ?? endpoint.SiteId;
             endpoint.AgentVersion = agentVersion;
             endpoint.EnrolledAt = now;
@@ -508,6 +509,9 @@ public sealed class EnrollmentService(
                 Manufacturer = ScanIngestionService.Truncate(device.Manufacturer, 255),
                 Model = ScanIngestionService.Truncate(device.Model, 255),
                 OperatingSystem = ScanIngestionService.Truncate(device.OsCaption, 255),
+                Platform = AgentPlatforms.Normalize(device.Platform) ?? AgentPlatforms.Windows,
+                OsId = ScanIngestionService.Truncate(device.OsId, 64),
+                OsVersion = ScanIngestionService.Truncate(device.OsVersion, 255),
                 Architecture = ScanIngestionService.Truncate(device.Architecture, 255),
                 AgentVersion = ScanIngestionService.Truncate(agentVersion, 255),
                 EnrolledAt = now,

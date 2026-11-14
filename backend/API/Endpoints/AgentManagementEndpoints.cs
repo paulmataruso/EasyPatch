@@ -49,7 +49,8 @@ public static class AgentManagementEndpoints
             var dtos = await TokenQuery(db, db.EnrollmentTokens.AsNoTracking().Where(t => ids.Contains(t.Id))).ToDictionaryAsync(t => t.Id, ct);
             var fileName = packages.GetLatest()?.FileName;
             return TypedResults.Ok(created.Select(c => new CreatedTokenDto(dtos[c.Token.Id] with { State = TokenState(dtos[c.Token.Id], now) },
-                c.PlaintextToken, InstallScriptBuilder.MsiExecCommand(options.Value.PublicUrl, c.PlaintextToken, fileName))).ToList());
+                c.PlaintextToken, InstallScriptBuilder.MsiExecCommand(options.Value.PublicUrl, c.PlaintextToken, fileName),
+                LinuxInstallScriptBuilder.TokenEnrollCommand(options.Value.PublicUrl, c.PlaintextToken))).ToList());
         });
 
         tokens.MapPost("/{id:guid}/revoke", async (Guid id, EnrollmentService enrollment, EasyPatchDbContext db, ITenantContext tenant, CancellationToken ct) =>
@@ -102,12 +103,28 @@ public static class AgentManagementEndpoints
             return TypedResults.NoContent();
         });
 
-        codes.MapGet("/{id:guid}/install-script", async (Guid id, string? package, bool? requireSignature, EasyPatchDbContext db, ITenantContext tenant,
-            AgentPackageService packages, IOptions<EasyPatchOptions> options, TimeProvider clock, CancellationToken ct) =>
+        codes.MapGet("/{id:guid}/install-script", async (Guid id, string? package, bool? requireSignature, string? platform, EasyPatchDbContext db,
+            ITenantContext tenant, AgentPackageService packages, IOptions<EasyPatchOptions> options, TimeProvider clock, CancellationToken ct) =>
         {
             var code = await db.DeploymentCodes.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct) ?? throw AppException.NotFound("Deployment code");
             tenant.EnsureAccess(code.OrganizationId);
-            var pkg = (package is null ? packages.GetLatest() : packages.Find(package))
+            if (string.Equals(platform, AgentPlatforms.Linux, StringComparison.OrdinalIgnoreCase))
+            {
+                var linux = LinuxInstallScriptBuilder.Newest(packages.List());
+                if (linux.Count == 0)
+                {
+                    throw AppException.Conflict("No Linux agent package is available. Copy the EasyPatchAgent .deb and .rpm packages into the agent packages directory.",
+                        "no_agent_package");
+                }
+
+                var serverUrl = options.Value.PublicUrl.TrimEnd('/');
+                var linuxScript = LinuxInstallScriptBuilder.Build(serverUrl, linux, code.Code, code.Name, clock.GetUtcNow());
+                return TypedResults.Ok(new InstallScriptResponse(linuxScript, LinuxInstallScriptBuilder.OneLiner(serverUrl, code.Code),
+                    $"{serverUrl}/downloads/install/{code.Code}.sh", string.Join(", ", linux.Select(p => p.FileName)), linux[0].Version,
+                    string.Join(", ", linux.Select(p => p.Sha256)), false, AgentPlatforms.Linux));
+            }
+
+            var pkg = (package is null ? packages.GetLatest() : packages.Find(package) is { Format: AgentRelease.FormatMsi } chosen ? chosen : null)
                       ?? throw AppException.Conflict("No agent package is available. Copy a signed EasyPatchAgent MSI into the agent packages directory.",
                           "no_agent_package");
             var url = options.Value.PublicUrl.TrimEnd('/');
@@ -189,10 +206,12 @@ public static class AgentManagementEndpoints
         app.MapGet("/api/v1/agent-packages", (AgentPackageService packages) =>
         {
             var list = packages.List();
-            var latest = list.GroupBy(p => p.Architecture).Select(g => g.OrderByDescending(p => Mapping.ParseVersion(p.Version)).First().FileName).ToHashSet();
-            return TypedResults.Ok(list.OrderByDescending(p => Mapping.ParseVersion(p.Version)).ThenBy(p => p.Architecture)
+            var latest = list.GroupBy(p => (p.Architecture, p.Format))
+                .Select(g => g.OrderByDescending(p => Mapping.ParseVersion(p.Version)).First().FileName).ToHashSet();
+            return TypedResults.Ok(list.OrderByDescending(p => Mapping.ParseVersion(p.Version)).ThenBy(p => p.Format).ThenBy(p => p.Architecture)
                 .Select(p => new AgentPackageDto(p.FileName, p.Version, p.Architecture, p.SizeBytes, p.Sha256, p.ModifiedAt,
-                    "/downloads/agent/" + Uri.EscapeDataString(p.FileName), latest.Contains(p.FileName), p.Release?.KeyId, p.SignatureProblem)).ToList());
+                    "/downloads/agent/" + Uri.EscapeDataString(p.FileName), latest.Contains(p.FileName), p.Release?.KeyId, p.SignatureProblem,
+                    p.Format)).ToList());
         }).WithTags("Agent management").RequireAuthorization(Policies.Viewer);
 
         app.MapGet("/api/v1/agent-versions", async (Guid? organizationId, EasyPatchDbContext db, ITenantContext tenant, AgentPackageService packages,
@@ -205,9 +224,9 @@ public static class AgentManagementEndpoints
             }
 
             var rows = await query.GroupBy(e => e.AgentVersion).Select(g => new { Version = g.Key, Count = g.Count() }).ToListAsync(ct);
-            var latest = packages.GetLatest()?.Version;
+            var latest = AgentRelease.PackageFormats.Select(f => packages.GetLatestVersion(f)).OfType<string>().ToHashSet();
             return TypedResults.Ok(rows.OrderByDescending(r => Mapping.ParseVersion(r.Version))
-                .Select(r => new AgentVersionCountDto(r.Version ?? "unknown", r.Count, r.Version is not null && r.Version == latest)).ToList());
+                .Select(r => new AgentVersionCountDto(r.Version ?? "unknown", r.Count, r.Version is not null && latest.Contains(r.Version))).ToList());
         }).WithTags("Agent management").RequireAuthorization(Policies.Viewer);
     }
 
@@ -242,7 +261,8 @@ public static class AgentManagementEndpoints
         return rows.Select(r => new DeploymentCodeDto(r.Code.Id, r.Code.Code, r.Code.Name, r.Code.OrganizationId, r.OrgName, r.Code.SiteId, r.SiteName,
             r.Code.MaxPendingRequests, r.Code.AllowedSourceCidrs, r.Code.CreatedAt, r.Code.ExpiresAt, r.Code.RevokedAt, r.Pending, r.Approved,
             r.Code.RevokedAt is not null ? "Revoked" : r.Code.ExpiresAt is { } exp && exp <= now ? "Expired" : "Active",
-            InstallScriptBuilder.OneLiner(url, r.Code.Code), $"{url}/downloads/install/{r.Code.Code}.ps1")).ToList();
+            InstallScriptBuilder.OneLiner(url, r.Code.Code), $"{url}/downloads/install/{r.Code.Code}.ps1",
+            LinuxInstallScriptBuilder.OneLiner(url, r.Code.Code), $"{url}/downloads/install/{r.Code.Code}.sh")).ToList();
     }
 
     private static async Task EnsureRequestAccessAsync(EasyPatchDbContext db, ITenantContext tenant, Guid id, CancellationToken ct)
@@ -285,7 +305,7 @@ public static class AgentManagementEndpoints
     }
 }
 
-/// <summary>Anonymous downloads used by installers: MSI packages and the tokenless PowerShell install script.</summary>
+/// <summary>Anonymous downloads used by installers: agent packages and the tokenless PowerShell and shell install scripts.</summary>
 public static class DownloadEndpoints
 {
     public static void MapDownloadEndpoints(this IEndpointRouteBuilder app)
@@ -295,9 +315,44 @@ public static class DownloadEndpoints
         g.MapGet("/agent/{fileName}", (string fileName, AgentPackageService packages) =>
         {
             var path = packages.GetPath(fileName);
+            var contentType = AgentRelease.FormatOf(path is null ? null : Path.GetFileName(path)) switch
+            {
+                AgentRelease.FormatDeb => "application/vnd.debian.binary-package",
+                AgentRelease.FormatRpm => "application/x-rpm",
+                _ => "application/x-msi",
+            };
             return path is null
                 ? Results.NotFound()
-                : Results.File(path, "application/x-msi", Path.GetFileName(path), enableRangeProcessing: true);
+                : Results.File(path, contentType, Path.GetFileName(path), enableRangeProcessing: true);
+        });
+
+        g.MapGet("/install/{code}.sh", async (string code, EasyPatchDbContext db, AgentPackageService packages, IOptions<EasyPatchOptions> options,
+            TimeProvider clock, HttpContext http, CancellationToken ct) =>
+        {
+            var now = clock.GetUtcNow();
+            if (code.Length > 64)
+            {
+                return Results.NotFound();
+            }
+
+            var deployment = await db.DeploymentCodes.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Code == code && c.RevokedAt == null && (c.ExpiresAt == null || c.ExpiresAt > now), ct);
+            if (deployment is null)
+            {
+                return Results.Text("echo 'easypatch: this deployment code is unknown, revoked or expired.' >&2; exit 1\n", "text/plain; charset=utf-8",
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+
+            var linux = LinuxInstallScriptBuilder.Newest(packages.List());
+            if (linux.Count == 0)
+            {
+                return Results.Text("echo 'easypatch: no Linux agent package is available on the server.' >&2; exit 1\n", "text/plain; charset=utf-8",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            http.Response.Headers.CacheControl = "no-store";
+            return Results.Text(LinuxInstallScriptBuilder.Build(options.Value.PublicUrl, linux, deployment.Code, deployment.Name, now),
+                "text/plain; charset=utf-8");
         });
 
         g.MapGet("/install/{code}.ps1", async (string code, bool? requireSignature, EasyPatchDbContext db, AgentPackageService packages,

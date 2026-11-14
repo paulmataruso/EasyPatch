@@ -119,6 +119,9 @@ public enum UpdateSourceType
     WindowsUpdate,
     MicrosoftUpdate,
     Wsus,
+
+    /// <summary>Linux: the repositories configured for apt or dnf.</summary>
+    PackageRepositories,
 }
 
 public enum EnrollmentState

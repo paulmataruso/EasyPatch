@@ -115,8 +115,11 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
     public static void ApplyLifecycle(Endpoint endpoint, IReadOnlyList<OsLifecycleEntry> lifecycle, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
-        var result = LifecycleEvaluator.Evaluate(lifecycle, endpoint.OsBuildNumber, endpoint.OsEdition, endpoint.OsProductType,
-            endpoint.EsuLicenseDetected, endpoint.EsuOverride, DateOnly.FromDateTime(now.UtcDateTime));
+        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        var result = endpoint.Platform == EasyPatch.Contracts.Agent.AgentPlatforms.Linux
+            ? LifecycleEvaluator.EvaluateLinux(lifecycle, endpoint.OsId, endpoint.OsVersion, endpoint.EsuLicenseDetected, endpoint.EsuOverride, today)
+            : LifecycleEvaluator.Evaluate(lifecycle, endpoint.OsBuildNumber, endpoint.OsEdition, endpoint.OsProductType,
+                endpoint.EsuLicenseDetected, endpoint.EsuOverride, today);
         endpoint.OsSupportStatus = result.Status;
         endpoint.OsEndOfServicing = result.EndOfServicing;
     }

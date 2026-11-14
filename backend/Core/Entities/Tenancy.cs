@@ -96,11 +96,14 @@ public sealed class OsLifecycleEntry
 {
     public Guid Id { get; set; }
 
-    /// <summary>"Windows 10", "Windows 11" or "Windows Server".</summary>
+    /// <summary>"Windows 10", "Windows 11", "Windows Server", or a Linux distribution ("Debian", "Ubuntu",
+    /// "Red Hat Enterprise Linux", "Rocky Linux", "AlmaLinux", "Oracle Linux").</summary>
     public required string Product { get; set; }
 
-    /// <summary>HomePro, EnterpriseEducation, LTSC, IoTLTSC, Server or Any.</summary>
+    /// <summary>HomePro, EnterpriseEducation, LTSC, IoTLTSC, Server, LTS (Ubuntu) or Any.</summary>
     public required string EditionGroup { get; set; }
+
+    /// <summary>Windows build number; for Linux the release (major version, or YYMM for Ubuntu).</summary>
     public int BuildNumber { get; set; }
     public required string VersionLabel { get; set; }
     public DateOnly EndOfServicing { get; set; }

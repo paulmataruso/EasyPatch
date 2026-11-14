@@ -30,8 +30,10 @@ public static class AgentUpdatePlanner
         {
             return Fail(AgentUpdateTarget.UpgradeRequired,
                 $"The EasyPatch agent on {endpoint.Hostname} (version {endpoint.AgentVersion ?? "unknown"}) cannot update itself: it is older than 1.2.0 " +
-                "or was built without a release key. Install a newer agent MSI on it once; after that it can update itself.");
+                "or was built without a release key. Install a newer agent package on it once; after that it can update itself.");
         }
+
+        var format = endpoint.AgentPackageFormat ?? AgentRelease.FormatMsi;
 
         if (version is not null && AgentRelease.ParseVersion(version) is null)
         {
@@ -40,14 +42,14 @@ public static class AgentUpdatePlanner
 
         var architecture = endpoint.AgentArchitecture;
         var newest = packages.List()
-            .Where(p => p.Architecture == architecture && (version is null || p.Version == version))
+            .Where(p => p.Architecture == architecture && p.Format == format && (version is null || p.Version == version))
             .OrderByDescending(p => AgentRelease.ParseVersion(p.Version))
             .FirstOrDefault();
         if (newest is null)
         {
             return Fail(AgentUpdateTarget.NoPackage, version is null
-                ? $"There is no {architecture} agent package on the server."
-                : $"Agent package {version} for {architecture} is not on the server.");
+                ? $"There is no {architecture} {format} agent package on the server."
+                : $"Agent package {version} for {architecture} ({format}) is not on the server.");
         }
 
         var current = AgentRelease.ParseVersion(endpoint.AgentVersion);

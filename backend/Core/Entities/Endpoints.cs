@@ -9,6 +9,9 @@ public sealed class Endpoint
     public Site? Site { get; set; }
     public EndpointStatus Status { get; set; } = EndpointStatus.Active;
 
+    /// <summary><see cref="EasyPatch.Contracts.Agent.AgentPlatforms"/>: Windows or Linux.</summary>
+    public string Platform { get; set; } = EasyPatch.Contracts.Agent.AgentPlatforms.Windows;
+
     // Identity / inventory
     public required string Hostname { get; set; }
     public string? DnsDomain { get; set; }
@@ -32,6 +35,18 @@ public sealed class Endpoint
     public bool? IsVirtualMachine { get; set; }
     public string? TimeZoneId { get; set; }
     public DateTimeOffset? LastBootAt { get; set; }
+
+    /// <summary>Linux: os-release ID (ubuntu, debian, rhel, rocky, almalinux, ol).</summary>
+    public string? OsId { get; set; }
+
+    /// <summary>Linux: running kernel release.</summary>
+    public string? KernelVersion { get; set; }
+
+    /// <summary>Linux: apt or dnf.</summary>
+    public string? PackageManager { get; set; }
+
+    /// <summary>How the agent protects its private key at rest (dpapi, systemd-creds-host, file-permissions).</summary>
+    public string? KeyProtection { get; set; }
 
     // Agent
     public string? AgentVersion { get; set; }
@@ -69,6 +84,9 @@ public sealed class Endpoint
 
     /// <summary>Package architecture of the agent build (<c>x64</c> or <c>arm64</c>), for agent updates.</summary>
     public string? AgentArchitecture { get; set; }
+
+    /// <summary>Package format agent updates must use (msi, deb or rpm).</summary>
+    public string? AgentPackageFormat { get; set; }
 
     /// <summary>Release keys the agent accepts updates from (<see cref="EasyPatch.Contracts.Agent.AgentRelease.KeyId"/>).</summary>
     public List<string> AgentReleaseKeyIds { get; set; } = [];
