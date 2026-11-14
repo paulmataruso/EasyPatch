@@ -15,6 +15,24 @@ public sealed class TrayIpcTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public void Signed_in_users_may_open_the_pipe_but_not_serve_it()
+    {
+        // Everything the tray requests is granted to interactive users...
+        Assert.Equal(TrayFrames.ClientAccess, TrayFrames.ClientAccess & TrayFrames.InteractiveUserAccess);
+
+        // ...but not the right to create pipe instances (or to change the pipe's security).
+        const PipeAccessRights serverRights = PipeAccessRights.CreateNewInstance | PipeAccessRights.ChangePermissions |
+                                              PipeAccessRights.TakeOwnership | PipeAccessRights.Delete;
+        Assert.Equal((PipeAccessRights)0, TrayFrames.InteractiveUserAccess & serverRights);
+
+        // GENERIC_READ | GENERIC_WRITE maps to FILE_GENERIC_READ | FILE_GENERIC_WRITE, which includes FILE_APPEND_DATA
+        // (= create pipe instance on a pipe). A tray asking for it would be refused, which is why it asks for ClientAccess.
+        const PipeAccessRights genericReadWrite = (PipeAccessRights)0x12019F;
+        Assert.NotEqual(genericReadWrite, genericReadWrite & TrayFrames.InteractiveUserAccess);
+        Assert.Equal((PipeAccessRights)0, TrayFrames.ClientAccess & PipeAccessRights.CreateNewInstance);
+    }
+
+    [Fact]
     public async Task Frames_round_trip_and_bad_frames_are_rejected()
     {
         using var stream = new MemoryStream();

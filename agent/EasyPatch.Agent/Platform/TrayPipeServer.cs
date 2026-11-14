@@ -13,8 +13,8 @@ namespace EasyPatch.Agent.Platform;
 /// The local pipe the trays connect to (<c>\\.\pipe\EasyPatchAgent</c>).
 /// <list type="bullet">
 /// <item>Created with FirstPipeInstance: if another process already owns the name, the service refuses to serve.</item>
-/// <item>ACL: SYSTEM and Administrators full control; interactive users read/write only (they cannot create
-/// instances of the pipe); network logons denied.</item>
+/// <item>ACL: SYSTEM and Administrators full control; interactive users read/write (<see cref="TrayFrames.InteractiveUserAccess"/>:
+/// they cannot create instances of the pipe); network logons denied.</item>
 /// <item>The caller's session comes from <c>GetNamedPipeClientSessionId</c>, never from the tray; session 0 is refused.</item>
 /// </list>
 /// </summary>
@@ -37,7 +37,7 @@ internal sealed class TrayPipeServer : BackgroundService
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), PipeAccessRights.FullControl, AccessControlType.Allow));
-        security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.InteractiveSid, null), PipeAccessRights.ReadWrite, AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.InteractiveSid, null), TrayFrames.InteractiveUserAccess, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.NetworkSid, null), PipeAccessRights.FullControl, AccessControlType.Deny));
         return security;
     }

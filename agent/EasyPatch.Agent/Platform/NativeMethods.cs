@@ -153,11 +153,7 @@ internal static partial class NativeMethods
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint processId);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool ProcessIdToSessionId(uint processId, out uint sessionId);
+    public static partial bool GetNamedPipeServerSessionId(SafePipeHandle pipe, out uint sessionId);
 
     /// <summary>Enables a privilege the process token holds but has disabled (e.g. SeShutdownPrivilege).</summary>
     public static void EnablePrivilege(string name)

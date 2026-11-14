@@ -12,7 +12,7 @@
     <Product>EasyPatch</Product>
     <Copyright>Copyright (c) EasyPatch contributors. Licensed under the Apache License, Version 2.0.</Copyright>
     <!-- Single source of truth for product version; overridden by CI with -p:Version=x.y.z -->
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <!-- Allow building Windows-targeted agent projects on Linux build hosts -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <!-- CA1848/CA1873: LoggerMessage source-gen is not required for this codebase's log volume;

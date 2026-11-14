@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.IO.Pipes;
 using System.Text.Json;
 using EasyPatch.Agent.Core.Abstractions;
 using EasyPatch.Contracts.Json;
@@ -41,6 +42,17 @@ public static class TrayFrames
     public const string PipeName = "EasyPatchAgent";
 
     public const int MaxFrameBytes = 16 * 1024;
+
+    /// <summary>The rights the tray requests when it opens the pipe.</summary>
+    /// <remarks>Not GENERIC_READ | GENERIC_WRITE (what a <see cref="System.IO.Pipes.PipeDirection"/> constructor asks
+    /// for): GENERIC_WRITE maps to FILE_APPEND_DATA, which on a pipe is the right to create pipe instances, and
+    /// signed-in users are deliberately not given that right, so Windows would refuse the connection.</remarks>
+    public const PipeAccessRights ClientAccess =
+        PipeAccessRights.ReadData | PipeAccessRights.WriteData | PipeAccessRights.ReadAttributes | PipeAccessRights.Synchronize;
+
+    /// <summary>The rights interactive users have on the pipe: everything <see cref="ClientAccess"/> requests, but not
+    /// <see cref="PipeAccessRights.CreateNewInstance"/>, so no user process can serve the pipe.</summary>
+    public const PipeAccessRights InteractiveUserAccess = PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize;
 
     public static async Task WriteAsync(Stream stream, TrayMessage message, CancellationToken cancellationToken)
     {

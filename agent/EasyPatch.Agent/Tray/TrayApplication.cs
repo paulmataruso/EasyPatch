@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Pipes;
+using System.Security.Principal;
 using EasyPatch.Agent.Core.Abstractions;
 using EasyPatch.Agent.Core.Ipc;
 using EasyPatch.Agent.Platform;
@@ -252,7 +253,8 @@ internal sealed class TrayPipeClient : IDisposable
         {
             try
             {
-                using var pipe = new NamedPipeClientStream(".", TrayFrames.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                using var pipe = new NamedPipeClientStream(".", TrayFrames.PipeName, TrayFrames.ClientAccess, PipeOptions.Asynchronous,
+                    TokenImpersonationLevel.Identification, HandleInheritability.None);
                 await pipe.ConnectAsync(5000, _cts.Token);
                 if (!IsServiceSession(pipe))
                 {
@@ -303,10 +305,9 @@ internal sealed class TrayPipeClient : IDisposable
     }
 
     /// <summary>Only a process in session 0 (a service) may serve the tray; a user process cannot create one there.</summary>
+    /// <remarks>The session comes from the pipe itself: a signed-in user cannot open the service's process to ask.</remarks>
     private static bool IsServiceSession(NamedPipeClientStream pipe) =>
-        NativeMethods.GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var processId) &&
-        NativeMethods.ProcessIdToSessionId(processId, out var sessionId) &&
-        sessionId == 0;
+        NativeMethods.GetNamedPipeServerSessionId(pipe.SafePipeHandle, out var sessionId) && sessionId == 0;
 
     public void Dispose()
     {

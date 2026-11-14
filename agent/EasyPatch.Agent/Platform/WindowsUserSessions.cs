@@ -91,10 +91,15 @@ internal sealed class TrayLauncher : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan RelaunchDelay = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan WarningInterval = TimeSpan.FromHours(6);
 
     private readonly TrayBroker _broker;
     private readonly ILogger<TrayLauncher> _logger;
     private readonly Dictionary<int, DateTime> _lastLaunch = [];
+
+    /// <summary>Sessions where a tray was started and has not connected since.</summary>
+    private readonly HashSet<int> _awaitingConnection = [];
+    private readonly Dictionary<int, DateTime> _lastWarning = [];
 
     public TrayLauncher(TrayBroker broker, ILogger<TrayLauncher> logger)
     {
@@ -124,26 +129,47 @@ internal sealed class TrayLauncher : BackgroundService
     private void LaunchMissing()
     {
         var connected = _broker.ConnectedSessions;
+        var signedIn = WindowsUserSessions.SignedIn();
+        var signedInIds = signedIn.Select(s => s.SessionId).ToHashSet();
+        _awaitingConnection.RemoveWhere(id => connected.Contains(id) || !signedInIds.Contains(id));
+        foreach (var gone in _lastLaunch.Keys.Where(id => !signedInIds.Contains(id)).ToList())
+        {
+            _lastLaunch.Remove(gone);
+            _lastWarning.Remove(gone);
+        }
+
         var now = DateTime.UtcNow;
-        foreach (var session in WindowsUserSessions.SignedIn().Where(s => s.Active && !connected.Contains(s.SessionId)))
+        foreach (var session in signedIn.Where(s => s.Active && !connected.Contains(s.SessionId)))
         {
             if (_lastLaunch.TryGetValue(session.SessionId, out var last) && now - last < RelaunchDelay)
             {
                 continue;
             }
 
+            var retry = _awaitingConnection.Contains(session.SessionId);
+            if (retry && (!_lastWarning.TryGetValue(session.SessionId, out var warned) || now - warned > WarningInterval))
+            {
+                _lastWarning[session.SessionId] = now;
+                _logger.LogWarning(
+                    "The EasyPatch tray started in session {SessionId} did not connect to the service; starting it again every {Minutes} minutes. Messages and restart prompts cannot reach this session until it connects.",
+                    session.SessionId, RelaunchDelay.TotalMinutes);
+            }
+
             _lastLaunch[session.SessionId] = now;
-            Launch(session.SessionId);
+            if (Launch(session.SessionId, retry))
+            {
+                _awaitingConnection.Add(session.SessionId);
+            }
         }
     }
 
-    private void Launch(int sessionId)
+    private bool Launch(int sessionId, bool retry)
     {
         var exe = Environment.ProcessPath ?? throw new InvalidOperationException("Unknown executable path.");
         if (!NativeMethods.WTSQueryUserToken(sessionId, out var token))
         {
             _logger.LogDebug("No user token for session {SessionId} (error {Error}).", sessionId, Marshal.GetLastPInvokeError());
-            return;
+            return false;
         }
 
         var environment = IntPtr.Zero;
@@ -162,12 +188,13 @@ internal sealed class TrayLauncher : BackgroundService
                     ref startup, out var process))
             {
                 _logger.LogWarning("Could not start the tray in session {SessionId} (error {Error}).", sessionId, Marshal.GetLastPInvokeError());
-                return;
+                return false;
             }
 
             NativeMethods.CloseHandle(process.Thread);
             NativeMethods.CloseHandle(process.Process);
-            _logger.LogInformation("Started the EasyPatch tray in session {SessionId}.", sessionId);
+            _logger.Log(retry ? LogLevel.Debug : LogLevel.Information, "Started the EasyPatch tray in session {SessionId}.", sessionId);
+            return true;
         }
         finally
         {

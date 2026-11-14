@@ -252,6 +252,10 @@ computer and no startup entry: if the tray is closed, the service starts it agai
 minutes. The tray connects to the service over a local named pipe and exits when the service
 stops.
 
+Windows 11 puts new notification-area icons in the hidden-icons flyout (the **^** next to the
+clock) until the user moves them. To keep it on the taskbar, drag it out of the flyout or turn
+it on under *Settings → Personalization → Taskbar → Other system tray icons*.
+
 The icon's menu shows the agent's status, its last contact with the server and whether a
 restart is pending. Notifications show the preset messages. During a restart request a small
 window offers *Restart now* and, where the administrator allowed it, *Postpone*. Users cannot
@@ -293,7 +297,7 @@ need them.
 | "Could not reach the EasyPatch server" | DNS, firewall, proxy (`PROXYURL`), or TLS: the server certificate must chain to a root trusted by the computer |
 | Scans fail with `0x8024402C`, `0x80244022` or similar | The Windows Update source (Microsoft or WSUS) is unreachable. The error code and its description are shown in the console |
 | Updates not offered that you expected | WSUS approvals, Windows Update for Business deferrals or a target release version apply. The console shows the detected update source, and the endpoint's *Policy* tab shows any Windows Update settings EasyPatch applied |
-| No tray icon | The *Tray icon* policy is off, the user signed in less than 15 seconds ago, or the session is a remote session that is disconnected. *Signed-in users* on the endpoint's overview shows how many sessions have a tray |
+| No tray icon | On Windows 11, look in the hidden-icons flyout (**^**) first. Otherwise the *Tray icon* policy is off, the user signed in less than 15 seconds ago, or the session is a remote session that is disconnected. *Signed-in users* on the endpoint's overview shows how many sessions have a tray. If a session is signed in but has no tray, the agent log says *did not connect to the service*. Agent 1.1.0 had this problem for every user who was not running as administrator; install 1.1.1 or later |
 | Windows Update settings show *Conflict* | Another policy source (usually domain Group Policy or Intune) set different values. Remove that policy, or change the EasyPatch setting to match; changing the EasyPatch setting applies it again |
 | Restart job failed with `restart_not_performed` | Windows did not restart within 30 minutes of the request, or nobody accepted a prompt without a deadline within 7 days. Check the System event log for shutdowns cancelled by a user or an application |
 
