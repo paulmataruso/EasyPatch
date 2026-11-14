@@ -21,11 +21,11 @@
     <PackageVersion Include="PDFsharp" Version="6.2.4" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
     <!-- Agent -->
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.15" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.15" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.EventLog" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.EventLog" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.15" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.15" />
     <PackageVersion Include="System.Management" Version="10.0.15" />
