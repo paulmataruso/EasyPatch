@@ -13,7 +13,7 @@ Name:           easypatch-agent
 Version:        %{ep_version}
 Release:        1
 Summary:        EasyPatch patch management agent
-License:        Apache-2.0
+License:        FSL-1.1-ALv2
 AutoReqProv:    no
 Requires:       glibc, libgcc, libstdc++, openssl-libs, ca-certificates, systemd
 

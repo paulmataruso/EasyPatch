@@ -8,9 +8,10 @@
     <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
     <InvariantGlobalization>true</InvariantGlobalization>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-    <Authors>EasyPatch contributors</Authors>
+    <Authors>DHI Technical Services LLC</Authors>
+    <Company>DHI Technical Services LLC</Company>
     <Product>EasyPatch</Product>
-    <Copyright>Copyright (c) EasyPatch contributors. Licensed under the Apache License, Version 2.0.</Copyright>
+    <Copyright>Copyright (c) 2026 DHI Technical Services LLC. Licensed under the Functional Source License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2).</Copyright>
     <!-- Single source of truth for product version; overridden by CI with -p:Version=x.y.z -->
     <Version>1.4.0</Version>
     <!-- Allow building Windows-targeted agent projects on Linux build hosts -->
