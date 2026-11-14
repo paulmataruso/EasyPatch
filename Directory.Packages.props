@@ -18,7 +18,7 @@
     <!-- Monthly PDF reports. 6.2.x is the last MIT-licensed line (6.5.0 and later are AGPL-3.0). PDFsharp and
          System.Security.Cryptography.Pkcs are pinned explicitly (transitive dependencies). -->
     <PackageVersion Include="PDFsharp-MigraDoc" Version="6.2.4" />
-    <PackageVersion Include="PDFsharp" Version="6.2.4" />
+    <PackageVersion Include="PDFsharp" Version="6.5.0" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
     <!-- Agent -->
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
