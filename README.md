@@ -8,10 +8,39 @@
   </picture>
 </h1>
 
-EasyPatch is a self-hosted Windows and Linux patch management platform for Managed Service
-Providers. A small agent reports Windows Update status, or the package upgrades available from
-apt or dnf, to a central web console. From there an administrator installs the missing updates
-on one computer, a site, or a whole customer, and tracks compliance across every customer.
+<p align="center">
+  <b>Self-hosted Windows and Linux patch management for Managed Service Providers.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/paulmataruso/EasyPatch/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/paulmataruso/EasyPatch?sort=semver"></a>
+  <a href="https://github.com/paulmataruso/EasyPatch/actions/workflows/server.yml"><img alt="Server build" src="https://github.com/paulmataruso/EasyPatch/actions/workflows/server.yml/badge.svg"></a>
+  <a href="https://github.com/paulmataruso/EasyPatch/actions/workflows/agent.yml"><img alt="Agent build" src="https://github.com/paulmataruso/EasyPatch/actions/workflows/agent.yml/badge.svg"></a>
+  <a href="LICENSE.md"><img alt="License: FSL-1.1-ALv2" src="https://img.shields.io/badge/license-FSL--1.1--ALv2-blue"></a>
+  <img alt="Platforms: Windows and Linux agents" src="https://img.shields.io/badge/agents-Windows%20%7C%20Linux-informational">
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#screenshots">Screenshots</a> ·
+  <a href="#features">Features</a> ·
+  <a href="docs/installation.md">Installation</a> ·
+  <a href="https://github.com/paulmataruso/EasyPatch/releases">Downloads</a> ·
+  <a href="#license">License</a>
+</p>
+
+EasyPatch is a self-hosted patch management platform for Managed Service Providers. A small
+agent reports Windows Update status, or the package upgrades available from apt or dnf, to a
+central web console. From there an administrator installs the missing updates on one computer,
+a site, or a whole customer, sees which missing updates fix actively exploited vulnerabilities,
+and tracks compliance across every customer.
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/dashboard-light.png">
+  <img src="docs/images/dashboard.png" alt="EasyPatch dashboard: compliance, known-exploited exposure, online and offline endpoints, a 30-day compliance trend and the least compliant organizations">
+</picture>
+
+## Principles
 
 * **Outbound-only agents.** Endpoints connect to the server over HTTPS (TCP 443). No VPN,
   inbound firewall rule or port forwarding is needed, so agents work behind NAT.
@@ -27,6 +56,33 @@ on one computer, a site, or a whole customer, and tracks compliance across every
   when an administrator configures an override. It never touches the WSUS server settings, and
   it puts the original values back when the override is removed. On Linux, repositories and
   `unattended-upgrades` or `dnf-automatic` are reported and never changed.
+
+## Screenshots
+
+All screenshots show fictional demo data.
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/images/endpoint-updates.png"><img src="docs/images/endpoint-updates.png" alt="Missing updates of one endpoint, with CVE counts, known-exploited flags, rollout delays and winget application updates"></a><br><sub><b>Endpoint updates.</b> Known-exploited first, CVE counts, rollout delays, winget application updates.</sub></td>
+    <td width="50%"><a href="docs/images/updates.png"><img src="docs/images/updates.png" alt="Fleet-wide update list across all organizations, known-exploited updates first"></a><br><sub><b>Update management.</b> Every update across the fleet, known-exploited first.</sub></td>
+  </tr>
+  <tr>
+    <td><a href="docs/images/update-detail.png"><img src="docs/images/update-detail.png" alt="One cumulative update with the CVEs it fixes and its CISA KEV entry"></a><br><sub><b>Update detail.</b> The CVEs an update fixes, with CISA KEV dates.</sub></td>
+    <td><a href="docs/images/linux-updates.png"><img src="docs/images/linux-updates.png" alt="A Rocky Linux server with security package updates and advisories"></a><br><sub><b>Linux endpoints.</b> apt and dnf upgrades with advisories and CVEs.</sub></td>
+  </tr>
+  <tr>
+    <td><a href="docs/images/endpoints.png"><img src="docs/images/endpoints.png" alt="Endpoint list with compliance, tags, operating system support status and agent versions"></a><br><sub><b>Endpoints.</b> Compliance, tags, OS support status and filters.</sub></td>
+    <td><a href="docs/images/policy.png"><img src="docs/images/policy.png" alt="Organization policy with automatic installation, maintenance window and rollout delays"></a><br><sub><b>Policy.</b> Maintenance windows and rollout delays, inherited or overridden.</sub></td>
+  </tr>
+  <tr>
+    <td><a href="docs/images/job-detail.png"><img src="docs/images/job-detail.png" alt="An install job with a timeline and per-update results, one failed with its error code"></a><br><sub><b>Jobs.</b> Per-update results, verified by a scan, never assumed.</sub></td>
+    <td><a href="docs/images/alerts.png"><img src="docs/images/alerts.png" alt="Open alerts for known-exploited vulnerabilities, offline endpoints and failed installs"></a><br><sub><b>Alerts.</b> Email, Slack, Teams or signed webhooks.</sub></td>
+  </tr>
+  <tr>
+    <td><a href="docs/images/monthly-reports.png"><img src="docs/images/monthly-reports.png" alt="Monthly PDF reports per organization"></a><br><sub><b>Monthly reports.</b> One PDF per customer and month, emailed on schedule.</sub></td>
+    <td><a href="docs/images/monthly-report-pdf.png"><img src="docs/images/monthly-report-pdf.png" alt="First page of a monthly compliance report PDF"></a><br><sub><b>Report PDF.</b> Compliance trend, sites and the most widely missing updates.</sub></td>
+  </tr>
+</table>
 
 ## Features
 
@@ -130,13 +186,13 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 
 ## Quick start
 
-On a Linux host with Docker, a DNS name pointing at it, and ports 80 and 443 open:
+On a Linux host (x64 or ARM64) with Docker, a DNS name pointing at it, and ports 80 and 443 open:
 
 ```bash
-git clone <repository-url> easypatch && cd easypatch
+git clone --branch v1.4.0 https://github.com/paulmataruso/EasyPatch.git easypatch && cd easypatch
 ./scripts/init-secrets.sh                 # database password secret, data directories, .env
 $EDITOR .env                              # set EASYPATCH_DOMAIN and ACME_EMAIL
-docker compose build
+docker compose pull                       # ghcr.io/paulmataruso/easypatch-server and -proxy
 docker compose up -d
 docker compose run --rm api create-admin --username admin --email admin@example.com
 ```
@@ -145,12 +201,15 @@ Then:
 
 1. Open `https://<EASYPATCH_DOMAIN>`, sign in with the printed temporary password, set up MFA
    and choose a new password.
-2. Copy the agent packages (MSI, `.deb`, `.rpm`) into `data/agent-packages/`.
+2. Download the agent packages (MSI, `.deb`, `.rpm` and their `.sig` files) from the
+   [release](https://github.com/paulmataruso/EasyPatch/releases/latest) into
+   `data/agent-packages/`.
 3. Create an organization, then deploy agents with an enrollment token or a deployment code.
 
 The full guides are [docs/installation.md](docs/installation.md),
 [docs/agent-installation.md](docs/agent-installation.md) and
-[docs/linux-agent.md](docs/linux-agent.md).
+[docs/linux-agent.md](docs/linux-agent.md). To build everything from source instead, see
+[Building the images from source](docs/installation.md#building-the-images-from-source).
 
 ## Documentation
 
@@ -189,7 +248,9 @@ The agent builds and tests on Linux with `scripts/build-agent.sh`. The MSIs can 
 Linux with Docker (`scripts/build-msi-linux.sh`, which runs WiX under Wine) or on Windows with
 `scripts/build-agent.ps1`, which can also sign them. The `agent` GitHub Actions workflow builds
 them on Windows. `scripts/build-linux-packages.sh` builds the signed `.deb` and `.rpm`
-packages of the Linux agent (Docker).
+packages of the Linux agent (Docker). Pushing a version tag (`v1.4.0`) runs the `release`
+workflow, which tests everything, builds and release-signs the agent packages, publishes the x64
+and ARM64 images to GitHub Container Registry and creates the GitHub Release.
 
 ```
 shared/      Contracts shared by agent and server (DTOs, request signing, update classification)
@@ -198,29 +259,57 @@ agent/       Agent core, communication, Windows Update, inventory, Windows and L
 frontend/    Web console
 deployment/  Dockerfiles and Caddy configuration
 scripts/     init-secrets, backup, restore, agent and MSI builds, agent icon, dependency audit
+keys/        The release public key built into official agent builds
+tools/       Release signing tool
 docs/        Documentation
 ```
 
 ## Project status
 
-Version 1.4.0, pre-release. Server, console and agent logic are covered by automated tests on
-Linux. The following have not yet been validated by this repository's automated tests:
+Version 1.4.0, the first public release. Server, console and agent logic are covered by automated
+tests on Linux, including an end-to-end test that drives the real agent runtime against the real
+API and PostgreSQL. Release builds are made and signed by GitHub Actions.
 
-* the Windows-specific agent components on real Windows: Windows Update Agent COM calls, WMI
-  inventory, DPAPI key storage and the Windows service host;
-* the MSI on real Windows. It builds on Linux, and installs, upgrades and uninstalls under
-  Wine, but Windows Installer ICE validation has not been run;
-* agent self-update on real Windows (`msiexec` replacing the running service). The agent's
-  side of it is tested with a simulated Windows Installer;
-* the PowerShell install script on Windows;
-* the Linux agent against real package managers. Its apt and dnf handling is tested with
-  simulated package managers; scanning, package installation, the install script and
-  self-update were exercised by hand on Debian 12 and 13, Ubuntu 22.04, 24.04, 26.04 and 26.10,
-  Rocky Linux 8 and 9, AlmaLinux 10.2 (x86-64-v2 build) and Fedora 45 containers, not by
-  automated tests.
+Checked by hand so far:
 
-Validate them on test endpoints before rolling out to production.
+* the Windows agent on a Windows 11 25H2 workstation: enrollment, scans, inventory, the tray
+  icon, and self-update from 1.2.0 to 1.2.1 and to 1.4.0;
+* the Linux agent on Debian 12 and 13, Ubuntu 22.04, 24.04, 26.04 and 26.10, Rocky Linux 8 and 9,
+  AlmaLinux 10.2 and Fedora 45 containers: enrollment through the install script, scans, package
+  installation and self-update.
+
+Not yet validated on real systems: installing updates across Windows versions and Windows
+Server, the MSI with Windows Installer ICE validation, the PowerShell install script, winget
+application updates and email delivery. Validate them on test endpoints before rolling out to
+production, and report what you find.
+
+## Security
+
+EasyPatch has no remote shell and runs no commands from the server, agents hold their own keys,
+and agent updates must carry a release signature that the agent checks itself. The design,
+threat model and hardening checklist are in [docs/security.md](docs/security.md).
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in public issues.
+
+## Contributing
+
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), including the
+contributor terms, and the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-[Apache License 2.0](LICENSE)
+EasyPatch is source-available under the **Functional Source License, Version 1.1, ALv2 Future
+License** ([FSL-1.1-ALv2](LICENSE.md)). Copyright 2026 DHI Technical Services LLC.
+
+* You may use, copy, modify and redistribute EasyPatch for any purpose **except a Competing
+  Use**: making it available to others in a commercial product or service that substitutes for
+  EasyPatch or offers substantially similar functionality.
+* The licensor's intent: MSPs and IT departments may run EasyPatch free of charge to patch their
+  own computers and the computers they manage for their clients, including as part of paid
+  managed services. Selling EasyPatch, or offering it or a product built from it for others to
+  run their own patch management, is not permitted.
+* Each version becomes available under the Apache License 2.0 two years after it is released.
+* For a commercial license, contact DHI Technical Services LLC through the
+  [maintainer's GitHub profile](https://github.com/paulmataruso).
+
+Third-party components keep their own licenses.
