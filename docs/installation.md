@@ -99,34 +99,39 @@ Then:
 ## 6. Offer agent packages
 
 Build the agent MSI (see [agent-installation.md](agent-installation.md#building-from-source))
-and copy it, with its `.sig` release signature, to `data/agent-packages/`:
+and the Linux `.deb` and `.rpm` packages (see [linux-agent.md](linux-agent.md#building-from-source)),
+and copy them, each with its `.sig` release signature, to `data/agent-packages/`:
 
 ```bash
-cp EasyPatchAgent-1.2.0-x64.msi EasyPatchAgent-1.2.0-x64.msi.sig data/agent-packages/
+cp EasyPatchAgent-1.3.0-x64.msi EasyPatchAgent-1.3.0-x64.msi.sig data/agent-packages/
+cp artifacts/linux/EasyPatchAgent-1.3.0-*.deb* artifacts/linux/EasyPatchAgent-1.3.0-*.rpm* data/agent-packages/
 chmod 644 data/agent-packages/*
 ```
 
-* File names must match `EasyPatchAgent-<version>-x64.msi` or `EasyPatchAgent-<version>-arm64.msi`
-  (version `MAJOR.MINOR.BUILD`, optionally with a fourth part). Other `.msi` files are ignored and
-  a warning is logged.
+* File names must match `EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm>` (version
+  `MAJOR.MINOR.BUILD`, optionally with a fourth part). Other files starting with `EasyPatchAgent-`
+  are ignored and a warning is logged; `.sig` and `.sha256` files are not packages.
 * The API runs as uid 1654 and mounts the directory read-only, so the files must be
   world-readable.
 * The server computes each package's SHA-256 itself. The package list is refreshed at most once a
   minute.
-* Packages appear under **Agent Management → Packages**. The console uses the newest package to
+* Packages appear under **Agent Management → Packages**. The console uses the newest MSI to
   build `msiexec` commands and the PowerShell install script for deployment codes. That script
   verifies the package's SHA-256, and optionally its Authenticode signature, before installing.
-* Agents 1.2.0 and later update themselves to the newest **signed** package (one with a valid
-  `.sig` file): automatically when the *Agent updates* policy is Automatic (the default), or when
+  The Linux install script offers the newest `.deb` and `.rpm` for each architecture and
+  verifies the SHA-256 of the one it downloads.
+* Agents (Windows 1.2.0 and later, all Linux agents) update themselves to the newest **signed**
+  package in their own format and architecture (one with a valid `.sig` file): automatically when the *Agent updates* policy is Automatic (the default), or when
   an Operator chooses *Update agent…*. Copying a newer signed package here therefore starts a
   rollout. Set the policy to Manual first if you want to choose when. Agents check the release
   signature against the key built into them, so the server cannot make them install anything
   else. See [agent-installation.md](agent-installation.md#upgrading). Older agents only log that
   a newer version exists; install the MSI on them once.
 * The release private key belongs on the machine that builds the agent. Never copy it to the
-  server: the server needs only the MSI and its `.sig` file.
+  server: the server needs only the packages and their `.sig` files.
 
-Agent installation and enrollment are described in [agent-installation.md](agent-installation.md).
+Agent installation and enrollment are described in [agent-installation.md](agent-installation.md)
+(Windows) and [linux-agent.md](linux-agent.md) (Linux).
 
 ## Upgrading
 

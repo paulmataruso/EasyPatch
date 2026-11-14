@@ -1,14 +1,16 @@
 # EasyPatch Architecture
 
-EasyPatch is a self-hosted Windows patch management platform for Managed Service Providers.
-It has two parts:
+EasyPatch is a self-hosted Windows and Linux patch management platform for Managed Service
+Providers. It has two parts:
 
 1. **The server**: a Docker Compose stack in a DMZ, reachable on TCP 443.
-2. **The agent**: a Windows service (`EasyPatchAgent`) on each managed endpoint. It only makes
+2. **The agent**: a Windows service (`EasyPatchAgent`) or a Linux systemd service
+   (`easypatch-agent`) on each managed endpoint. It only makes
    outbound HTTPS connections, so customer networks need no VPN, inbound rules or port
    forwarding. It works behind NAT and CGNAT.
 
-The platform patches the Windows operating system and does nothing else. The agent has no
+The platform patches the Windows operating system, or the packages installed from a Linux
+distribution's repositories, and does nothing else. The agent has no
 remote shell and no arbitrary command execution. It restarts a computer only for an
 administrator's restart job: a one-off restart, or one created by a restart schedule an
 administrator configured in policy.
@@ -53,9 +55,11 @@ agent/EasyPatch.Communication   Signed HTTPS client for the agent protocol
 agent/EasyPatch.WindowsUpdate   Windows Update Agent (WUA) COM integration          [Windows]
 agent/EasyPatch.Inventory       WMI and registry inventory, reboot and update-source detection [Windows]
 agent/EasyPatch.Agent           Windows service host, tray app, DPAPI, CLI           [Windows]
+agent/EasyPatch.Linux           apt/dnf backends, package ledger, inventory, reboot detection, systemd-creds [Linux]
+agent/EasyPatch.Agent.Linux     systemd service host and CLI (easypatch-agent)       [Linux]
 agent/EasyPatch.Agent.Tests     Agent logic tests (run on any OS using fakes)
-agent/Installer                 WiX v5 MSI project
-tools/EasyPatch.ReleaseSigner   easypatch-release: creates the release key, signs and verifies agent MSIs
+agent/Installer                 WiX v5 MSI project; linux-packages: .deb/.rpm metadata, systemd unit
+tools/EasyPatch.ReleaseSigner   easypatch-release: creates the release key, signs and verifies agent packages
 frontend/                       React + TypeScript + Vite + Tailwind SPA
 ```
 
@@ -165,6 +169,13 @@ order:
 
 The original Microsoft classification is stored as well. Cumulative, ServicingStack and
 DotNet are derived categories, not Microsoft classifications.
+
+Linux package upgrades are **Security** when the Linux agent found them in a security
+repository (apt) or covered by a security advisory (dnf), and **Other** otherwise. Each one is
+a catalog entry for one version of one package on one distribution release (the update GUID is
+derived from the distribution, release, package name, architecture and version), with the
+package name, version, architecture, repository and advisories stored on the update and the
+installed version on the endpoint's update row.
 
 ## 3. Policy
 
@@ -324,8 +335,9 @@ server never signs anything; see [security.md](security.md#agent-release-signing
 
 * **Who creates them.** An Operator (*Update agent…*, one endpoint or bulk), or the worker's
   `agent-updates` task every 2 minutes for online endpoints whose effective *Agent updates*
-  policy is Automatic. The task picks the newest package for the agent's architecture that is
-  newer than the installed agent and signed with a key the agent reported. It starts at most
+  policy is Automatic. The task picks the newest package for the agent's architecture and
+  package format (MSI, `.deb` or `.rpm`) that is newer than the installed agent and signed with
+  a key the agent reported. It starts at most
   `EasyPatch:AutomaticAgentUpdateConcurrency` (default 25) agent update jobs at a time across
   the installation. After a failed or cancelled update of a version it waits 6 hours, and stops
   after 3 failures of that version (an Operator can still start it). Automatic jobs expire after
@@ -382,7 +394,9 @@ server never signs anything; see [security.md](security.md#agent-release-signing
   and lists the reasons. Install jobs never restart the computer. The agent restarts it only
   for a `Restart` job (see [Restart jobs](#restart-jobs)).
 * **Self-update.** Agents 1.2.0 and newer report the package architecture and the IDs of the
-  release keys built into them, and can run `AgentUpdate` jobs (above).
+  release keys built into them, and can run `AgentUpdate` jobs (above). Linux agents also
+  report their package format and install the package with apt or dnf in a transient systemd
+  unit that outlives the agent's own restart.
 * **Resilience.** On a service restart or reboot, the agent reloads its saved state and
   resumes the active job, which is idempotent. Reports wait in the on-disk outbox until the
   server accepts them. Network failures use exponential backoff with full jitter, up to
@@ -392,6 +406,25 @@ server never signs anything; see [security.md](security.md#agent-release-signing
   server, Windows Update or Microsoft Update), Windows Update for Business deferral policies
   and Automatic Updates mode. It changes Windows Update policy values only for the groups an
   administrator configured (below), and never the WSUS settings.
+
+### Linux agent
+
+The Linux agent runs the same `EasyPatch.Agent.Core` runtime (check-in, scan, inventory, jobs,
+outbox, restarts, self-update) with Linux implementations of the platform services:
+
+| Service | Implementation |
+|---|---|
+| Updates | `PackageUpdateService` over `AptBackend` or `DnfBackend`. Scans refresh the package lists and list upgradable installed packages; installs run one apt or dnf transaction for the approved packages at exact versions, in the transient unit `easypatch-packages`, and verify the installed versions afterwards |
+| Installed updates | A ledger (`/var/lib/easypatch/package-ledger.json`) of reported upgrades, kept for 30 days, reports them as installed or superseded once the package database shows a version at least as new |
+| Reboot detection | `/run/reboot-required(.pkgs)`, `dnf needs-restarting -r`, a newer installed kernel of the running flavour |
+| Restart | `shutdown -r +N <message>` and `shutdown -c`; signed-in users from `who` |
+| Inventory | `/etc/os-release`, `/proc`, DMI, `systemd-detect-virt`, Ubuntu Pro status, the automatic-update tool |
+| Key protection | `systemd-creds` with the host key, or file permissions |
+| Bootstrap | `/etc/easypatch/agent.conf` |
+| Agent update | `apt-get install` or `dnf install` of the verified package in the transient unit `easypatch-agent-update` |
+
+There is no tray, no user messages and no Windows Update policy. See
+[linux-agent.md](linux-agent.md).
 
 ### Tray
 

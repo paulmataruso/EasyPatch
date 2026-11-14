@@ -23,11 +23,11 @@ The live OpenAPI document is served at `/api/openapi/v1.json`, with Swagger UI a
 
 | Method | Route | Auth | Purpose |
 |---|---|---|---|
-| POST | `/enroll` | none (token or deployment code in the body) | Register a public key. Returns `Active` (with `endpointId`, `credentialId` = `c_…`, `config`) or `PendingApproval` (with `credentialId` = `r_…`). |
+| POST | `/enroll` | none (token or deployment code in the body) | Register a public key. Linux agents add `platform`, `osId` and `osVersion` to the device description. Returns `Active` (with `endpointId`, `credentialId` = `c_…`, `config`) or `PendingApproval` (with `credentialId` = `r_…`). |
 | POST | `/enrollment/status` | signed with `r_…` | Poll a pending enrollment: `PendingApproval`, `Active` (with the new `c_…` credential), `Rejected` or `Expired`. This is the only route an `r_…` credential may call. |
-| POST | `/check-in` | signed | Combined heartbeat and job poll. Request: agent version, boot time, reboot state and reasons, IDs of jobs the agent holds, current activity, capabilities, signed-in user and tray counts, the Windows Update policy status (only when it changed, and at least daily), and for self-update the package architecture (`agentArchitecture`, `x64` or `arm64`) and the IDs of the release keys built into the agent (`releaseKeyIds`). Response: server time, config (including the tray and notification settings and the effective Windows Update settings), jobs to run (at most one newly leased job, up to five messages, plus re-deliveries), IDs of jobs to cancel, `rotateCredential`, latest available agent version. |
-| POST | `/inventory` | signed | OS and hardware inventory. `204`. |
-| POST | `/updates/scan-results` | signed | Full scan snapshot (missing and installed updates, update source). Idempotent by `scanId`. `204`. |
+| POST | `/check-in` | signed | Combined heartbeat and job poll. Request: agent version, boot time, reboot state and reasons, IDs of jobs the agent holds, current activity, capabilities, signed-in user and tray counts, the Windows Update policy status (only when it changed, and at least daily), and for self-update the package architecture (`agentArchitecture`, `x64` or `arm64`), the package format (`agentPackageFormat`: `msi`, `deb` or `rpm`; absent before 1.3.0 means `msi`) and the IDs of the release keys built into the agent (`releaseKeyIds`). Response: server time, config (including the tray and notification settings and the effective Windows Update settings), jobs to run (at most one newly leased job, up to five messages, plus re-deliveries), IDs of jobs to cancel, `rotateCredential`, latest available agent version. |
+| POST | `/inventory` | signed | OS and hardware inventory. Linux agents also send `platform` (`Linux`; absent means `Windows`), `osId` and `osVersion` from `/etc/os-release`, the kernel version, the package manager and how the private key is protected. `204`. |
+| POST | `/updates/scan-results` | signed | Full scan snapshot (missing and installed updates, update source). Linux updates carry a `package` object: name, architecture, installed and new version, repository, `security`, severity and advisories. Idempotent by `scanId`. `204`. |
 | POST | `/updates/history` | signed | Windows Update history entries, deduplicated on the server. `204`. |
 | POST | `/jobs/{jobId}/ack` | signed | Confirm receipt of a delivered job. `409` with `code=job_cancelled` if it was cancelled or already finished. |
 | POST | `/jobs/{jobId}/status` | signed | Progress, per-update results and final status. Each report carries a per-job `sequence`; stale or repeated reports are ignored. `204`. An impossible transition returns `409 invalid_transition`. |
@@ -48,11 +48,12 @@ through one sequence-numbered channel.
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | `/downloads/agent/{fileName}` | Agent MSI from the package directory. Agents download updates here too. |
+| GET | `/downloads/agent/{fileName}` | Agent package (MSI, `.deb` or `.rpm`) from the package directory. Agents download updates here too. |
 | GET | `/downloads/install/{deploymentCode}.ps1` | The tokenless install script for a deployment code (`?requireSignature=true` adds an Authenticode check). Returns `404` for an unknown, expired or revoked code and `503` when no agent package is available; both bodies are a PowerShell `throw`, so a piped one-liner fails loudly. |
+| GET | `/downloads/install/{deploymentCode}.sh` | The tokenless Linux install script (POSIX `sh`) for a deployment code, with the newest `.deb` and `.rpm` package for each architecture and their SHA-256. `404` for an unknown, expired or revoked code and `503` when no Linux package is available; both bodies are shell that prints the error and exits with status 1. |
 
 These routes are outside `/api/v1`, need no session and are limited to 60 requests per
-minute per IP. The install script contains no secret: endpoints installed with it wait for
+minute per IP. The install scripts contain no secret: endpoints installed with it wait for
 administrator approval.
 
 ## Administrator API
@@ -117,11 +118,11 @@ values return `400 validation_failed`.
 | Method | Route | Notes |
 |---|---|---|
 | GET | `/endpoints` | Filters: `organizationId, siteId, search, compliance, online, os, rebootPending, outdatedAgent, status`. Sort: `hostname` (default), `organization, site, os, missing, lastCheckIn, compliance, agentVersion`. |
-| GET/PUT/DELETE | `/endpoints/{id}` | PUT: `siteId`, `notes`, `esuOverride`. DELETE revokes the credentials and removes the record. |
+| GET/PUT/DELETE | `/endpoints/{id}` | GET includes `platform` (`Windows` or `Linux`) and, for Linux, `linux`: `osId`, `osVersion`, `kernelVersion`, `packageManager`, `keyProtection`. PUT: `siteId`, `notes`, `esuOverride`. DELETE revokes the credentials and removes the record. |
 | POST | `/endpoints/{id}/revoke` | `{reason?}`. Revokes all credentials; the agent can no longer call the server. |
-| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification and excluded updates, with the live state of an active job overlaid. |
+| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification and excluded updates, with the live state of an active job overlaid. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). |
 | GET | `/endpoints/{id}/installed-updates` | Updates confirmed installed by a scan |
-| GET | `/endpoints/{id}/update-history` | Windows Update history (`?search=&page=&pageSize=`) |
+| GET | `/endpoints/{id}/update-history` | Windows Update history (`?search=&page=&pageSize=`). Always empty for Linux endpoints |
 | GET | `/endpoints/{id}/events` | Agent and server activity (`?severity=&page=&pageSize=`) |
 | GET | `/endpoints/{id}/jobs` | Job history (`?page=&pageSize=`) |
 | GET | `/endpoints/{id}/effective-policy` | Resolved policy and where each value came from, including the restart schedule, the Windows Update settings per group and the exact registry values the agent will set |
@@ -133,7 +134,7 @@ values return `400 validation_failed`.
 | DELETE | `/endpoints/{id}/exclusions/{updateGuid}` | Remove the exclusion |
 | POST | `/endpoints/{id}/restart` | `{mode, condition, countdownMinutes?, deadlineMinutes?, scheduledAt?, expiresAfterMinutes?, force}` → `202` with the job. `mode`: `Immediate`, `Countdown`, `PromptWithDeadline`, `PromptNoDeadline`; `condition`: `Always`, `OnlyIfPending`. `scheduledAt` is at most 31 days ahead; `expiresAfterMinutes` (15 to 1440, default 120) is how long an offline computer may take to pick it up. `409 duplicate_job` while another restart is active, `409 agent_upgrade_required` for agents without restart support. |
 | POST | `/endpoints/{id}/notify` | `{preset, restartAt?}` → `202` with the job. `restartAt` is required for `RestartScheduled`. `409 agent_upgrade_required` for agents without message support. |
-| POST | `/endpoints/{id}/agent-update` | `{version?}` (send `{}` for the newest) → `202` with an `AgentUpdate` job for the newest signed package for the agent's architecture, or the given version. `409` with `agent_upgrade_required` (agent older than 1.2.0 or built without a release key), `no_agent_package`, `agent_up_to_date` (also for older versions: agents are never downgraded), `package_not_signed`, `release_key_not_trusted` or `duplicate_job`. |
+| POST | `/endpoints/{id}/agent-update` | `{version?}` (send `{}` for the newest) → `202` with an `AgentUpdate` job for the newest signed package for the agent's architecture and package format, or the given version. `409` with `agent_upgrade_required` (agent older than 1.2.0 or built without a release key), `no_agent_package`, `agent_up_to_date` (also for older versions: agents are never downgraded), `package_not_signed`, `release_key_not_trusted` or `duplicate_job`. |
 | POST | `/endpoints/bulk/scan`, `/endpoints/bulk/install-updates` | `{endpointIds[], force}`. Returns a per-endpoint outcome. |
 | POST | `/endpoints/bulk/restart` | `{endpointIds[], restart: {…as above}}`. Per-endpoint outcome. |
 | POST | `/endpoints/bulk/notify` | `{endpointIds[], message: {preset, restartAt?}}`. Per-endpoint outcome. |
@@ -147,7 +148,9 @@ endpoints.
 
 `GET /updates` aggregates updates across endpoints with missing, failed, installed and
 pending-reboot counts. Filters: `organizationId, siteId, category, state, search`. Sort:
-`missing` (default: missing + failed), `failed`, `installed`. Also `GET /updates/{updateGuid}`
+`missing` (default: missing + failed), `failed`, `installed`. Without `state`, only updates that
+are missing, failed or pending a restart somewhere are listed; `search` matches the title and KB
+numbers (Linux update titles contain the package name). Linux updates include `package`. Also `GET /updates/{updateGuid}`
 (`?organizationId=&siteId=`), `GET /updates/{updateGuid}/endpoints`
 (`?state=&organizationId=&siteId=&page=&pageSize=`) and
 `POST /updates/{updateGuid}/install` (Operator; `{organizationId?, siteId?, endpointIds?}`
@@ -167,16 +170,16 @@ creates a `Selected` install job on each affected endpoint, at most 1000).
 
 | Method | Route | Notes |
 |---|---|---|
-| GET/POST | `/enrollment-tokens` | GET: `?organizationId=&includeInactive=`. POST `{organizationId, siteId?, description?, expiresInHours, maxUses, count}` returns each plaintext token **once**, with a ready-made `msiexec` command. |
+| GET/POST | `/enrollment-tokens` | GET: `?organizationId=&includeInactive=`. POST `{organizationId, siteId?, description?, expiresInHours, maxUses, count}` returns each plaintext token **once**, with a ready-made `msiexec` command and `linuxEnrollCommand` (pipes the token into `easypatch-agent enroll --token-file -`). |
 | POST | `/enrollment-tokens/{id}/revoke` | |
-| GET/POST | `/deployment-codes` | POST `{organizationId, siteId?, name, expiresInDays?, allowedSourceCidrs?, maxPendingRequests?}` → `201`. Each code includes the PowerShell one-liner. |
+| GET/POST | `/deployment-codes` | POST `{organizationId, siteId?, name, expiresInDays?, allowedSourceCidrs?, maxPendingRequests?}` → `201`. Each code includes the PowerShell one-liner and the Linux one-liner (`linuxOneLiner`, `linuxScriptUrl`). |
 | POST | `/deployment-codes/{id}/revoke` | |
-| GET | `/deployment-codes/{id}/install-script` | `?package=&requireSignature=`. The full PowerShell script, the one-liner, and the package name, version and SHA-256. |
+| GET | `/deployment-codes/{id}/install-script` | `?package=&requireSignature=&platform=`. The full PowerShell script, the one-liner, and the package name, version and SHA-256. `platform=linux` returns the Linux shell script and one-liner, with the package names and SHA-256 values comma-separated. |
 | GET | `/enrollment-requests` | `?status=Pending&organizationId=&page=&pageSize=` |
 | POST | `/enrollment-requests/{id}/approve` | `{organizationId?, siteId?}` (optionally assign elsewhere) |
 | POST | `/enrollment-requests/{id}/reject` | `{reason?}` |
 | POST | `/enrollment-requests/bulk-approve` | `{ids[]}` |
-| GET | `/agent-packages` | Viewer. MSIs in the package directory with version, size, SHA-256 and, when a valid `.sig` file is next to the package, its `releaseKeyId`. `signatureProblem` says why a `.sig` file was ignored. |
+| GET | `/agent-packages` | Viewer. Packages in the package directory with `format` (`msi`, `deb`, `rpm`), version, size, SHA-256 and, when a valid `.sig` file is next to the package, its `releaseKeyId`. `signatureProblem` says why a `.sig` file was ignored. |
 | GET | `/agent-versions` | Viewer. Agent version distribution (`?organizationId=`) |
 
 ### Dashboard, reports, audit, settings

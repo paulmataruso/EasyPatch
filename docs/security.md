@@ -67,20 +67,22 @@ changes Windows Update policy values only for settings an administrator configur
 
 There are two ways to enroll an agent.
 
-1. **Enrollment token** (`msiexec … ENROLLMENTTOKEN=…`). A token is valid for one organization
+1. **Enrollment token** (`msiexec … ENROLLMENTTOKEN=…`, or `easypatch-agent enroll --token-file`
+   on Linux). A token is valid for one organization
    (and optionally one site). It expires (default 24 h, maximum 30 days) and is limited to a
    number of uses (default 1). Administrators can revoke it. Enrollment is rate-limited to
    30 requests per minute per IP.
-2. **Deployment code with approval** (the tokenless PowerShell/RMM install).
+2. **Deployment code with approval** (the tokenless PowerShell/RMM install, or the Linux install
+   script).
    * The deployment code is a non-secret routing identifier. On its own it grants nothing.
    * The agent enrolls with its public key, which creates a **pending request**. The agent
      then polls a signed status endpoint. No endpoint or credential exists until an
      administrator approves the request in the GUI.
    * The administrator sees the hostname, serial number, manufacturer and model, OS, agent
      version, source IP and the **key fingerprint**. On the endpoint, the fingerprint is
-     written to the agent log and the Application event log, `EasyPatch.Agent.exe status`
-     prints it, and the generated install script displays it, so the RMM output can be
-     compared with the approval queue.
+     written to the agent log and the Application event log (the journal on Linux),
+     `EasyPatch.Agent.exe status` and `easypatch-agent status` print it, and the generated
+     install scripts display it, so the RMM output can be compared with the approval queue.
    * Limits:
      * Pending requests per code are capped (default 500).
      * Requests expire after 7 days.
@@ -196,9 +198,38 @@ the named pipe `\\.\pipe\EasyPatchAgent`:
   administrator's deadline, which the restart prompt allows anyway. No input from the tray is
   ever executed, and the tray cannot change the agent's configuration, jobs or credentials.
 
+## Linux agent
+
+The Linux agent follows the same model with these platform specifics
+([linux-agent.md](linux-agent.md)):
+
+* **It runs as root**, which apt, dnf and `shutdown` require, with `UMask=0077`. Its settings
+  (`/etc/easypatch`, 0700, `agent.conf` 0600) and data (`/var/lib/easypatch`, 0700) are
+  readable by root only.
+* **Private key.** Encrypted with `systemd-creds` and the host key
+  (`/var/lib/systemd/credential.secret`) on systemd 250 and later; otherwise protected by file
+  permissions only. The console shows which one each endpoint uses. Root can read the key either
+  way; the host key protects copies of `/var/lib/easypatch` such as backups.
+* **Enrollment token.** Never accepted as a command-line argument, because arguments are
+  visible to every local user. `enroll` reads it from a file, standard input or
+  `EASYPATCH_ENROLLMENT_TOKEN`, and the token is removed from `agent.conf` after enrollment.
+  The command the console shows pipes the token in with the `printf` builtin, which keeps it out
+  of the process list but not out of the shell history.
+* **The install script** contains the server URL and the deployment code, nothing secret. It
+  downloads the package from the server over HTTPS and checks the SHA-256 that the server put in
+  the script, so its trust rests on the TLS connection to the server, like the PowerShell
+  script.
+* **Package installation.** The server sends update GUIDs; the agent installs only upgrades that
+  its own scan found in the repositories the computer is configured for, at the exact versions
+  it found. Package names, architectures and versions are validated, passed to apt or dnf as
+  separate arguments after `--` (no shell), and no options come from the server. The server
+  cannot name a package, a version or a repository.
+* **Output.** Package manager output sent to the server (error summaries) has credentials in
+  repository URLs (`user:password@`, `token=` and similar query parameters) replaced with `***`.
+
 ## Agent release signing
 
-Agents 1.2.0 and newer can update themselves. The EasyPatch server is not trusted to decide
+Windows agents 1.2.0 and newer and all Linux agents can update themselves. The EasyPatch server is not trusted to decide
 what code runs on endpoints: it only relays agent packages and their signatures, and the agent
 checks them against a key that was built into it.
 
@@ -209,10 +240,10 @@ to the EasyPatch server or into source control. Set `EASYPATCH_RELEASE_KEY_PASSW
 encrypted (PKCS#8, AES-256-CBC, PBKDF2-SHA256 with 600,000 iterations). The public key
 (`easypatch-release-key.pub.pem`) is built into the agent executable by the build scripts.
 An agent built without it reports that it cannot update itself and must be upgraded by
-installing a newer MSI.
+installing a newer package.
 
-**What is signed.** The build scripts write `<msi>.sig` next to each MSI. It signs the file
-name, version, architecture, size and SHA-256 of the package, prefixed with a fixed domain
+**What is signed.** The build scripts write `<package>.sig` next to each MSI, `.deb` and `.rpm`
+package. It signs the file name, version, architecture, size and SHA-256 of the package, prefixed with a fixed domain
 string, so a signature cannot be reused for another file, version or architecture. The
 server reads the `.sig` file only to offer the package; it does not and cannot vouch for it.
 
@@ -221,20 +252,24 @@ server reads the `.sig` file only to offer the package; it does not and cannot v
 1. The signature's key ID is one of the keys built into the agent, and the signature verifies.
    The server cannot supply or replace keys.
 2. The package is newer than the running agent (agents are never downgraded) and is for the
-   agent's architecture.
+   agent's architecture and package format (MSI, `.deb` or `.rpm`).
 3. The download, from `downloads/agent/<file>` on the agent's own server over TLS, has exactly
    the signed size and SHA-256. The agent checks the hash again immediately before starting
-   Windows Installer, holding the file open so it cannot be changed in between.
+   the installer, holding the file open (on Windows this prevents changes in between; on Linux
+   the file is in a root-only directory).
 4. It runs `%SystemRoot%\System32\msiexec.exe /i <package> /qn /norestart /l*v <log>` and
    nothing else. No MSI properties are passed, so the installed server URL is kept and nothing
    is re-enrolled. `/norestart` means the computer is never restarted by an agent update.
+   On Linux it runs `apt-get install … <package>` or `dnf --disablerepo=* install <package>`
+   in the transient unit `easypatch-agent-update`, with no other arguments from the server.
+   The package keeps `/etc/easypatch` and `/var/lib/easypatch`, so nothing is re-enrolled.
 
-The job completes only when the new version is running and reports it. If Windows Installer
-fails and rolls back, the previous version reports the failure with the installer's error code.
+The job completes only when the new version is running and reports it. If the installer
+fails, the previous version reports the failure with the installer's exit code.
 
 **Who can start an update.** An Operator (Admin or SuperAdmin) with *Update agent*, or the
 worker when the *Agent updates* policy is *Automatic* (the default). With *Automatic*, copying a
-newer signed MSI into the agent-packages directory starts the rollout to every computer whose
+newer signed package into the agent-packages directory starts the rollout to every computer whose
 policy allows it, at most `EasyPatch:AutomaticAgentUpdateConcurrency` (default 25) at a time.
 Set the policy to *Manual* where updates must be scheduled by hand.
 
@@ -255,9 +290,9 @@ signature covers the signed file.
 | # | Threat | Mitigation |
 |---|---|---|
 | S1 | Attacker impersonates an agent | Per-device ECDSA keys, signed requests, nonce and timestamp checks, revocation |
-| S2 | Attacker impersonates the server to an agent | The agent uses normal Windows TLS validation of the server certificate (the public CA from Caddy's ACME). TLS validation cannot be turned off. |
+| S2 | Attacker impersonates the server to an agent | The agent uses the operating system's normal TLS validation of the server certificate (the Windows certificate store, or the system CA store on Linux; the public CA from Caddy's ACME). TLS validation cannot be turned off. |
 | S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory TOTP |
-| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select WUA updates by GUID or category, never arbitrary binaries. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. |
+| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select, by GUID or category, Windows updates or Linux package upgrades that the agent's own scan found, never arbitrary binaries or packages. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. |
 | T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |
 | T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |
 | R1 | Admin actions are denied after the fact | `audit_logs` records the user, IP, correlation ID and details of every mutating admin action |
@@ -266,8 +301,8 @@ signature covers the signed file.
 | I3 | Database exposure | No published port, internal Docker network, Compose secret for the password |
 | D1 | Check-in floods | Per-credential and per-IP rate limits, request size limits, jitter |
 | D2 | Enrollment queue spam | A deployment code is required, pending requests are capped and expire, per-IP rate limit |
-| E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability, and Windows updates come from the sources Windows is configured for. Agent updates install only MSIs whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |
-| E2 | A local non-admin user reads agent secrets | ProgramData ACL (SYSTEM and Administrators), DPAPI, registry ACL on bootstrap values |
+| E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability. Windows updates come from the sources Windows is configured for, and Linux packages from the repositories the computer is configured for. Agent updates install only packages whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |
+| E2 | A local non-admin user reads agent secrets | Windows: ProgramData ACL (SYSTEM and Administrators), DPAPI, registry ACL on bootstrap values. Linux: root-only `/etc/easypatch` and `/var/lib/easypatch`, `systemd-creds` where available, no token on the command line |
 | E3 | Cross-site request forgery or XSS in the admin UI | SameSite=Strict, CSRF header check, a strict CSP from Caddy, and React escaping |
 | E4 | A local user abuses the tray pipe to make the service do something | The pipe accepts only *restart now* or an offered postponement for the current restart request, from interactive sessions; the session comes from Windows. See [Tray and local pipe](#tray-and-local-pipe). |
 | D3 | A compromised admin account or server restarts many computers or weakens Windows Update settings | Requires the Operator role and MFA; every manual restart and policy change is audited. Restarts warn signed-in users according to the chosen mode. Windows Update changes are limited to the listed values (never the WSUS server), are shown per endpoint in the console, and are restored when removed. This is a disruption risk, not code execution. |
@@ -307,6 +342,12 @@ signature covers the signed file.
   Remove packages of releases you no longer want installed from the agent-packages directory.
 * Agents older than 1.2.0 have no release key and cannot update themselves. Install 1.2.0 or
   later on them once.
+* The Linux `.deb` and `.rpm` packages are not GPG-signed. Their authenticity is checked by the
+  release signature (self-update) or by the SHA-256 in the install script. Systems that require
+  GPG signatures for local packages (dnf `localpkg_gpgcheck=1`) cannot install them.
+* On Linux, root can read the agent's private key even when `systemd-creds` protects it, and on
+  systemd older than 250 (Ubuntu 22.04, RHEL 8) the key is protected by file permissions only.
+  A TPM is not used.
 * The Data Protection key ring (`dpkeys` volume) is stored unencrypted on the Docker host, as
   is the database volume. Anyone with root on the host can read MFA secrets. Protect the
   host, and encrypt backups (`scripts/backup.sh` output includes the key ring).

@@ -40,6 +40,10 @@ automatically, meaning all of the following:
   updates (off by default);
 * it is not excluded by the policy (by KB number or by update).
 
+Linux package upgrades are classified as Security or Other, so with the default categories every
+available upgrade of an installed package is required. Remove Other from the policy's categories
+to require only security upgrades.
+
 Updates that are not required are still shown and can still be installed, but they never affect
 compliance. When a policy changes, the required flags and statuses of every endpoint in its
 scope are recalculated immediately.
@@ -80,6 +84,13 @@ to date. Windows 10 22H2 is **not** treated as supported after 2025-10-14 unless
 A fully patched Windows 10 22H2 machine without ESU is therefore `Compliant`, because nothing
 Windows Update offers is missing, and also `Unsupported`, because Windows Update no longer
 offers it security fixes. Reports show both columns.
+
+The table also has entries for Debian 11 to 13, Ubuntu 20.04 to 26.04 LTS, Red Hat Enterprise
+Linux, Rocky Linux and AlmaLinux 8 to 10, and Oracle Linux 8 and 9, matched by the distribution
+and its major release (Ubuntu by `YY.MM`). The Debian dates include Debian LTS, which needs no subscription.
+For Ubuntu, `ExtendedSecurityUpdates` means Ubuntu Pro (ESM) is enabled on the endpoint, as
+reported by `pro status`. Other distributions and releases (Ubuntu interim releases, CentOS
+Stream, Fedora) are `Unknown`.
 
 ## Percentages and snapshots
 

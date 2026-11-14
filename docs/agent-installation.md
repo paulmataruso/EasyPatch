@@ -1,5 +1,8 @@
 # EasyPatch agent: installation and operation
 
+This guide covers the Windows agent. For Linux (Debian, Ubuntu, RHEL and its rebuilds), see
+[linux-agent.md](linux-agent.md).
+
 The EasyPatch agent is a Windows service (`EasyPatchAgent`) that reports Windows Update state to
 your EasyPatch server and installs the updates an administrator approves. It uses the Windows
 Update Agent API that Windows itself uses. The agent:

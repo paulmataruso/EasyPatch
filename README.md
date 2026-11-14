@@ -8,16 +8,16 @@
   </picture>
 </h1>
 
-EasyPatch is a self-hosted Windows patch management platform for Managed Service Providers.
-A small Windows agent reports Windows Update status to a central web console. From there an
-administrator installs the missing updates on one computer, a site, or a whole customer, and
-tracks compliance across every customer.
+EasyPatch is a self-hosted Windows and Linux patch management platform for Managed Service
+Providers. A small agent reports Windows Update status, or the package upgrades available from
+apt or dnf, to a central web console. From there an administrator installs the missing updates
+on one computer, a site, or a whole customer, and tracks compliance across every customer.
 
 * **Outbound-only agents.** Endpoints connect to the server over HTTPS (TCP 443). No VPN,
   inbound firewall rule or port forwarding is needed, so agents work behind NAT.
 * **Patching, and nothing else.** The agent has no remote shell and no command execution. It
-  runs a fixed set of job types: update scan, inventory refresh, install updates, restart, and
-  preset messages to signed-in users.
+  runs a fixed set of job types: update scan, inventory refresh, install updates, restart,
+  agent update, and (Windows) preset messages to signed-in users.
 * **No surprise restarts.** EasyPatch reports when a restart is pending and why. It restarts a
   computer only when an administrator asks for it, either once or through a restart schedule
   the administrator configured, and it warns signed-in users first. Installing updates never
@@ -25,7 +25,8 @@ tracks compliance across every customer.
 * **Respects existing configuration.** WSUS, Group Policy and Windows Update for Business
   settings are detected and reported. EasyPatch changes Windows Update policy settings only
   when an administrator configures an override. It never touches the WSUS server settings, and
-  it puts the original values back when the override is removed.
+  it puts the original values back when the override is removed. On Linux, repositories and
+  `unattended-upgrades` or `dnf-automatic` are reported and never changed.
 
 ## Features
 
@@ -72,18 +73,24 @@ tracks compliance across every customer.
 * **Per-device agent credentials.** Each agent generates its own ECDSA P-256 key pair; only the
   public key goes to the server. Every request is signed with a timestamp and nonce for replay
   protection, and keys rotate automatically. The agent contains no shared secret.
-* **Agent self-update** (agent 1.2.0 and later), automatic or on demand, set per organization,
-  site or endpoint. Agents install only MSIs signed with your own release key, whose public
-  half is built into the agent; the server only relays packages and cannot make an agent
-  install anything else or downgrade it. See
+* **Linux agent** for Debian and Ubuntu (apt) and Red Hat Enterprise Linux, Rocky Linux,
+  AlmaLinux and Oracle Linux (dnf), as `.deb` and `.rpm` packages with a one-line install script
+  for deployment codes. It reports and installs upgrades of installed packages at exact versions,
+  classifies security updates from the distribution's security repositories and advisories, and
+  uses the same policies, jobs, restarts and compliance reporting. See
+  [docs/linux-agent.md](docs/linux-agent.md).
+* **Agent self-update** (Windows agent 1.2.0 and later, all Linux agents), automatic or on
+  demand, set per organization, site or endpoint. Agents install only packages signed with your
+  own release key, whose public half is built into the agent; the server only relays packages
+  and cannot make an agent install anything else or downgrade it. See
   [docs/security.md](docs/security.md#agent-release-signing).
 
 ## Architecture
 
 ```
-Windows agents ──HTTPS──┐
-                        ├──► caddy (TLS, web console) ──► api ──► postgres
-Admin browsers ──HTTPS──┘                                  worker ──┘
+Windows/Linux agents ─HTTPS─┐
+                            ├──► caddy (TLS, web console) ──► api ──► postgres
+Admin browsers ─────HTTPS───┘                                  worker ──┘
 ```
 
 | Component | Technology |
@@ -91,8 +98,9 @@ Admin browsers ──HTTPS──┘                                  worker ─�
 | Server API and worker | ASP.NET Core 10, EF Core 10, PostgreSQL 18 |
 | Web console | React 19, TypeScript, Vite, Tailwind CSS (served by Caddy) |
 | Reverse proxy | Caddy 2 with automatic certificates |
-| Agent | .NET 10 Windows service using the Windows Update Agent COM API, plus a tray icon (Windows Forms) in each user session |
-| Installer | WiX Toolset v5 MSI (x64 and ARM64) |
+| Windows agent | .NET 10 Windows service using the Windows Update Agent COM API, plus a tray icon (Windows Forms) in each user session |
+| Linux agent | .NET 10 self-contained systemd service driving apt or dnf |
+| Installers | WiX Toolset v5 MSI; `.deb` and `.rpm` packages (x64 and ARM64) |
 | Deployment | Docker Compose: `caddy`, `api`, `worker`, `postgres`, plus a one-shot `migrate` |
 
 See [docs/architecture.md](docs/architecture.md) for the full design.
@@ -114,18 +122,20 @@ Then:
 
 1. Open `https://<EASYPATCH_DOMAIN>`, sign in with the printed temporary password, set up MFA
    and choose a new password.
-2. Copy an agent MSI into `data/agent-packages/`.
+2. Copy the agent packages (MSI, `.deb`, `.rpm`) into `data/agent-packages/`.
 3. Create an organization, then deploy agents with an enrollment token or a deployment code.
 
-The full guides are [docs/installation.md](docs/installation.md) and
-[docs/agent-installation.md](docs/agent-installation.md).
+The full guides are [docs/installation.md](docs/installation.md),
+[docs/agent-installation.md](docs/agent-installation.md) and
+[docs/linux-agent.md](docs/linux-agent.md).
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
 | [installation.md](docs/installation.md) | Server installation, first sign-in, agent packages, upgrades, backup and restore, CLI commands |
-| [agent-installation.md](docs/agent-installation.md) | Agent requirements, MSI properties, RMM deployment, command line, logs, building the MSI |
+| [agent-installation.md](docs/agent-installation.md) | Windows agent requirements, MSI properties, RMM deployment, command line, logs, building the MSI |
+| [linux-agent.md](docs/linux-agent.md) | Linux agent: supported distributions, install script and token enrollment, how packages are scanned and installed, self-update, building the packages |
 | [architecture.md](docs/architecture.md) | Components, data model, update state model, policy, job system, agent lifecycle, deployment design |
 | [compliance.md](docs/compliance.md) | Compliance statuses and rules, required updates, OS support status, reports |
 | [security.md](docs/security.md) | Security model, threat model, hardening checklist, known limitations |
@@ -153,12 +163,13 @@ verification and compliance.
 The agent builds and tests on Linux with `scripts/build-agent.sh`. The MSIs can be built on
 Linux with Docker (`scripts/build-msi-linux.sh`, which runs WiX under Wine) or on Windows with
 `scripts/build-agent.ps1`, which can also sign them. The `agent` GitHub Actions workflow builds
-them on Windows.
+them on Windows. `scripts/build-linux-packages.sh` builds the signed `.deb` and `.rpm`
+packages of the Linux agent (Docker).
 
 ```
 shared/      Contracts shared by agent and server (DTOs, request signing, update classification)
 backend/     Core (domain), Infrastructure (EF Core, services), API, Worker, Tests
-agent/       Agent core, communication, Windows Update, inventory, service host, tests, WiX installer
+agent/       Agent core, communication, Windows Update, inventory, Windows and Linux hosts, apt/dnf, tests, installers
 frontend/    Web console
 deployment/  Dockerfiles and Caddy configuration
 scripts/     init-secrets, backup, restore, agent and MSI builds, agent icon, dependency audit
@@ -167,7 +178,7 @@ docs/        Documentation
 
 ## Project status
 
-Version 1.2.0, pre-release. Server, console and agent logic are covered by automated tests on
+Version 1.3.0, pre-release. Server, console and agent logic are covered by automated tests on
 Linux. The following have not yet been validated by this repository's automated tests:
 
 * the Windows-specific agent components on real Windows: Windows Update Agent COM calls, WMI
@@ -176,7 +187,11 @@ Linux. The following have not yet been validated by this repository's automated 
   Wine, but Windows Installer ICE validation has not been run;
 * agent self-update on real Windows (`msiexec` replacing the running service). The agent's
   side of it is tested with a simulated Windows Installer;
-* the PowerShell install script on Windows.
+* the PowerShell install script on Windows;
+* the Linux agent against real package managers. Its apt and dnf handling is tested with
+  simulated package managers; scanning, package installation, the install script and
+  self-update were exercised by hand on Debian 12 and 13, Ubuntu 22.04 and 24.04 and Rocky Linux
+  8 and 9 containers, not by automated tests.
 
 Validate them on test endpoints before rolling out to production.
 
