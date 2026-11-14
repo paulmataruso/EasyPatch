@@ -114,6 +114,7 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
             services.AddScoped<JobMaintenanceTask>();
             services.AddScoped<PresenceMonitorTask>();
             services.AddScoped<ScheduledInstallTask>();
+            services.AddScoped<DeferralExpiryTask>();
             services.AddScoped<ScheduledRestartTask>();
             services.AddScoped<AgentUpdateTask>();
             services.AddScoped<ComplianceSnapshotTask>();

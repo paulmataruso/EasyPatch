@@ -194,16 +194,35 @@ public sealed class ScheduledInstallTask(
                 continue;
             }
 
+            // Without a rollout delay the agent installs everything policy allows (as before). With a delay only the
+            // server knows which updates are due, so the job lists them explicitly.
+            var mode = InstallMode.AllEligible;
+            IReadOnlyList<Guid>? selected = null;
+            if (policy.HasInstallDelay)
+            {
+                mode = InstallMode.Selected;
+                selected = await DueUpdatesAsync(e.Id, ct);
+                if (selected.Count == 0)
+                {
+                    continue;
+                }
+            }
+
             try
             {
-                await jobs.CreateAsync(new CreateJobRequest(e.Id, JobType.InstallUpdates, InstallMode.AllEligible,
+                await jobs.CreateAsync(new CreateJobRequest(e.Id, JobType.InstallUpdates, mode, selected,
                     Trigger: JobTrigger.Scheduled, ExpiresAt: open.End, NotAfter: open.End,
                     DedupeSuffix: "window:" + open.Start.UtcDateTime.ToString("yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture)), ct);
                 created++;
             }
-            catch (AppException ex) when (ex.Code is "duplicate_job" or "endpoint_not_active")
+            catch (AppException ex) when (ex.Code is "duplicate_job" or "endpoint_not_active" or "nothing_to_install" or "validation_failed")
             {
+                // One endpoint's problem must not stop the others.
                 db.ChangeTracker.Clear();
+                if (ex.Code is "nothing_to_install" or "validation_failed")
+                {
+                    logger.LogInformation("No scheduled installation for endpoint {EndpointId}: {Reason}", e.Id, ex.Message);
+                }
             }
         }
 
@@ -211,6 +230,50 @@ public sealed class ScheduledInstallTask(
         {
             logger.LogInformation("Scheduled {Count} maintenance-window installation job(s) (global limit {Limit})", created, settings.GlobalMaxConcurrentInstalls);
         }
+    }
+
+    /// <summary>Required (and therefore due) updates still outstanding on the endpoint, security first, at most 500.</summary>
+    private async Task<IReadOnlyList<Guid>> DueUpdatesAsync(Guid endpointId, CancellationToken ct)
+    {
+        var rows = await db.EndpointUpdates.AsNoTracking()
+            .Where(u => u.EndpointId == endpointId && u.IsRequired && !u.IsExcluded &&
+                        (u.State == EndpointUpdateState.Missing || u.State == EndpointUpdateState.Failed))
+            .Select(u => new { u.UpdateGuid, u.Update!.Category, u.Update.MsClassification, u.FirstDetectedAt })
+            .ToListAsync(ct);
+        return rows
+            .OrderByDescending(r => r.Category == UpdateCategory.Security ||
+                                    string.Equals(r.MsClassification, UpdateRequirement.SecurityClassification, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(r => r.FirstDetectedAt)
+            .Select(r => r.UpdateGuid)
+            .Take(500)
+            .ToList();
+    }
+}
+
+/// <summary>Recomputes endpoints whose updates have just come out of their rollout delay, so they become required (and
+/// scheduled) without waiting for the next scan.</summary>
+public sealed class DeferralExpiryTask(EasyPatchDbContext db, ComplianceService compliance, TimeProvider clock, ILogger<DeferralExpiryTask> logger)
+    : IMaintenanceTask
+{
+    public string Name => "deferral-expiry";
+    public long LockKey => 0x4550_0008;
+    public TimeSpan Interval => TimeSpan.FromMinutes(10);
+
+    public async Task RunOnceAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var ids = await db.EndpointUpdates.AsNoTracking()
+            .Where(u => u.DeferredUntil != null && u.DeferredUntil <= now &&
+                        (u.State == EndpointUpdateState.Missing || u.State == EndpointUpdateState.Failed))
+            .Select(u => u.EndpointId).Distinct().Take(2000).ToListAsync(ct);
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        await compliance.RecomputeAsync(ids, ct);
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Rollout delay ended for updates on {Count} endpoint(s)", ids.Count);
     }
 }
 

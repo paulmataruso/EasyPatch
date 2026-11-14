@@ -38,15 +38,42 @@ automatically, meaning all of the following:
   and feature updates: Security, Critical, Cumulative, Definition, Servicing Stack, .NET and Other;
 * it is not optional ("browse-only" in Windows Update), unless the policy includes optional
   updates (off by default);
-* it is not excluded by the policy (by KB number or by update).
+* it is not excluded by the policy (by KB number or by update);
+* its **rollout delay** has ended (see below).
 
 Linux package upgrades are classified as Security or Other, so with the default categories every
 available upgrade of an installed package is required. Remove Other from the policy's categories
 to require only security upgrades.
 
 Updates that are not required are still shown and can still be installed, but they never affect
-compliance. When a policy changes, the required flags and statuses of every endpoint in its
-scope are recalculated immediately.
+compliance. When a policy changes, or tags are added to or removed from an endpoint, the required
+flags and statuses of every affected endpoint are recalculated immediately.
+
+### Rollout delay
+
+A policy can delay updates so that a pilot group installs them first. There are two settings,
+both 0 (no delay) by default:
+
+* **Security updates** (0 to 90 days): updates with Microsoft's "Security Updates"
+  classification, which includes the monthly cumulative updates, and Linux security upgrades.
+* **Other updates** (0 to 365 days): every other allowed update.
+
+Definition (antivirus signature) updates are never delayed.
+
+The delay counts from when EasyPatch **first saw the update on any endpoint**, not from when a
+particular endpoint reported it. When a new update replaces one that was still outstanding on
+the endpoint (a Windows update that supersedes it, or a newer version of the same Linux package),
+the new one keeps the older update's start date. A monthly cumulative update that is replaced
+each month therefore does not restart the delay forever.
+
+While an update is inside its delay it is **deferred**: it is not required, it does not affect
+compliance, and scheduled installs skip it. The console shows it as "deferred until" a date and
+counts it separately. The worker re-evaluates deferred updates every 10 minutes, so an update
+becomes required (and a compliance problem) shortly after its delay ends. Installing an update
+manually ignores the delay; the install preview warns when that happens.
+
+A long delay keeps endpoints compliant while they lack released fixes. The policy editor warns
+about delays longer than 30 days.
 
 ## Update states and verification
 

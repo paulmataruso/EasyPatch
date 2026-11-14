@@ -102,7 +102,7 @@ restricted to specific organizations.
 | POST | `/sites/{id}/archive`, `/sites/{id}/restore` |
 | GET/PUT/DELETE | `/sites/{id}/policy` |
 | GET/PUT/DELETE | `/endpoints/{id}/policy` (an endpoint override; GET returns an empty policy when there is none; `maxConcurrentInstallsPerSite` cannot be set here) |
-| GET/PUT | `/policies/global` |
+| GET/PUT | `/policies/global` (PUT is SuperAdmin) |
 
 A policy body has nullable fields; `null` inherits from the level above. Besides the install
 and schedule fields it has `trayIconEnabled`, `installNotificationsEnabled`,
@@ -110,22 +110,35 @@ and schedule fields it has `trayIconEnabled`, `installNotificationsEnabled`,
 is `true`), `restartSchedule` (`{enabled, days[0-6], time "HH:mm", condition, mode, countdownMinutes,
 deadlineMinutes, expiryMinutes}`) and `windowsUpdate`. `windowsUpdate` has one entry per group
 (`automaticUpdates`, `featureUpdates`, `qualityUpdates`, `restartBehavior`), each `null`
-(inherit), `{managed: false}` (*Not configured*) or `{managed: true, value: {…}}`. Invalid
-values return `400 validation_failed`.
+(inherit), `{managed: false}` (*Not configured*) or `{managed: true, value: {…}}`.
+`securityInstallDelayDays` (0 to 90) and `installDelayDays` (0 to 365) set the rollout delay.
+Invalid values return `400 validation_failed`.
+
+### Tags
+
+| Method | Route | Notes |
+|---|---|---|
+| GET | `/tags` | Viewer. Every tag (`id, name, color, description, priority, endpointCount, hasPolicy`). Organization-restricted users get only the tags on their endpoints, with `endpointCount` 0. |
+| POST | `/tags` | SuperAdmin. `{name (1-40), color, description?, priority (0-1000)}`. `color`: `gray, blue, green, amber, red, purple, teal, pink`. `409 tag_exists` for a duplicate name (case-insensitive). |
+| PUT/DELETE | `/tags/{id}` | SuperAdmin. DELETE removes the tag from every endpoint and deletes its policy. |
+| GET/PUT/DELETE | `/tags/{id}/policy` | SuperAdmin. A policy body as above; `maxConcurrentInstallsPerSite` cannot be set. |
+| PUT | `/endpoints/{id}/tags` | `{tagIds[]}` replaces the endpoint's tags (at most 20). Operator without organization restrictions. |
+| POST | `/endpoints/tags/bulk` | `{endpointIds[], addTagIds[]?, removeTagIds[]?}` → `{changed}`. At most 1000 endpoints. Operator without organization restrictions. |
+| GET | `/endpoints/{id}/tag-policies` | Viewer. The tag policies that apply to the endpoint, in resolution order (`{tag, priority, policy}`). |
 
 ### Endpoints
 
 | Method | Route | Notes |
 |---|---|---|
-| GET | `/endpoints` | Filters: `organizationId, siteId, search, compliance, online, os, rebootPending, outdatedAgent, status`. Sort: `hostname` (default), `organization, site, os, missing, lastCheckIn, compliance, agentVersion`. |
+| GET | `/endpoints` | Filters: `organizationId, siteId, search, compliance, online, os, rebootPending, outdatedAgent, status, tagId`. Each item includes `tags` and `missingDeferredCount` (updates inside their rollout delay). Sort: `hostname` (default), `organization, site, os, missing, lastCheckIn, compliance, agentVersion`. |
 | GET/PUT/DELETE | `/endpoints/{id}` | GET includes `platform` (`Windows` or `Linux`) and, for Linux, `linux`: `osId`, `osVersion`, `kernelVersion`, `packageManager`, `keyProtection`. PUT: `siteId`, `notes`, `esuOverride`. DELETE revokes the credentials and removes the record. |
 | POST | `/endpoints/{id}/revoke` | `{reason?}`. Revokes all credentials; the agent can no longer call the server. |
-| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification and excluded updates, with the live state of an active job overlaid. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). |
+| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification and excluded updates, with the live state of an active job overlaid. `deferredUntil` is set while an update is inside its rollout delay. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). |
 | GET | `/endpoints/{id}/installed-updates` | Updates confirmed installed by a scan |
 | GET | `/endpoints/{id}/update-history` | Windows Update history (`?search=&page=&pageSize=`). Always empty for Linux endpoints |
 | GET | `/endpoints/{id}/events` | Agent and server activity (`?severity=&page=&pageSize=`) |
 | GET | `/endpoints/{id}/jobs` | Job history (`?page=&pageSize=`) |
-| GET | `/endpoints/{id}/effective-policy` | Resolved policy and where each value came from, including the restart schedule, the Windows Update settings per group and the exact registry values the agent will set |
+| GET | `/endpoints/{id}/effective-policy` | Resolved policy and where each value came from (`sources`; for values from a tag policy, `sourceTags` names the tag), including the restart schedule, the Windows Update settings per group and the exact registry values the agent will set |
 | GET | `/endpoints/{id}/install-preview` | `?mode=all|selected&updateGuids=<comma-separated>`. What would be installed, what would be skipped and why, total size, reboot implications and warnings. |
 | POST | `/endpoints/{id}/install-updates` | `{mode: "AllEligible"|"Selected", updateGuids?, force}` → `202` with the job. `409 duplicate_job` (with `existingJobId`) unless `force`; `409 nothing_to_install` when none of the selected updates can be installed. |
 | POST | `/endpoints/{id}/scan` | Queue an `UpdateScan` job (`202`) |

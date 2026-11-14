@@ -3,7 +3,11 @@ using EasyPatch.Core.Entities;
 namespace EasyPatch.Core.Domain;
 
 /// <summary>One update reported by a scan, already mapped to a catalog row.</summary>
-public sealed record ReconcileItem(Guid UpdateGuid, Guid UpdateId, bool RebootRequired, IReadOnlyList<Guid> Supersedes);
+/// <param name="FleetFirstSeenAt">When any endpoint first reported this update (start of its rollout delay).</param>
+/// <param name="LineKey">Linux: package line (see <see cref="UpdateRequirement.LineKey(Update?)"/>); a newer version
+/// replaces older outstanding versions of the same line.</param>
+public sealed record ReconcileItem(Guid UpdateGuid, Guid UpdateId, bool RebootRequired, IReadOnlyList<Guid> Supersedes,
+    DateTimeOffset? FleetFirstSeenAt = null, string? LineKey = null);
 
 public sealed record ReconcileResult(IReadOnlyList<EndpointUpdate> Added, int Changed);
 
@@ -45,6 +49,29 @@ public static class UpdateReconciler
         var superseded = missing.Concat(installed).SelectMany(i => i.Supersedes).ToHashSet();
         var seen = new HashSet<Guid>();
 
+        // Outstanding rows before this scan (their state is changed below): a new update that replaces one of them inherits
+        // the start of its rollout delay.
+        var outstanding = existing.Values
+            .Where(r => r.State is EndpointUpdateState.Missing or EndpointUpdateState.Failed or EndpointUpdateState.Superseded)
+            .ToList();
+
+        DateTimeOffset DelayBasis(ReconcileItem item)
+        {
+            var basis = item.FleetFirstSeenAt is { } seen && seen < now ? seen : now;
+            foreach (var previous in outstanding)
+            {
+                var replaced = item.Supersedes.Contains(previous.UpdateGuid) ||
+                               (item.LineKey is not null && item.LineKey == UpdateRequirement.LineKey(previous.Update));
+                var previousBasis = previous.DelayBasisAt ?? previous.FirstDetectedAt;
+                if (replaced && previousBasis < basis)
+                {
+                    basis = previousBasis;
+                }
+            }
+
+            return basis;
+        }
+
         EndpointUpdate GetOrAdd(ReconcileItem item, EndpointUpdateState initial)
         {
             if (!existing.TryGetValue(item.UpdateGuid, out var row))
@@ -59,9 +86,14 @@ public static class UpdateReconciler
                     FirstDetectedAt = now,
                     LastDetectedAt = now,
                     StateChangedAt = now,
+                    DelayBasisAt = DelayBasis(item),
                 };
                 existing[item.UpdateGuid] = row;
                 added.Add(row);
+            }
+            else
+            {
+                row.DelayBasisAt ??= DelayBasis(item);
             }
 
             row.UpdateId = item.UpdateId;

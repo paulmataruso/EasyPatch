@@ -92,11 +92,13 @@ public sealed class ScanIngestionService(
         var filter = policy.ToFilter(excludedGuids);
         var byId = catalog.Values.ToDictionary(u => u.Id);
         var byGuid = catalog.Values.GroupBy(u => u.UpdateGuid).ToDictionary(g => g.Key, g => g.MaxBy(u => u.RevisionNumber)!);
+        var firstSeen = catalog.Values.GroupBy(u => u.UpdateGuid).ToDictionary(g => g.Key, g => g.Min(u => u.CreatedAt));
 
         ReconcileItem ToItem(ReportedUpdate r)
         {
             var row = catalog[(r.UpdateGuid, r.RevisionNumber)];
-            return new ReconcileItem(r.UpdateGuid, row.Id, r.RebootRequired, r.SupersededUpdateGuids);
+            return new ReconcileItem(r.UpdateGuid, row.Id, r.RebootRequired, r.SupersededUpdateGuids,
+                firstSeen.GetValueOrDefault(r.UpdateGuid), UpdateRequirement.LineKey(r.Package));
         }
 
         var result = UpdateReconciler.Reconcile(
@@ -120,6 +122,13 @@ public sealed class ScanIngestionService(
             }
         }
 
+        // Requirement flags (policy, exclusions and rollout delay) come from the one shared evaluation.
+        foreach (var row in result.Added)
+        {
+            row.Update ??= byId.GetValueOrDefault(row.UpdateId);
+        }
+
+        ComplianceService.ApplyRequirementFlags(rows.Values, excludedGuids, policy, now);
         var previousMissing = endpoint.MissingRequiredCount;
         ComplianceService.ApplyCounts(endpoint, rows.Values, policy, now);
         EndpointEvents.Add(db, endpoint, "ScanCompleted",

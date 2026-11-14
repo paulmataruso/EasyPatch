@@ -68,6 +68,7 @@ public static class DependencyInjection
         services.AddScoped<AgentUpdateTask>();
         services.AddScoped<ComplianceSnapshotTask>();
         services.AddScoped<RetentionTask>();
+        services.AddScoped<DeferralExpiryTask>();
         services.AddSingleton<MaintenanceHeartbeat>();
         services.AddHostedService<MaintenanceLoop<JobMaintenanceTask>>();
         services.AddHostedService<MaintenanceLoop<PresenceMonitorTask>>();
@@ -76,6 +77,7 @@ public static class DependencyInjection
         services.AddHostedService<MaintenanceLoop<AgentUpdateTask>>();
         services.AddHostedService<MaintenanceLoop<ComplianceSnapshotTask>>();
         services.AddHostedService<MaintenanceLoop<RetentionTask>>();
+        services.AddHostedService<MaintenanceLoop<DeferralExpiryTask>>();
         return services;
     }
 }

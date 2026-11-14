@@ -94,7 +94,7 @@ A job moves through `Queued` → `Delivered` → `Acknowledged` → `Running`, a
 | Job `Failed` after the running timeout | No progress for 12 hours (default). If the agent reports a result later, the late result is still accepted |
 | Update `Failed` with an `0x8…` error code | Windows Update's own error, shown with its description on the job and the update. Common causes: servicing store corruption (`0x80073712`), not enough disk space, or an unreachable update source |
 | Update `Failed`: "still reports the update as missing" | The agent reported success but the verification scan disagrees. Retry the job. If it fails again, check the endpoint's Windows Update log |
-| Scheduled installs do not run | Auto-install is off by default. It must be enabled in the policy, and it only creates jobs while the policy's maintenance window is open |
+| Scheduled installs do not run | Auto-install is off by default. It must be enabled in the policy, and it only creates jobs while the policy's maintenance window is open. Updates inside their rollout delay are skipped (the endpoint's Updates tab shows "deferred until") |
 
 Cancelling a queued job takes effect immediately. Cancelling a running install job tells the agent
 at its next check-in. The agent then stops before the next update; an update that is already

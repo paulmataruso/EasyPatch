@@ -20,6 +20,8 @@ interface AuthContextValue {
   isSuperAdmin: boolean;
   /** Admin or SuperAdmin: may perform operational writes. */
   canOperate: boolean;
+  /** SuperAdmin, or a user without organization restrictions (can see and assign MSP-wide tags). */
+  isUnrestricted: boolean;
   refresh: () => Promise<void>;
   setUser: (user: CurrentUserDto | null) => void;
   error: unknown;
@@ -104,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role,
       isSuperAdmin: role === 'SuperAdmin',
       canOperate: role === 'SuperAdmin' || role === 'Admin',
+      isUnrestricted: role === 'SuperAdmin' || (user !== null && user.organizationIds.length === 0),
       refresh,
       setUser,
       error: me.error,

@@ -472,6 +472,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("microsoft_update_registered");
 
+                    b.Property<int>("MissingDeferredCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("missing_deferred_count");
+
                     b.Property<int>("MissingRequiredCount")
                         .HasColumnType("integer")
                         .HasColumnName("missing_required_count");
@@ -740,12 +744,41 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.ToTable("endpoint_events", (string)null);
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.EndpointTag", b =>
+                {
+                    b.Property<Guid>("EndpointId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("endpoint_id");
+
+                    b.Property<Guid>("TagId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tag_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("EndpointId", "TagId");
+
+                    b.HasIndex("TagId");
+
+                    b.ToTable("endpoint_tags", (string)null);
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.EndpointUpdate", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("DeferredUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deferred_until");
+
+                    b.Property<DateTimeOffset?>("DelayBasisAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("delay_basis_at");
 
                     b.Property<Guid>("EndpointId")
                         .HasColumnType("uuid")
@@ -821,6 +854,9 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnName("update_id");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DeferredUntil")
+                        .HasFilter("deferred_until IS NOT NULL");
 
                     b.HasIndex("UpdateId");
 
@@ -2009,6 +2045,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("include_optional");
 
+                    b.Property<int?>("InstallDelayDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("install_delay_days");
+
                     b.Property<bool?>("InstallNotificationsEnabled")
                         .HasColumnType("boolean")
                         .HasColumnName("install_notifications_enabled");
@@ -2059,9 +2099,17 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("scope");
 
+                    b.Property<int?>("SecurityInstallDelayDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("security_install_delay_days");
+
                     b.Property<Guid?>("SiteId")
                         .HasColumnType("uuid")
                         .HasColumnName("site_id");
+
+                    b.Property<Guid?>("TagId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tag_id");
 
                     b.Property<bool?>("TrayIconEnabled")
                         .HasColumnType("boolean")
@@ -2096,6 +2144,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.HasIndex("SiteId")
                         .IsUnique()
                         .HasFilter("scope = 'Site'");
+
+                    b.HasIndex("TagId")
+                        .IsUnique()
+                        .HasFilter("scope = 'Tag'");
 
                     b.ToTable("policies", (string)null);
                 });
@@ -2187,6 +2239,50 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("sites", (string)null);
+                });
+
+            modelBuilder.Entity("EasyPatch.Core.Entities.Tag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("color");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer")
+                        .HasColumnName("priority");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("tags", (string)null);
                 });
 
             modelBuilder.Entity("EasyPatch.Core.Entities.Update", b =>
@@ -2736,6 +2832,21 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.EndpointTag", b =>
+                {
+                    b.HasOne("EasyPatch.Core.Entities.Endpoint", null)
+                        .WithMany()
+                        .HasForeignKey("EndpointId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EasyPatch.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.EndpointUpdate", b =>
                 {
                     b.HasOne("EasyPatch.Core.Entities.Endpoint", null)
@@ -2820,6 +2931,11 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.HasOne("EasyPatch.Core.Entities.Site", null)
                         .WithMany()
                         .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("EasyPatch.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
                         .OnDelete(DeleteBehavior.Cascade);
                 });
 

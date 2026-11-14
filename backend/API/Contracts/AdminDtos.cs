@@ -155,7 +155,10 @@ public sealed record PolicyDto(
     bool? InstallNotificationsEnabled = null,
     RestartScheduleDto? RestartSchedule = null,
     PolicyWindowsUpdate? WindowsUpdate = null,
-    bool? AgentAutoUpdateEnabled = null);
+    bool? AgentAutoUpdateEnabled = null,
+    int? InstallDelayDays = null,
+    int? SecurityInstallDelayDays = null,
+    Guid? TagId = null);
 
 /// <summary>Recurring restart. <c>Time</c> is "HH:mm" in the site (or organization) time zone; days use 0 = Sunday … 6 = Saturday.</summary>
 public sealed record RestartScheduleDto(
@@ -190,7 +193,9 @@ public sealed record PolicyRequest(
     bool? InstallNotificationsEnabled = null,
     RestartScheduleDto? RestartSchedule = null,
     PolicyWindowsUpdate? WindowsUpdate = null,
-    bool? AgentAutoUpdateEnabled = null);
+    bool? AgentAutoUpdateEnabled = null,
+    int? InstallDelayDays = null,
+    int? SecurityInstallDelayDays = null);
 
 public sealed record EffectivePolicyDto(
     int CheckInIntervalSeconds,
@@ -214,7 +219,30 @@ public sealed record EffectivePolicyDto(
     RestartScheduleDto? RestartSchedule = null,
     WindowsUpdatePolicySettings? WindowsUpdate = null,
     IReadOnlyList<PolicyRegistryValueDto>? WindowsUpdateValues = null,
-    bool AgentAutoUpdateEnabled = true);
+    bool AgentAutoUpdateEnabled = true,
+    int InstallDelayDays = 0,
+    int SecurityInstallDelayDays = 0,
+    IReadOnlyDictionary<string, string>? SourceTags = null);
+
+// ---------------------------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------------------------
+
+public sealed record TagRefDto(Guid Id, string Name, string Color);
+
+public sealed record TagDto(Guid Id, string Name, string Color, string? Description, int Priority, int EndpointCount, bool HasPolicy,
+    DateTimeOffset CreatedAt);
+
+public sealed record TagRequest(string Name, string Color, string? Description, int Priority);
+
+public sealed record EndpointTagsRequest(IReadOnlyList<Guid> TagIds);
+
+public sealed record BulkEndpointTagsRequest(IReadOnlyList<Guid> EndpointIds, IReadOnlyList<Guid>? AddTagIds, IReadOnlyList<Guid>? RemoveTagIds);
+
+public sealed record BulkEndpointTagsResult(int Changed);
+
+/// <summary>A tag policy that applies to an endpoint, in resolution order (later entries override earlier ones).</summary>
+public sealed record TagPolicyLayerDto(TagRefDto Tag, int Priority, PolicyDto Policy);
 
 // ---------------------------------------------------------------------------------------------
 // Endpoints
@@ -245,7 +273,9 @@ public sealed record EndpointSummaryDto(
     OsSupportStatus OsSupportStatus,
     string? CurrentActivity,
     string? LastSeenIp,
-    string Platform = "Windows");
+    string Platform = "Windows",
+    int MissingDeferredCount = 0,
+    IReadOnlyList<TagRefDto>? Tags = null);
 
 public sealed record CredentialDto(string CredentialId, string KeyFingerprint, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, DateTimeOffset? RevokedAt,
     string? RevokedReason, DateTimeOffset? LastUsedAt);
@@ -350,7 +380,8 @@ public sealed record EndpointUpdateDto(
     string? ErrorCode,
     string? ErrorMessage,
     JobOverlayDto? ActiveJob,
-    PackageInfoDto? Package = null);
+    PackageInfoDto? Package = null,
+    DateTimeOffset? DeferredUntil = null);
 
 /// <summary>Linux package behind an update. <c>InstalledVersion</c> is the endpoint's version (endpoint views only).</summary>
 public sealed record PackageInfoDto(string Name, string? Architecture, string? Version, string? InstalledVersion, string? Repository,

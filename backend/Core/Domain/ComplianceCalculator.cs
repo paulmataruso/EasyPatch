@@ -2,7 +2,7 @@ using EasyPatch.Core.Entities;
 
 namespace EasyPatch.Core.Domain;
 
-public readonly record struct UpdateCounts(int MissingRequired, int MissingTotal, int Failed, int Installed, int PendingReboot);
+public readonly record struct UpdateCounts(int MissingRequired, int MissingTotal, int Failed, int Installed, int PendingReboot, int MissingDeferred = 0);
 
 /// <summary>
 /// Patch compliance rules (documented in docs/compliance.md):
@@ -12,7 +12,8 @@ public readonly record struct UpdateCounts(int MissingRequired, int MissingTotal
 /// 4. MissingUpdates — at least one required update is missing (or awaiting verification).
 /// 5. RebootRequired — Windows reports a pending restart, or an installed update awaits a restart.
 /// 6. Compliant — none of the above.
-/// Excluded, superseded, not-applicable and not-required (drivers/feature/optional unless enabled) updates never count.
+/// Excluded, superseded, not-applicable and not-required (drivers/feature/optional unless enabled) updates never count,
+/// nor do updates still inside their rollout delay (counted separately as deferred).
 /// Offline status is tracked separately and does not change compliance by itself.
 /// </summary>
 public static class ComplianceCalculator
@@ -20,7 +21,7 @@ public static class ComplianceCalculator
     public static UpdateCounts Count(IEnumerable<EndpointUpdate> updates)
     {
         ArgumentNullException.ThrowIfNull(updates);
-        int missingRequired = 0, missingTotal = 0, failed = 0, installed = 0, pendingReboot = 0;
+        int missingRequired = 0, missingTotal = 0, failed = 0, installed = 0, pendingReboot = 0, deferred = 0;
         foreach (var u in updates)
         {
             switch (u.State)
@@ -38,6 +39,10 @@ public static class ComplianceCalculator
                     {
                         missingRequired++;
                     }
+                    else if (u.DeferredUntil is not null)
+                    {
+                        deferred++;
+                    }
 
                     break;
                 case EndpointUpdateState.Failed:
@@ -47,12 +52,16 @@ public static class ComplianceCalculator
                         missingRequired++;
                         failed++;
                     }
+                    else if (u.DeferredUntil is not null)
+                    {
+                        deferred++;
+                    }
 
                     break;
             }
         }
 
-        return new UpdateCounts(missingRequired, missingTotal, failed, installed, pendingReboot);
+        return new UpdateCounts(missingRequired, missingTotal, failed, installed, pendingReboot, deferred);
     }
 
     public static ComplianceStatus Evaluate(

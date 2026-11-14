@@ -17,6 +17,7 @@ import {
   type EndpointUpdateState,
   type JobSummaryDto,
   type PolicyScope,
+  type TagPolicyLayerDto,
   type UpdateHistoryDto,
 } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
@@ -27,6 +28,7 @@ import { PackageFacts } from '../../components/PackageInfo';
 import { PolicyEditor, resolveInherited } from '../../components/PolicyEditor';
 import { describeRestartSchedule, describeWindowsUpdateGroup, WU_GROUPS } from '../../components/PolicySections';
 import { SessionSummary } from '../../components/RestartDialogs';
+import { TagChip } from '../../components/Tags';
 import { CategoryBadge, EventSeverityDot, JobItemStatusBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
 import { useToast } from '../../components/Toast';
 import {
@@ -392,7 +394,13 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
                       ) : (
                         u.kbNumbers.length > 0 && <span className="font-mono">{u.kbNumbers.join(', ')}</span>
                       )}
-                      {!u.isRequired && <span title="Not installed by policy (category, optional or excluded)">not required by policy</span>}
+                      {u.deferredUntil ? (
+                        <span className="text-info" title="Inside the rollout delay set in policy: not required and not installed by scheduled installs until then. Installing manually overrides the delay.">
+                          deferred until {formatDate(u.deferredUntil)}
+                        </span>
+                      ) : (
+                        !u.isRequired && <span title="Not installed by policy (category, optional or excluded)">not required by policy</span>
+                      )}
                       {u.rebootLikely && <span className="text-info">restart likely</span>}
                       {u.supportUrl && (
                         <a href={u.supportUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-0.5 text-accent hover:underline">
@@ -680,15 +688,27 @@ export function EventList({ events, showHostname = false }: { events: EndpointEv
   );
 }
 
-function sourceOf(sources: Record<string, PolicyScope>, field: string): PolicyScope | undefined {
+function sourceOf<T>(sources: Record<string, T> | null | undefined, field: string): T | undefined {
+  if (!sources) return undefined;
   const pascal = field.charAt(0).toUpperCase() + field.slice(1);
   const camel = field.charAt(0).toLowerCase() + field.slice(1);
   return sources[pascal] ?? sources[camel];
 }
 
-function ScopeBadge({ scope }: { scope: PolicyScope | undefined }) {
+function ScopeBadge({ scope, tagName }: { scope: PolicyScope | undefined; tagName?: string }) {
   if (!scope) return null;
+  if (scope === 'Tag') {
+    return (
+      <Badge tone="ok" title="Set by a tag policy">
+        Tag{tagName ? `: ${tagName}` : ''}
+      </Badge>
+    );
+  }
   return <Badge tone={scope === 'Endpoint' ? 'warn' : scope === 'Site' ? 'accent' : scope === 'Organization' ? 'info' : 'neutral'}>{scope}</Badge>;
+}
+
+function delayText(days: number): string {
+  return days > 0 ? `${days} day${days === 1 ? '' : 's'} after release` : 'None';
 }
 
 const WU_STATE_TONE: Record<WindowsUpdatePolicyState, 'ok' | 'warn' | 'danger' | 'neutral'> = {
@@ -710,7 +730,7 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
     label,
     <span className="flex flex-wrap items-center gap-2">
       {value}
-      <ScopeBadge scope={sourceOf(p.sources, field)} />
+      <ScopeBadge scope={sourceOf(p.sources, field)} tagName={sourceOf(p.sourceTags, field)} />
     </span>,
   ];
   const report = endpoint.windowsUpdatePolicy;
@@ -723,8 +743,8 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
         <div className="flex flex-wrap items-center gap-3">
           <p className="flex-1 text-sm">
             {endpoint.hasOwnPolicy
-              ? 'This endpoint has its own policy layer, which overrides the site, organization and global policy for the values it sets.'
-              : 'This endpoint uses the site, organization and global policy. You can override individual values for this endpoint only.'}
+              ? 'This endpoint has its own policy layer, which overrides its tag, site, organization and global policy for the values it sets.'
+              : 'This endpoint uses its tag, site, organization and global policy. You can override individual values for this endpoint only.'}
           </p>
           {canOperate && endpoint.summary.status === 'Active' && (
             <Button icon={<Pencil className="size-4" aria-hidden />} onClick={() => setEditing(true)}>
@@ -749,6 +769,8 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
                   {linux && <span className="text-xs text-muted">(Windows updates only)</span>}
                 </>,
               ),
+              row('Rollout delay: security updates', 'securityInstallDelayDays', delayText(p.securityInstallDelayDays ?? 0)),
+              row('Rollout delay: other updates', 'installDelayDays', delayText(p.installDelayDays ?? 0)),
               row('Automatic installation', 'autoInstallEnabled', p.autoInstallEnabled ? 'On (inside maintenance window; installing never restarts)' : 'Off'),
               row(
                 'Maintenance window',
@@ -885,6 +907,7 @@ function EndpointPolicyDialog({ endpoint, open, onClose }: { endpoint: EndpointD
   const org = usePolicy(open ? `/organizations/${s.organizationId}/policy` : null);
   const site = usePolicy(open && s.siteId ? `/sites/${s.siteId}/policy` : null);
   const policy = usePolicy(open ? path : null);
+  const tagLayers = useApi<TagPolicyLayerDto[]>(open ? `/endpoints/${s.id}/tag-policies` : null);
   const save = useApiMutation((req: PolicyRequest) => api.put(path, req), {
     invalidate: [path, `/endpoints/${s.id}`],
     onSuccess: () => {
@@ -899,10 +922,26 @@ function EndpointPolicyDialog({ endpoint, open, onClose }: { endpoint: EndpointD
       onClose();
     },
   });
-  const loading = policy.isPending || global.isPending || org.isPending || (!!s.siteId && site.isPending);
+  const loading = policy.isPending || global.isPending || org.isPending || (!!s.siteId && site.isPending) || tagLayers.isPending;
+  const tagPolicies = tagLayers.data ?? [];
 
   return (
-    <Dialog open={open} onClose={onClose} title={`Policy for ${s.hostname}`} size="xl" description="Overrides the site, organization and global policy for this endpoint only.">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`Policy for ${s.hostname}`}
+      size="xl"
+      description={
+        <>
+          Overrides the tag, site, organization and global policy for this endpoint only.
+          {tagPolicies.length > 0 && (
+            <span className="ml-1 inline-flex flex-wrap items-center gap-1">
+              Tag policies: {tagPolicies.map((l) => <TagChip key={l.tag.id} tag={l.tag} />)}
+            </span>
+          )}
+        </>
+      }
+    >
       {open &&
         (loading ? (
           <Spinner />
@@ -913,7 +952,7 @@ function EndpointPolicyDialog({ endpoint, open, onClose }: { endpoint: EndpointD
             scope="Endpoint"
             linux={isLinux(s.platform)}
             policy={policy.data ?? null}
-            inherited={resolveInherited([global.data, org.data, site.data])}
+            inherited={resolveInherited([global.data, org.data, site.data, ...tagPolicies.map((l) => l.policy)])}
             readOnly={false}
             saving={save.isPending}
             deleting={reset.isPending}

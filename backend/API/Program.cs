@@ -124,6 +124,7 @@ app.MapAuthEndpoints();
 app.MapUserEndpoints();
 app.MapOrganizationEndpoints();
 app.MapEndpointEndpoints();
+app.MapTagEndpoints();
 app.MapJobEndpoints();
 app.MapFleetUpdateEndpoints();
 app.MapAgentManagementEndpoints();

@@ -11,6 +11,7 @@ import { formatDateTime } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 import { AuditTab } from './AuditTab';
 import { LifecycleTab } from './LifecycleTab';
+import { TagsTab } from './TagsTab';
 import { UsersTab } from './UsersTab';
 
 export function SettingsPage() {
@@ -19,12 +20,13 @@ export function SettingsPage() {
   const tab = url.get('tab', 'policy');
   return (
     <>
-      <PageHeader title="Settings" subtitle="Global policy, server behavior, users, OS lifecycle data and the audit log." />
+      <PageHeader title="Settings" subtitle="Global policy, tags, server behavior, users, OS lifecycle data and the audit log." />
       <Tabs
         active={tab}
         onChange={(t) => url.set({ tab: t === 'policy' ? null : t, action: null, userId: null, from: null, to: null, organizationId: null })}
         tabs={[
           { id: 'policy', label: 'Global policy' },
+          { id: 'tags', label: 'Tags' },
           { id: 'server', label: 'Server settings' },
           { id: 'users', label: 'Users', hidden: !isSuperAdmin },
           { id: 'lifecycle', label: 'OS lifecycle' },
@@ -32,6 +34,7 @@ export function SettingsPage() {
         ]}
       />
       {tab === 'policy' && <GlobalPolicyTab />}
+      {tab === 'tags' && <TagsTab />}
       {tab === 'server' && <ServerSettingsTab />}
       {tab === 'users' && isSuperAdmin && <UsersTab />}
       {tab === 'lifecycle' && <LifecycleTab />}

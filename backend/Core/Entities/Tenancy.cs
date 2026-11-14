@@ -43,6 +43,7 @@ public sealed class Policy
     public Guid? OrganizationId { get; set; }
     public Guid? SiteId { get; set; }
     public Guid? EndpointId { get; set; }
+    public Guid? TagId { get; set; }
 
     public int? CheckInIntervalSeconds { get; set; }
     public int? ScanIntervalMinutes { get; set; }
@@ -58,6 +59,12 @@ public sealed class Policy
     public bool? AcceptEulas { get; set; }
 
     public bool? AutoInstallEnabled { get; set; }
+
+    /// <summary>Automatic installs wait until a non-security update has been available this many days (rollout delay).</summary>
+    public int? InstallDelayDays { get; set; }
+
+    /// <summary>Rollout delay for security updates.</summary>
+    public int? SecurityInstallDelayDays { get; set; }
 
     /// <summary>Maintenance window days (0 = Sunday … 6 = Saturday). Window fields override as a unit.</summary>
     public List<int>? MaintenanceDays { get; set; }

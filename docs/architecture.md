@@ -34,7 +34,7 @@ administrator configured in policy.
 |---|---|---|
 | `caddy` | `easypatch-proxy` (Caddy plus the built SPA) | Terminates TLS with automatic ACME certificates, enforces TLS 1.2+, adds security headers, serves the React SPA and reverse-proxies `/api/*` and `/downloads/*` to the API. |
 | `api` | `easypatch-server` | ASP.NET Core 10 Web API. Handles admin auth, the admin REST API, the agent protocol and OpenAPI. |
-| `worker` | `easypatch-server` (different entrypoint) | Background processing: job expiry and lease recovery, online/offline detection, scheduled installs, scheduled restarts, compliance snapshots, retention. |
+| `worker` | `easypatch-server` (different entrypoint) | Background processing: job expiry and lease recovery, online/offline detection, scheduled installs, the end of rollout delays, scheduled restarts, compliance snapshots, retention. |
 | `postgres` | `postgres:18.6-alpine3.24` | System of record, including the durable job queue. Attached only to the internal `data` network. |
 | `migrate` | `easypatch-server` | One-shot container that applies EF Core migrations before `api` and `worker` start. |
 
@@ -148,9 +148,13 @@ The **job layer** (`job_updates.status`) records operational progress: `Pending`
 and `Cancelled`. The UI overlays live job progress onto the endpoint inventory. A crashed job
 therefore can never leave the inventory stuck in "Downloading".
 
-`is_required` is true when policy says the update should be installed: its category is
-allowed, it is not optional (unless optional updates are enabled) and it is not excluded.
-Compliance only counts updates where `is_required` is true.
+`is_required` is true when policy says the update should be installed now: its category is
+allowed, it is not optional (unless optional updates are enabled), it is not excluded and its
+rollout delay has ended. While the delay runs, `deferred_until` holds its end. The delay counts
+from `delay_basis_at`: when the update was first seen in the fleet, or the start of an older
+outstanding update it replaces. `Core/Domain/UpdateRequirement.cs` makes this decision for scan
+ingestion, recomputation, the install preview and the scheduler. Compliance only counts updates
+where `is_required` is true.
 
 ### Update categories
 
@@ -179,10 +183,17 @@ installed version on the endpoint's update row.
 
 ## 3. Policy
 
-The effective policy is resolved in the order **global → organization → site → endpoint**.
-Scalar fields take the most specific non-null value. Lists (excluded KBs) are merged. An
-endpoint policy is optional and holds only the values that differ for that one computer (its
+The effective policy is resolved in the order **global → organization → site → tags →
+endpoint**. Scalar fields take the most specific non-null value. Lists (excluded KBs) are merged.
+An endpoint policy is optional and holds only the values that differ for that one computer (its
 editor has no per-site install limit).
+
+**Tags** are MSP-wide labels (for example update rings such as "Pilot" and "Broad"). Super
+administrators create tags and tag policies. Administrators without organization restrictions
+assign tags to endpoints; restricted users only see the tags on their own endpoints. A tag
+policy applies to every endpoint with the tag. When an endpoint has several tags with policies,
+they are applied in ascending priority, so the highest priority wins; on equal priority the
+alphabetically first name wins. A tag policy cannot set the per-site install limit.
 
 | Field | Global default |
 |---|---|
@@ -198,6 +209,8 @@ editor has no per-site install limit).
 | Maintenance window | none (days of week, start time, duration, in the site's or organization's time zone) |
 | Scan considered stale after | 48 h |
 | Max concurrent installs per site | 10 |
+| Rollout delay: security updates | 0 days |
+| Rollout delay: other updates | 0 days |
 | Tray icon | shown |
 | Install notifications ("Updates are installing") | on |
 | Restart schedule | none |

@@ -9,6 +9,7 @@ namespace EasyPatch.Infrastructure.Services;
 /// <summary>Recomputes per-update requirement flags, endpoint compliance counters and OS support status.</summary>
 public sealed class ComplianceService(EasyPatchDbContext db, PolicyService policies, TimeProvider clock)
 {
+    /// <summary>Recomputes and saves (per chunk) the given endpoints. Callers save their own pending changes first.</summary>
     public async Task RecomputeAsync(IReadOnlyCollection<Guid> endpointIds, CancellationToken ct = default)
     {
         if (endpointIds.Count == 0)
@@ -35,6 +36,8 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
                 ApplyCounts(endpoint, updatesByEndpoint[endpoint.Id], policy, now);
                 ApplyLifecycle(endpoint, lifecycle, now);
             }
+
+            await db.SaveChangesAsync(ct);
         }
     }
 
@@ -66,17 +69,19 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
                 continue;
             }
 
-            var excluded = InstallFilter.IsExcluded(u.UpdateGuid, u.Update.KbNumbers, filter);
-            u.IsExcluded = excluded;
-            u.IsRequired = !excluded && InstallFilter.EvaluatePolicy(u.Update.Category, u.Update.IsOptional, filter) is null;
+            var decision = UpdateRequirement.Evaluate(u.Update, u, policy, filter, now);
+            u.IsExcluded = decision.Excluded;
+            u.IsRequired = decision.Required;
+            u.DeferredUntil = UpdateReconciler.IsOutstanding(u.State) ? decision.DeferredUntil : null;
             var next = u.State;
-            if (excluded && u.State is EndpointUpdateState.Missing or EndpointUpdateState.Failed)
+            if (decision.Excluded && u.State is EndpointUpdateState.Missing or EndpointUpdateState.Failed)
             {
                 next = EndpointUpdateState.Excluded;
             }
-            else if (!excluded && u.State == EndpointUpdateState.Excluded)
+            else if (!decision.Excluded && u.State == EndpointUpdateState.Excluded)
             {
                 next = u.FailedAttempts > 0 ? EndpointUpdateState.Failed : EndpointUpdateState.Missing;
+                u.DeferredUntil = decision.DeferredUntil;
             }
 
             if (next != u.State)
@@ -97,6 +102,7 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
         endpoint.FailedCount = counts.Failed;
         endpoint.InstalledCount = counts.Installed;
         endpoint.PendingRebootUpdateCount = counts.PendingReboot;
+        endpoint.MissingDeferredCount = counts.MissingDeferred;
         endpoint.ComplianceStatus = ComplianceCalculator.Evaluate(endpoint.LastScanAt, endpoint.RebootPending, counts, policy.ScanStaleAfterHours, now);
         endpoint.ComplianceEvaluatedAt = now;
     }
@@ -107,7 +113,7 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentNullException.ThrowIfNull(policy);
         var counts = new UpdateCounts(endpoint.MissingRequiredCount, endpoint.MissingTotalCount, endpoint.FailedCount,
-            endpoint.InstalledCount, endpoint.PendingRebootUpdateCount);
+            endpoint.InstalledCount, endpoint.PendingRebootUpdateCount, endpoint.MissingDeferredCount);
         endpoint.ComplianceStatus = ComplianceCalculator.Evaluate(endpoint.LastScanAt, endpoint.RebootPending, counts, policy.ScanStaleAfterHours, now);
         endpoint.ComplianceEvaluatedAt = now;
     }

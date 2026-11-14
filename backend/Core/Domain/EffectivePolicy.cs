@@ -23,6 +23,14 @@ public sealed record EffectivePolicy
     public IReadOnlyList<string> ExcludedKbs { get; init; } = [];
     public bool AcceptEulas { get; init; }
     public bool AutoInstallEnabled { get; init; }
+
+    /// <summary>Rollout delay (days) for non-security updates; 0 = install as soon as they are found.</summary>
+    public int InstallDelayDays { get; init; }
+
+    /// <summary>Rollout delay (days) for security updates.</summary>
+    public int SecurityInstallDelayDays { get; init; }
+
+    public bool HasInstallDelay => InstallDelayDays > 0 || SecurityInstallDelayDays > 0;
     public MaintenanceWindowSettings? MaintenanceWindow { get; init; }
     public int ScanStaleAfterHours { get; init; }
     public int MaxConcurrentInstallsPerSite { get; init; }
@@ -38,6 +46,9 @@ public sealed record EffectivePolicy
     /// <summary>Windows Update settings to enforce (null groups are not managed).</summary>
     public WindowsUpdatePolicySettings WindowsUpdate { get; init; } = new();
     public IReadOnlyDictionary<string, PolicyScope> Sources { get; init; } = new Dictionary<string, PolicyScope>();
+
+    /// <summary>For values that came from a tag policy: the tag's name.</summary>
+    public IReadOnlyDictionary<string, string> SourceTags { get; init; } = new Dictionary<string, string>();
 
     public AgentConfig ToAgentConfig() => new()
     {
@@ -75,6 +86,8 @@ public static class PolicyDefaults
         ExcludedKbs = [],
         AcceptEulas = true,
         AutoInstallEnabled = false,
+        InstallDelayDays = 0,
+        SecurityInstallDelayDays = 0,
         MaintenanceDays = [],
         MaintenanceStart = new TimeOnly(2, 0),
         MaintenanceDurationMinutes = 180,
@@ -87,63 +100,90 @@ public static class PolicyDefaults
     };
 }
 
+/// <summary>A tag's policy layer for one endpoint.</summary>
+public sealed record TagPolicyLayer(string TagName, int Priority, Policy Policy);
+
 public static class PolicyResolver
 {
-    /// <summary>Resolves global → organization → site → endpoint. Scalars: most specific non-null wins.
+    /// <summary>Order in which tag layers are applied: lower priority first, so the highest priority wins; on equal priority
+    /// the tag whose name sorts first wins.</summary>
+    public static IEnumerable<TagPolicyLayer> OrderTags(IEnumerable<TagPolicyLayer> tags) =>
+        tags.OrderBy(t => t.Priority).ThenByDescending(t => t.TagName, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Resolves global → organization → site → tags → endpoint. Scalars: most specific non-null wins.
     /// Excluded KB lists are merged. The maintenance window, the restart schedule and each Windows Update group
     /// override as a unit.</summary>
-    public static EffectivePolicy Resolve(Policy global, Policy? organization, Policy? site, Policy? endpoint = null)
+    public static EffectivePolicy Resolve(Policy global, Policy? organization, Policy? site, Policy? endpoint = null,
+        IReadOnlyList<TagPolicyLayer>? tags = null)
     {
         ArgumentNullException.ThrowIfNull(global);
         var sources = new Dictionary<string, PolicyScope>();
-        var layers = new List<(Policy Policy, PolicyScope Scope)> { (global, PolicyScope.Global) };
+        var sourceTags = new Dictionary<string, string>();
+        var layers = new List<(Policy Policy, PolicyScope Scope, string? TagName)> { (global, PolicyScope.Global, null) };
         if (organization is not null)
         {
-            layers.Add((organization, PolicyScope.Organization));
+            layers.Add((organization, PolicyScope.Organization, null));
         }
 
         if (site is not null)
         {
-            layers.Add((site, PolicyScope.Site));
+            layers.Add((site, PolicyScope.Site, null));
+        }
+
+        foreach (var tag in OrderTags(tags ?? []))
+        {
+            layers.Add((tag.Policy, PolicyScope.Tag, tag.TagName));
         }
 
         if (endpoint is not null)
         {
-            layers.Add((endpoint, PolicyScope.Endpoint));
+            layers.Add((endpoint, PolicyScope.Endpoint, null));
+        }
+
+        void Source(string name, PolicyScope scope, string? tagName)
+        {
+            sources[name] = scope;
+            if (tagName is null)
+            {
+                sourceTags.Remove(name);
+            }
+            else
+            {
+                sourceTags[name] = tagName;
+            }
         }
 
         T Pick<T>(string name, Func<Policy, T?> selector, T fallback)
             where T : struct
         {
             var value = fallback;
-            var scope = PolicyScope.Global;
-            foreach (var (policy, layerScope) in layers)
+            Source(name, PolicyScope.Global, null);
+            foreach (var (policy, layerScope, tagName) in layers)
             {
                 if (selector(policy) is { } v)
                 {
                     value = v;
-                    scope = layerScope;
+                    Source(name, layerScope, tagName);
                 }
             }
 
-            sources[name] = scope;
             return value;
         }
 
         IReadOnlyList<UpdateCategory> categories = UpdateClassifier.DefaultInstallCategories;
-        sources[nameof(EffectivePolicy.AllowedCategories)] = PolicyScope.Global;
-        foreach (var (policy, layerScope) in layers)
+        Source(nameof(EffectivePolicy.AllowedCategories), PolicyScope.Global, null);
+        foreach (var (policy, layerScope, tagName) in layers)
         {
             if (policy.AllowedCategories is { } names)
             {
                 categories = ParseCategories(names);
-                sources[nameof(EffectivePolicy.AllowedCategories)] = layerScope;
+                Source(nameof(EffectivePolicy.AllowedCategories), layerScope, tagName);
             }
         }
 
         MaintenanceWindowSettings? window = null;
-        sources[nameof(EffectivePolicy.MaintenanceWindow)] = PolicyScope.Global;
-        foreach (var (policy, layerScope) in layers)
+        Source(nameof(EffectivePolicy.MaintenanceWindow), PolicyScope.Global, null);
+        foreach (var (policy, layerScope, tagName) in layers)
         {
             if (policy.MaintenanceDays is { } days)
             {
@@ -151,18 +191,18 @@ public static class PolicyResolver
                     days.Where(d => d is >= 0 and <= 6).Distinct().Order().Select(d => (DayOfWeek)d).ToArray(),
                     policy.MaintenanceStart ?? new TimeOnly(2, 0),
                     policy.MaintenanceDurationMinutes ?? 180);
-                sources[nameof(EffectivePolicy.MaintenanceWindow)] = layerScope;
+                Source(nameof(EffectivePolicy.MaintenanceWindow), layerScope, tagName);
             }
         }
 
         RestartScheduleSettings? restart = null;
-        sources[nameof(EffectivePolicy.RestartSchedule)] = PolicyScope.Global;
-        foreach (var (policy, layerScope) in layers)
+        Source(nameof(EffectivePolicy.RestartSchedule), PolicyScope.Global, null);
+        foreach (var (policy, layerScope, tagName) in layers)
         {
             if (policy.RestartSchedule is { } schedule)
             {
                 restart = schedule;
-                sources[nameof(EffectivePolicy.RestartSchedule)] = layerScope;
+                Source(nameof(EffectivePolicy.RestartSchedule), layerScope, tagName);
             }
         }
 
@@ -170,13 +210,13 @@ public static class PolicyResolver
             where T : class
         {
             T? value = null;
-            sources["WindowsUpdate." + name] = PolicyScope.Global;
-            foreach (var (policy, layerScope) in layers)
+            Source("WindowsUpdate." + name, PolicyScope.Global, null);
+            foreach (var (policy, layerScope, tagName) in layers)
             {
                 if (policy.WindowsUpdate is { } wu && selector(wu) is { } group)
                 {
                     value = group.Managed ? group.Value : null;
-                    sources["WindowsUpdate." + name] = layerScope;
+                    Source("WindowsUpdate." + name, layerScope, tagName);
                 }
             }
 
@@ -209,6 +249,8 @@ public static class PolicyResolver
             ExcludedKbs = excluded,
             AcceptEulas = Pick(nameof(EffectivePolicy.AcceptEulas), p => p.AcceptEulas, true),
             AutoInstallEnabled = Pick(nameof(EffectivePolicy.AutoInstallEnabled), p => p.AutoInstallEnabled, false),
+            InstallDelayDays = Pick(nameof(EffectivePolicy.InstallDelayDays), p => p.InstallDelayDays, 0),
+            SecurityInstallDelayDays = Pick(nameof(EffectivePolicy.SecurityInstallDelayDays), p => p.SecurityInstallDelayDays, 0),
             MaintenanceWindow = window is { IsConfigured: true } ? window : null,
             ScanStaleAfterHours = Pick(nameof(EffectivePolicy.ScanStaleAfterHours), p => p.ScanStaleAfterHours, 48),
             MaxConcurrentInstallsPerSite = Pick(nameof(EffectivePolicy.MaxConcurrentInstallsPerSite), p => p.MaxConcurrentInstallsPerSite, 10),
@@ -218,6 +260,7 @@ public static class PolicyResolver
             RestartSchedule = restart is { Enabled: true } ? restart : null,
             WindowsUpdate = windowsUpdate,
             Sources = sources,
+            SourceTags = sourceTags,
         };
     }
 
@@ -246,6 +289,8 @@ public static class PolicyResolver
         Range(nameof(policy.MaintenanceDurationMinutes), policy.MaintenanceDurationMinutes, 15, 1440);
         Range(nameof(policy.ScanStaleAfterHours), policy.ScanStaleAfterHours, 1, 720);
         Range(nameof(policy.MaxConcurrentInstallsPerSite), policy.MaxConcurrentInstallsPerSite, 1, 1000);
+        Range(nameof(policy.InstallDelayDays), policy.InstallDelayDays, 0, 365);
+        Range(nameof(policy.SecurityInstallDelayDays), policy.SecurityInstallDelayDays, 0, 90);
         if (policy.AllowedCategories is { } cats &&
             cats.Any(c => !Enum.TryParse<UpdateCategory>(c, ignoreCase: true, out _)))
         {

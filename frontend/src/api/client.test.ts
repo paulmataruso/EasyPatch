@@ -154,6 +154,8 @@ describe('policy editor rules', () => {
     trayIconEnabled: true,
     installNotificationsEnabled: true,
     agentAutoUpdateEnabled: true,
+    installDelayDays: 0,
+    securityInstallDelayDays: 0,
     restartSchedule: null,
     windowsUpdate: {
       automaticUpdates: { managed: true, value: { mode: 'AutoDownloadNotifyInstall', scheduledInstallDay: 0, scheduledInstallHour: 3 } },
@@ -184,6 +186,8 @@ describe('policy editor rules', () => {
     trayIconEnabled: false,
     installNotificationsEnabled: null,
     agentAutoUpdateEnabled: false,
+    installDelayDays: 14,
+    securityInstallDelayDays: null,
     restartSchedule: { enabled: true, days: [6], time: '04:00', condition: 'OnlyIfPending', mode: 'Countdown', countdownMinutes: 10, deadlineMinutes: 240, expiryMinutes: 120 },
     windowsUpdate: {
       automaticUpdates: { managed: false, value: null },
@@ -205,6 +209,8 @@ describe('policy editor rules', () => {
     expect(r.installNotificationsEnabled).toBe(true);
     expect(r.agentAutoUpdateEnabled).toBe(false);
     expect(r.restartSchedule?.mode).toBe('Countdown');
+    expect(r.installDelayDays).toBe(14);
+    expect(r.securityInstallDelayDays).toBe(0);
   });
 
   it('merges Windows Update settings group by group', () => {
@@ -250,5 +256,7 @@ describe('policy editor rules', () => {
     expect(validatePolicy({ ...base, maintenanceDays: [1], maintenanceStart: '02:00', maintenanceDurationMinutes: 10 }, true)).toMatch(/duration/);
     expect(validatePolicy({ ...base, checkInIntervalSeconds: null }, true)).toMatch(/required/);
     expect(validatePolicy({ ...base, checkInIntervalSeconds: null }, false)).toBeNull();
+    expect(validatePolicy({ ...base, securityInstallDelayDays: 91 }, true)).toMatch(/security updates must be between 0 and 90/);
+    expect(validatePolicy({ ...base, installDelayDays: 365, securityInstallDelayDays: null }, true)).toBeNull();
   });
 });

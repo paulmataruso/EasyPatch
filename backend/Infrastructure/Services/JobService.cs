@@ -692,7 +692,10 @@ public sealed class JobService(
         if (updatesChanged || report.RebootRequired)
         {
             var policy = await policies.ResolveAsync(endpoint, ct);
-            var rows = await db.EndpointUpdates.Where(u => u.EndpointId == endpointId).ToListAsync(ct);
+            var rows = await db.EndpointUpdates.Include(u => u.Update).Where(u => u.EndpointId == endpointId).ToListAsync(ct);
+            var excluded = (await db.UpdateExclusions.AsNoTracking().Where(x => x.EndpointId == endpointId)
+                .Select(x => x.UpdateGuid).ToListAsync(ct)).ToHashSet();
+            ComplianceService.ApplyRequirementFlags(rows, excluded, policy, now);
             ComplianceService.ApplyCounts(endpoint, rows, policy, now);
         }
 
@@ -774,7 +777,8 @@ public sealed class JobService(
                         FirstDetectedAt = now,
                         LastDetectedAt = now,
                         StateChangedAt = now,
-                        IsRequired = true,
+                        DelayBasisAt = catalogRow.CreatedAt,
+                        IsRequired = true, // recomputed below with the endpoint's policy
                     };
                     db.EndpointUpdates.Add(row);
                 }

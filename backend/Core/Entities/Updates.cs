@@ -75,6 +75,13 @@ public sealed class EndpointUpdate
 
     /// <summary>Linux: the package version installed at the latest scan that reported this update.</summary>
     public string? InstalledVersion { get; set; }
+
+    /// <summary>Start of the rollout delay: when the fleet first saw this update, or earlier when it replaced an update that
+    /// was still outstanding on this endpoint (so a long delay still makes progress across monthly or weekly releases).</summary>
+    public DateTimeOffset? DelayBasisAt { get; set; }
+
+    /// <summary>Set while policy allows the update but its rollout delay has not passed; it is not required until then.</summary>
+    public DateTimeOffset? DeferredUntil { get; set; }
 }
 
 public sealed class UpdateExclusion

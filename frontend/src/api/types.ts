@@ -45,7 +45,7 @@ export type OsSupportStatus = (typeof OS_SUPPORT_STATUSES)[number];
 export const ESU_OVERRIDES = ['Auto', 'Enrolled', 'NotEnrolled'] as const;
 export type EsuOverride = (typeof ESU_OVERRIDES)[number];
 
-export const POLICY_SCOPES = ['Global', 'Organization', 'Site', 'Endpoint'] as const;
+export const POLICY_SCOPES = ['Global', 'Organization', 'Site', 'Endpoint', 'Tag'] as const;
 export type PolicyScope = (typeof POLICY_SCOPES)[number];
 
 export const ENROLLMENT_REQUEST_STATUSES = ['Pending', 'Approved', 'Rejected', 'Expired'] as const;
@@ -475,6 +475,10 @@ export interface PolicyValues {
   windowsUpdate: PolicyWindowsUpdate | null;
   /** "Agent updates": true = Automatic, false = Manual, null inherits (the global default is Automatic). */
   agentAutoUpdateEnabled: boolean | null;
+  /** Rollout delay (days after an update is first seen) for non-security updates; 0-365, null inherits. */
+  installDelayDays: number | null;
+  /** Rollout delay for security updates (including monthly cumulative updates); 0-90, null inherits. */
+  securityInstallDelayDays: number | null;
 }
 
 export interface PolicyDto extends PolicyValues {
@@ -485,6 +489,7 @@ export interface PolicyDto extends PolicyValues {
   endpointId: Guid | null;
   excludedKbs: string[];
   updatedAt: Instant | null;
+  tagId?: Guid | null;
 }
 
 export interface PolicyRequest extends PolicyValues {
@@ -516,6 +521,53 @@ export interface EffectivePolicyDto {
   /** Registry values EasyPatch sets on the endpoint for the managed groups. */
   windowsUpdateValues: PolicyRegistryValueDto[] | null;
   agentAutoUpdateEnabled: boolean;
+  installDelayDays: number;
+  securityInstallDelayDays: number;
+  /** For values supplied by a tag policy: field name → tag name. */
+  sourceTags: Record<string, string> | null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------------------------
+
+export const TAG_COLORS = ['gray', 'blue', 'green', 'amber', 'red', 'purple', 'teal', 'pink'] as const;
+export type TagColor = (typeof TAG_COLORS)[number];
+
+export interface TagRefDto {
+  id: Guid;
+  name: string;
+  color: string;
+}
+
+export interface TagDto extends TagRefDto {
+  description: string | null;
+  /** Higher priority tag policies override lower ones on endpoints with several tags. */
+  priority: number;
+  /** 0 for organization-restricted users. */
+  endpointCount: number;
+  hasPolicy: boolean;
+  createdAt: Instant;
+}
+
+export interface TagRequest {
+  name: string;
+  color: string;
+  description: string | null;
+  priority: number;
+}
+
+/** A tag policy that applies to an endpoint, in resolution order (later entries override earlier ones). */
+export interface TagPolicyLayerDto {
+  tag: TagRefDto;
+  priority: number;
+  policy: PolicyDto;
+}
+
+export interface BulkEndpointTagsRequest {
+  endpointIds: Guid[];
+  addTagIds: Guid[] | null;
+  removeTagIds: Guid[] | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -549,6 +601,9 @@ export interface EndpointSummaryDto {
   lastSeenIp: string | null;
   /** "Windows" or "Linux" (see ENDPOINT_PLATFORMS). */
   platform: string;
+  /** Allowed updates still inside their rollout delay (not counted as missing). */
+  missingDeferredCount: number;
+  tags: TagRefDto[];
 }
 
 export const ENDPOINT_PLATFORMS = { windows: 'Windows', linux: 'Linux' } as const;
@@ -706,6 +761,8 @@ export interface EndpointUpdateDto {
   activeJob: JobOverlayDto | null;
   /** The Linux package behind the update; null for Windows updates. */
   package: PackageInfoDto | null;
+  /** Set while the update is inside its rollout delay (it is not required until then). */
+  deferredUntil: Instant | null;
 }
 
 /** A Linux package update. `installedVersion` is the endpoint's current version (endpoint views only). */

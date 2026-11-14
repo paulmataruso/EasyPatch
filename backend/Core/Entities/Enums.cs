@@ -58,6 +58,9 @@ public enum PolicyScope
     Organization,
     Site,
     Endpoint,
+
+    /// <summary>Applies to every endpoint with the tag, between the site and endpoint layers.</summary>
+    Tag,
 }
 
 public enum EnrollmentRequestStatus

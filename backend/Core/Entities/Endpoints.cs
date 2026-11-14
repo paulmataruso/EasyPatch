@@ -110,6 +110,9 @@ public sealed class Endpoint
     public int FailedCount { get; set; }
     public int InstalledCount { get; set; }
     public int PendingRebootUpdateCount { get; set; }
+
+    /// <summary>Missing updates policy allows but whose rollout delay has not passed (not counted as required).</summary>
+    public int MissingDeferredCount { get; set; }
     public DateTimeOffset? ComplianceEvaluatedAt { get; set; }
 
     public string? Notes { get; set; }

@@ -33,13 +33,17 @@ on one computer, a site, or a whole customer, and tracks compliance across every
 * **Multi-tenant hierarchy**: Organization → Site → Endpoint. Policies are inherited, with
   overrides at organization, site and endpoint level. Administrators can be restricted to
   specific organizations.
+* **Tags and update rings.** Endpoints can carry MSP-wide tags (such as "Pilot" or "SQL
+  servers"), and a tag can carry its own policy layer. A **rollout delay** in policy (separate
+  values for security and other updates) keeps new updates from being required or installed by
+  schedule until they have been out for a given number of days, so a pilot ring can go first.
 * **Install all missing updates** on one endpoint or on many selected endpoints at once, or
   install chosen updates. A single update can also be rolled out across an organization or a
   site. Installing on a single endpoint first shows exactly which updates will be installed.
   Policy decides which categories are included: by default, everything except drivers and
   feature updates.
 * **Optional scheduled installs** inside a per-policy maintenance window (off by default),
-  limited per site and globally.
+  limited per site and globally. Updates still inside their rollout delay are skipped.
 * **Restarts** of one endpoint or many selected endpoints, now or at a chosen time, or on a
   recurring restart schedule set in policy (optionally only when Windows needs a restart).
   Signed-in users see a countdown, or can postpone up to a deadline. A restart job completes

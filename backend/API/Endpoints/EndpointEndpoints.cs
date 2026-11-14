@@ -18,7 +18,7 @@ namespace EasyPatch.Api.Endpoints;
 
 public sealed record EndpointListQuery(
     Guid? OrganizationId, Guid? SiteId, string? Search, ComplianceStatus? Compliance, bool? Online, string? Os, bool? RebootPending, bool? OutdatedAgent,
-    EndpointStatus? Status, string? Sort, string? Dir, int? Page, int? PageSize);
+    EndpointStatus? Status, string? Sort, string? Dir, int? Page, int? PageSize, Guid? TagId = null);
 
 public static class EndpointEndpoints
 {
@@ -189,7 +189,7 @@ public static class EndpointEndpoints
                 window?.Start.ToString("HH:mm", CultureInfo.InvariantCulture), window?.DurationMinutes,
                 endpoint.Site?.TimeZone ?? endpoint.Organization!.TimeZone, p.ScanStaleAfterHours, p.MaxConcurrentInstallsPerSite, p.Sources,
                 p.TrayIconEnabled, p.InstallNotificationsEnabled, OrganizationEndpoints.ToDto(p.RestartSchedule), p.WindowsUpdate, registry,
-                p.AgentAutoUpdateEnabled));
+                p.AgentAutoUpdateEnabled, p.InstallDelayDays, p.SecurityInstallDelayDays, p.SourceTags));
         });
 
         // Per-endpoint policy overrides (the most specific layer).
@@ -422,6 +422,11 @@ public static class EndpointEndpoints
             query = query.Where(e => e.RebootPending == reboot);
         }
 
+        if (q.TagId is { } tagId)
+        {
+            query = query.Where(e => db.EndpointTags.Any(et => et.EndpointId == e.Id && et.TagId == tagId));
+        }
+
         var latest = Mapping.LatestAgentVersions.From(packages);
 
         var desc = PagingExtensions.IsDescending(q.Dir);
@@ -443,12 +448,16 @@ public static class EndpointEndpoints
             // Version comparison happens in memory (per package format).
             var all = (await query.Select(Mapping.EndpointRowProjection).ToListAsync(ct))
                 .Where(r => latest.IsOutdated(r.AgentVersion, r.AgentPackageFormat)).ToList();
-            return new PagedResult<EndpointSummaryDto>(all.Skip(page.Skip).Take(page.PageSize).Select(r => Mapping.ToSummary(r, latest)).ToList(),
+            var pageRows = all.Skip(page.Skip).Take(page.PageSize).ToList();
+            var pageTags = await Mapping.LoadTagsAsync(db, pageRows.Select(r => r.Id).ToList(), ct);
+            return new PagedResult<EndpointSummaryDto>(pageRows.Select(r => Mapping.ToSummary(r, latest, pageTags.GetValueOrDefault(r.Id))).ToList(),
                 page.Page, page.PageSize, all.Count);
         }
 
         var paged = await query.Select(Mapping.EndpointRowProjection).ToPagedAsync(page, ct);
-        return new PagedResult<EndpointSummaryDto>(paged.Items.Select(r => Mapping.ToSummary(r, latest)).ToList(), paged.Page, paged.PageSize, paged.TotalCount);
+        var tags = await Mapping.LoadTagsAsync(db, paged.Items.Select(r => r.Id).ToList(), ct);
+        return new PagedResult<EndpointSummaryDto>(paged.Items.Select(r => Mapping.ToSummary(r, latest, tags.GetValueOrDefault(r.Id))).ToList(),
+            paged.Page, paged.PageSize, paged.TotalCount);
     }
 
     private static async Task<EndpointDetailDto> LoadDetailAsync(Guid id, EasyPatchDbContext db, ITenantContext tenant, AgentPackageService packages,
@@ -461,7 +470,8 @@ public static class EndpointEndpoints
         var row = new Mapping.EndpointRow(e.Id, e.Hostname, e.OrganizationId, e.Organization!.Name, e.SiteId, e.Site?.Name, e.Status, e.OperatingSystem,
             e.OsVersion, e.OsBuild, e.OsBuildNumber, e.OsProductType, e.Architecture, e.AgentVersion, e.IsOnline, e.LastCheckInAt, e.LastScanAt,
             e.ComplianceStatus, e.MissingRequiredCount, e.MissingTotalCount, e.FailedCount, e.RebootPending, e.OsSupportStatus, e.CurrentActivity, e.LastSeenIp,
-            e.Platform, e.AgentPackageFormat);
+            e.Platform, e.AgentPackageFormat, e.MissingDeferredCount);
+        var endpointTags = await Mapping.LoadTagsAsync(db, [id], ct);
         var credentials = await db.AgentCredentials.AsNoTracking().Where(c => c.EndpointId == id).OrderByDescending(c => c.CreatedAt).Take(10)
             .Select(c => new CredentialDto(c.CredentialId, c.KeyFingerprint, c.CreatedAt, c.ExpiresAt, c.RevokedAt, c.RevokedReason, c.LastUsedAt))
             .ToListAsync(ct);
@@ -470,7 +480,7 @@ public static class EndpointEndpoints
                                                j.Status == JobStatus.Running || j.Status == JobStatus.WaitingForReboot))
             .OrderByDescending(j => j.Status == JobStatus.Running).ThenByDescending(j => j.CreatedAt)
             .Select(Mapping.JobSummary).FirstOrDefaultAsync(ct);
-        return new EndpointDetailDto(Mapping.ToSummary(row, latest), e.DnsDomain, e.DomainJoined, e.OsEdition, e.OsProductType, e.OsInstallDate,
+        return new EndpointDetailDto(Mapping.ToSummary(row, latest, endpointTags.GetValueOrDefault(id)), e.DnsDomain, e.DomainJoined, e.OsEdition, e.OsProductType, e.OsInstallDate,
             e.SerialNumber, e.Manufacturer, e.Model, e.ProcessorName, e.TotalMemoryBytes, e.SystemDriveTotalBytes, e.SystemDriveFreeBytes,
             e.IsVirtualMachine, e.TimeZoneId, e.LastBootAt, e.AgentInstalledAt, e.EnrolledAt, e.LastInventoryAt, e.LastScanAttemptAt, e.LastScanError,
             e.RebootReasons, e.RebootPendingSince, e.UpdateSourceType, e.UpdateSourceServer, e.MicrosoftUpdateRegistered, e.WufbPoliciesConfigured,
@@ -525,7 +535,7 @@ public static class EndpointEndpoints
         row.UpdateGuid, update.RevisionNumber, update.Title, update.Description, update.PrimaryKb, update.KbNumbers, update.Category, update.MsClassification,
         update.MsrcSeverity, update.ReleaseDate, update.MaxDownloadSizeBytes, update.RebootBehavior is > 0, update.SupportUrl, row.State, row.IsRequired,
         row.IsExcluded, row.FirstDetectedAt, row.StateChangedAt, row.InstalledAt, row.FailedAttempts, row.ErrorCode, row.ErrorMessage, overlay,
-        Mapping.Package(update, row.InstalledVersion));
+        Mapping.Package(update, row.InstalledVersion), row.DeferredUntil);
 
     internal static List<Guid> ParseGuids(string? csv) =>
         string.IsNullOrWhiteSpace(csv)

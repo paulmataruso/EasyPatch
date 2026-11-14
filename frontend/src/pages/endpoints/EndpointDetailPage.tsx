@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { ArrowUpCircle, Ban, Download, MessageSquare, MoreHorizontal, Pencil, Power, RefreshCw, ScanSearch, Trash2, WifiOff } from 'lucide-react';
+import { ArrowUpCircle, Ban, Download, MessageSquare, MoreHorizontal, Pencil, Power, RefreshCw, ScanSearch, Tag as TagIcon, Trash2, WifiOff } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
 import { useApi, useApiMutation, useSites } from '../../api/hooks';
 import { AGENT_CAPABILITIES, ESU_OVERRIDES, type EndpointDetailDto, type EsuOverride, type UpdateEndpointRequest } from '../../api/types';
@@ -10,6 +10,7 @@ import { ConfirmDialog, Dialog } from '../../components/Dialog';
 import { InstallUpdatesDialog, jobIdOf } from '../../components/InstallDialog';
 import { MessageDialog, RestartDialog } from '../../components/RestartDialogs';
 import { ComplianceBadge, EndpointStatusBadge, JobStatusBadge, OnlineBadge, OsSupportBadge, PlatformBadge } from '../../components/StatusBadges';
+import { EndpointTagsDialog, TagList } from '../../components/Tags';
 import { useToast } from '../../components/Toast';
 import {
   Alert,
@@ -34,7 +35,8 @@ export function EndpointDetailPage() {
   const { id = '' } = useParams();
   const url = useUrlState();
   const tab = url.get('tab', 'overview');
-  const { canOperate } = useAuth();
+  const { canOperate, isUnrestricted } = useAuth();
+  const [tagsOpen, setTagsOpen] = useState(false);
   const [install, setInstall] = useState<{ mode: 'AllEligible' | 'Selected'; guids?: string[] } | null>(null);
   const [restartOpen, setRestartOpen] = useState(false);
   const endpoint = useApi<EndpointDetailDto>(`/endpoints/${id}`, undefined, {
@@ -80,6 +82,12 @@ export function EndpointDetailPage() {
             <OsSupportBadge status={s.osSupportStatus} />
             <span>Last check-in {formatRelative(s.lastCheckInAt)}</span>
             {s.currentActivity && <span className="text-accent">{s.currentActivity}</span>}
+            {(s.tags?.length ?? 0) > 0 && <TagList tags={s.tags} max={8} />}
+            {canOperate && isUnrestricted && (
+              <Button size="sm" variant="ghost" icon={<TagIcon className="size-3.5" aria-hidden />} onClick={() => setTagsOpen(true)}>
+                {(s.tags?.length ?? 0) > 0 ? 'Edit tags' : 'Add tags'}
+              </Button>
+            )}
           </span>
         }
         actions={canOperate && managed && <EndpointActions endpoint={e} onInstallAll={() => setInstall({ mode: 'AllEligible' })} onRestart={() => setRestartOpen(true)} />}
@@ -118,7 +126,12 @@ export function EndpointDetailPage() {
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
-        <StatTile label="Missing (required)" value={s.missingRequiredCount} tone={s.missingRequiredCount ? 'warn' : 'ok'} hint={`${s.missingTotalCount} missing in total`} />
+        <StatTile
+          label="Missing (required)"
+          value={s.missingRequiredCount}
+          tone={s.missingRequiredCount ? 'warn' : 'ok'}
+          hint={`${s.missingTotalCount} missing in total${s.missingDeferredCount > 0 ? `, ${s.missingDeferredCount} in rollout delay` : ''}`}
+        />
         <StatTile label="Failed" value={s.failedCount} tone={s.failedCount ? 'danger' : undefined} />
         <StatTile label="Installed" value={e.installedCount} />
         <StatTile label="Pending restart" value={e.pendingRebootUpdateCount} tone={e.pendingRebootUpdateCount ? 'info' : undefined} />
@@ -161,6 +174,7 @@ export function EndpointDetailPage() {
         onClose={() => setInstall(null)}
       />
       <RestartDialog target={restartOpen ? { kind: 'endpoint', endpoint: e } : null} onClose={() => setRestartOpen(false)} />
+      <EndpointTagsDialog open={tagsOpen} onClose={() => setTagsOpen(false)} endpointId={s.id} hostname={s.hostname} current={s.tags ?? []} />
     </>
   );
 }

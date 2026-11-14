@@ -72,13 +72,22 @@ public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService p
         }
 
         var server = await settings.GetAsync(ct);
+        var warnings = BuildWarnings(endpoint, policy, server, now);
+        var included = items.Select(i => i.UpdateGuid).ToHashSet();
+        var deferred = candidates.Where(c => included.Contains(c.UpdateGuid) && c.DeferredUntil > now).ToList();
+        if (deferred.Count > 0)
+        {
+            warnings.Add($"{deferred.Count} of these update(s) are still in their rollout delay (the last one until " +
+                         $"{deferred.Max(d => d.DeferredUntil)!.Value.UtcDateTime:yyyy-MM-dd} UTC). Installing now overrides the delay.");
+        }
+
         return new InstallPreview(
             mode,
             items,
             skipped,
             items.Sum(i => i.SizeBytes ?? 0),
             items.Count(i => i.RebootBehavior is 1 or 2 || i.Category is UpdateCategory.Cumulative or UpdateCategory.ServicingStack or UpdateCategory.DotNet),
-            BuildWarnings(endpoint, policy, server, now),
+            warnings,
             filter,
             endpoint.LastScanAt);
     }

@@ -20,6 +20,8 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<Policy> Policies => Set<Policy>();
+    public DbSet<Tag> Tags => Set<Tag>();
+    public DbSet<EndpointTag> EndpointTags => Set<EndpointTag>();
     public DbSet<ServerSettingsRow> ServerSettings => Set<ServerSettingsRow>();
     public DbSet<OsLifecycleEntry> OsLifecycleEntries => Set<OsLifecycleEntry>();
     public DbSet<ComplianceSnapshot> ComplianceSnapshots => Set<ComplianceSnapshot>();
@@ -154,11 +156,29 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.HasIndex(x => x.OrganizationId).IsUnique().HasFilter("scope = 'Organization'");
             e.HasIndex(x => x.SiteId).IsUnique().HasFilter("scope = 'Site'");
             e.HasIndex(x => x.EndpointId).IsUnique().HasFilter("scope = 'Endpoint'");
+            e.HasIndex(x => x.TagId).IsUnique().HasFilter("scope = 'Tag'");
+            e.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Site>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Endpoint>().WithMany().HasForeignKey(x => x.EndpointId).OnDelete(DeleteBehavior.Cascade);
             Json(e.Property(x => x.RestartSchedule));
             Json(e.Property(x => x.WindowsUpdate));
+        });
+        b.Entity<Tag>(e =>
+        {
+            e.ToTable("tags");
+            e.Property(x => x.Name).HasMaxLength(Tag.MaxNameLength);
+            e.Property(x => x.Color).HasMaxLength(16);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.HasIndex(x => x.Name).IsUnique();
+        });
+        b.Entity<EndpointTag>(e =>
+        {
+            e.ToTable("endpoint_tags");
+            e.HasKey(x => new { x.EndpointId, x.TagId });
+            e.HasIndex(x => x.TagId);
+            e.HasOne<Endpoint>().WithMany().HasForeignKey(x => x.EndpointId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<ServerSettingsRow>(e =>
         {
@@ -317,6 +337,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.HasIndex(x => new { x.EndpointId, x.UpdateGuid }).IsUnique();
             e.HasIndex(x => new { x.EndpointId, x.State });
             e.HasIndex(x => new { x.UpdateGuid, x.State });
+            e.HasIndex(x => x.DeferredUntil).HasFilter("deferred_until IS NOT NULL");
             e.HasOne(x => x.Update).WithMany().HasForeignKey(x => x.UpdateId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<Endpoint>().WithMany().HasForeignKey(x => x.EndpointId).OnDelete(DeleteBehavior.Cascade);
         });

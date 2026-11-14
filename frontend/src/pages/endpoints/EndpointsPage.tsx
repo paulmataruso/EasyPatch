@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { ArrowUpCircle, Download, MessageSquare, Monitor, Power, RefreshCw } from 'lucide-react';
+import { ArrowUpCircle, Download, MessageSquare, Monitor, Power, RefreshCw, Tag as TagIcon } from 'lucide-react';
 import { api } from '../../api/client';
-import { useApiMutation, useList } from '../../api/hooks';
-import { COMPLIANCE_STATUSES, type BulkResultDto, type EndpointSummaryDto } from '../../api/types';
+import { useApi, useApiMutation, useList } from '../../api/hooks';
+import { COMPLIANCE_STATUSES, type BulkResultDto, type EndpointSummaryDto, type TagDto } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AgentUpdateDialog } from '../../components/AgentUpdateDialog';
 import { Dialog } from '../../components/Dialog';
 import { EnumSelect, OrganizationSelect, SearchInput, SiteSelect } from '../../components/Filters';
 import { MessageDialog, RestartDialog } from '../../components/RestartDialogs';
 import { ComplianceBadge, EndpointStatusBadge, OnlineBadge, OsSupportBadge, PlatformBadge } from '../../components/StatusBadges';
+import { BulkTagsDialog, TagList } from '../../components/Tags';
 import { useToast } from '../../components/Toast';
 import {
   Alert,
@@ -42,8 +43,9 @@ export function EndpointsPage() {
 
 /** Filterable endpoint table with bulk actions. With `organizationId`, the organization filter is fixed. */
 export function EndpointList({ organizationId: fixedOrg }: { organizationId?: string }) {
-  const { canOperate } = useAuth();
+  const { canOperate, isUnrestricted } = useAuth();
   const navigate = useNavigate();
+  const tags = useApi<TagDto[]>('/tags', undefined, { staleTime: 30_000 });
   const toast = useToast();
   const url = useUrlState();
   const organizationId = fixedOrg ?? url.get('organizationId');
@@ -56,6 +58,7 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
     os: url.get('os') || undefined,
     rebootPending: url.get('rebootPending') || undefined,
     outdatedAgent: url.get('outdatedAgent') || undefined,
+    tagId: url.get('tagId') || undefined,
   };
   const list = useList<EndpointSummaryDto>(
     '/endpoints',
@@ -66,7 +69,7 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmInstall, setConfirmInstall] = useState(false);
   const [result, setResult] = useState<{ title: string; data: BulkResultDto } | null>(null);
-  const [bulkDialog, setBulkDialog] = useState<'restart' | 'message' | 'agent-update' | null>(null);
+  const [bulkDialog, setBulkDialog] = useState<'restart' | 'message' | 'agent-update' | 'tags' | null>(null);
   const items = list.page.items;
   const selectable = useMemo(() => items.filter((e) => e.status === 'Active'), [items]);
   const allSelected = selectable.length > 0 && selectable.every((e) => selected.has(e.id));
@@ -132,6 +135,18 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
             </optgroup>
           </Select>
         </Field>
+        {(tags.data ?? []).length > 0 && (
+          <Field label="Tag" htmlFor="tag-filter" className="min-w-32">
+            <Select id="tag-filter" value={url.get('tagId')} onChange={(e) => url.set({ tagId: e.target.value || null })}>
+              <option value="">Any</option>
+              {(tags.data ?? []).map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <div className="flex flex-col gap-1.5 pb-1">
           <Checkbox label="Restart pending" checked={url.get('rebootPending') === 'true'} onChange={(e) => url.set({ rebootPending: e.target.checked ? 'true' : null })} />
           <Checkbox label="Outdated agent" checked={url.get('outdatedAgent') === 'true'} onChange={(e) => url.set({ outdatedAgent: e.target.checked ? 'true' : null })} />
@@ -141,7 +156,9 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
             variant="ghost"
             size="sm"
             className="mb-1"
-            onClick={() => url.set({ search: null, organizationId: null, siteId: null, compliance: null, online: null, os: null, rebootPending: null, outdatedAgent: null })}
+            onClick={() =>
+              url.set({ search: null, organizationId: null, siteId: null, compliance: null, online: null, os: null, rebootPending: null, outdatedAgent: null, tagId: null })
+            }
           >
             Clear filters
           </Button>
@@ -166,6 +183,11 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
           <Button size="sm" icon={<ArrowUpCircle className="size-3.5" aria-hidden />} onClick={() => setBulkDialog('agent-update')}>
             Update agent…
           </Button>
+          {isUnrestricted && (
+            <Button size="sm" icon={<TagIcon className="size-3.5" aria-hidden />} onClick={() => setBulkDialog('tags')}>
+              Tags…
+            </Button>
+          )}
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
             Clear selection
           </Button>
@@ -244,6 +266,11 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
                         <OnlineBadge online={e.isOnline} lastSeen={e.lastCheckInAt} />
                         {e.currentActivity && <span className="max-w-48 truncate text-xs text-accent">{e.currentActivity}</span>}
                       </div>
+                      {e.tags?.length > 0 && (
+                        <div className="mt-1">
+                          <TagList tags={e.tags} />
+                        </div>
+                      )}
                     </td>
                     {!fixedOrg && <td className="whitespace-nowrap">{e.organizationName}</td>}
                     <td className="whitespace-nowrap text-muted">{e.siteName ?? '—'}</td>
@@ -265,6 +292,11 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
                     <td className="text-right tabular-nums">
                       {e.missingRequiredCount > 0 ? <span className="font-medium text-warn">{e.missingRequiredCount}</span> : '0'}
                       {e.missingTotalCount > e.missingRequiredCount && <span className="text-xs text-subtle" title="Including updates not required by policy"> / {e.missingTotalCount}</span>}
+                      {e.missingDeferredCount > 0 && (
+                        <div className="text-xs text-subtle" title="Allowed updates still inside their rollout delay (not counted as missing yet)">
+                          {e.missingDeferredCount} deferred
+                        </div>
+                      )}
                     </td>
                     <td className="text-right tabular-nums">{e.failedCount > 0 ? <span className="font-medium text-danger">{e.failedCount}</span> : '0'}</td>
                     <td className="whitespace-nowrap text-muted" title={e.lastCheckInAt ? new Date(e.lastCheckInAt).toLocaleString() : undefined}>
@@ -296,6 +328,7 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
         onClose={() => setBulkDialog(null)}
         onBulkResult={(title, data) => setResult({ title, data })}
       />
+      <BulkTagsDialog open={bulkDialog === 'tags'} onClose={() => setBulkDialog(null)} endpointIds={[...selected]} />
       <AgentUpdateDialog
         target={bulkDialog === 'agent-update' ? { kind: 'bulk', ids: [...selected] } : null}
         onClose={() => setBulkDialog(null)}

@@ -325,15 +325,16 @@ public static class OrganizationEndpoints
         p.AllowedCategories, p.IncludeOptional, p.ExcludedKbs, p.AcceptEulas, p.AutoInstallEnabled, p.MaintenanceDays,
         p.MaintenanceStart?.ToString("HH:mm", CultureInfo.InvariantCulture), p.MaintenanceDurationMinutes, p.ScanStaleAfterHours,
         p.MaxConcurrentInstallsPerSite, p.UpdatedAt, p.EndpointId, p.TrayIconEnabled, p.InstallNotificationsEnabled,
-        ToDto(p.RestartSchedule), p.WindowsUpdate, p.AgentAutoUpdateEnabled);
+        ToDto(p.RestartSchedule), p.WindowsUpdate, p.AgentAutoUpdateEnabled, p.InstallDelayDays, p.SecurityInstallDelayDays, p.TagId);
 
     internal static RestartScheduleDto? ToDto(RestartScheduleSettings? r) => r is null
         ? null
         : new RestartScheduleDto(r.Enabled, r.Days, r.Time.ToString("HH:mm", CultureInfo.InvariantCulture), r.Condition, r.Mode,
             r.CountdownMinutes, r.DeadlineMinutes, r.ExpiryMinutes);
 
-    internal static PolicyDto EmptyPolicy(PolicyScope scope, Guid? organizationId, Guid? siteId, Guid? endpointId = null) => new(
-        null, scope, organizationId, siteId, null, null, null, null, null, null, [], null, null, null, null, null, null, null, null, endpointId);
+    internal static PolicyDto EmptyPolicy(PolicyScope scope, Guid? organizationId, Guid? siteId, Guid? endpointId = null, Guid? tagId = null) => new(
+        null, scope, organizationId, siteId, null, null, null, null, null, null, [], null, null, null, null, null, null, null, null, endpointId,
+        TagId: tagId);
 
     internal static Policy FromRequest(PolicyRequest r)
     {
@@ -361,6 +362,8 @@ public static class OrganizationEndpoints
             ExcludedKbs = r.ExcludedKbs?.ToList() ?? [],
             AcceptEulas = r.AcceptEulas,
             AutoInstallEnabled = r.AutoInstallEnabled,
+            InstallDelayDays = r.InstallDelayDays,
+            SecurityInstallDelayDays = r.SecurityInstallDelayDays,
             MaintenanceDays = r.MaintenanceDays?.Distinct().Order().ToList(),
             MaintenanceStart = start,
             MaintenanceDurationMinutes = r.MaintenanceDurationMinutes,

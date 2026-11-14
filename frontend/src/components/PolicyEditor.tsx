@@ -36,6 +36,8 @@ const EMPTY: PolicyRequest = {
   restartSchedule: null,
   windowsUpdate: null,
   agentAutoUpdateEnabled: null,
+  installDelayDays: null,
+  securityInstallDelayDays: null,
 };
 
 export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
@@ -60,6 +62,8 @@ export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
     restartSchedule: policy.restartSchedule ? { ...policy.restartSchedule, time: policy.restartSchedule.time.slice(0, 5) } : null,
     windowsUpdate: policy.windowsUpdate ?? null,
     agentAutoUpdateEnabled: policy.agentAutoUpdateEnabled ?? null,
+    installDelayDays: policy.installDelayDays ?? null,
+    securityInstallDelayDays: policy.securityInstallDelayDays ?? null,
   };
 }
 
@@ -88,7 +92,15 @@ export function resolveInherited(layers: (PolicyDto | null | undefined)[]): Inhe
 }
 
 interface NumberSpec {
-  key: 'checkInIntervalSeconds' | 'scanIntervalMinutes' | 'inventoryIntervalMinutes' | 'jitterPercent' | 'scanStaleAfterHours' | 'maxConcurrentInstallsPerSite';
+  key:
+    | 'checkInIntervalSeconds'
+    | 'scanIntervalMinutes'
+    | 'inventoryIntervalMinutes'
+    | 'jitterPercent'
+    | 'scanStaleAfterHours'
+    | 'maxConcurrentInstallsPerSite'
+    | 'installDelayDays'
+    | 'securityInstallDelayDays';
   label: string;
   unit: string;
   min: number;
@@ -104,6 +116,22 @@ const NUMBER_FIELDS: NumberSpec[] = [
   { key: 'scanStaleAfterHours', label: 'Scan considered stale after', unit: 'hours', min: 1, max: 720, hint: 'Endpoints without a successful scan for this long are reported as Scan stale.' },
   { key: 'maxConcurrentInstallsPerSite', label: 'Max concurrent installs per site', unit: 'endpoints', min: 1, max: 1000, hint: 'Limits how many endpoints in one site install at the same time.' },
 ];
+
+/** Rollout delays (0 = no delay). Not required in the global policy: an empty value there means 0. */
+const DELAY_FIELDS: NumberSpec[] = [
+  {
+    key: 'securityInstallDelayDays',
+    label: 'Security updates',
+    unit: 'days',
+    min: 0,
+    max: 90,
+    hint: 'Includes the monthly cumulative updates. Definition (antivirus) updates are never delayed.',
+  },
+  { key: 'installDelayDays', label: 'Other updates', unit: 'days', min: 0, max: 365, hint: 'Non-security updates in the allowed categories.' },
+];
+
+/** A delay this long leaves endpoints without fixes for a long time; the editor warns about it. */
+export const LONG_DELAY_DAYS = 30;
 
 export function PolicyEditor({
   scope,
@@ -134,7 +162,16 @@ export function PolicyEditor({
 }) {
   const isGlobal = scope === 'Global';
   const isEndpoint = scope === 'Endpoint';
-  const initial = useMemo(() => toRequest(policy), [policy]);
+  const isTag = scope === 'Tag';
+  const initial = useMemo(() => {
+    const r = toRequest(policy);
+    if (isGlobal) {
+      // Older global policies have no delay stored: that means no delay.
+      r.installDelayDays ??= 0;
+      r.securityInstallDelayDays ??= 0;
+    }
+    return r;
+  }, [policy, isGlobal]);
   const [form, setForm] = useState<PolicyRequest>(initial);
   const [kbInput, setKbInput] = useState('');
   const [kbError, setKbError] = useState<string | null>(null);
@@ -171,11 +208,18 @@ export function PolicyEditor({
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
-      {!isGlobal && (
+      {isTag && (
+        <Alert tone="info">
+          A tag policy applies to every endpoint with the tag, after the site policy and before the endpoint’s own policy. Fields set to{' '}
+          <strong>Inherit</strong> are left to each endpoint’s site, organization or global policy (the values shown are the global ones). When an endpoint has
+          several tags with policies, the tag with the higher priority wins.
+        </Alert>
+      )}
+      {!isGlobal && !isTag && (
         <Alert tone="info">
           Fields set to <strong>Inherit</strong> use the value from the{' '}
-          {scope === 'Endpoint' ? 'site, organization or global' : scope === 'Site' ? 'organization or global' : 'global'} policy. Excluded KBs are added to the
-          inherited exclusions; the maintenance window and the restart schedule are inherited or overridden as a whole.
+          {scope === 'Endpoint' ? 'tag, site, organization or global' : scope === 'Site' ? 'organization or global' : 'global'} policy. Excluded KBs are added to
+          the inherited exclusions; the maintenance window and the restart schedule are inherited or overridden as a whole.
         </Alert>
       )}
 
@@ -338,6 +382,27 @@ export function PolicyEditor({
         </div>
       </Card>
 
+      <Card title="Rollout delay">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-muted">
+            An update is not required, and scheduled installs skip it, until this many days after EasyPatch first saw it on any endpoint. Use a short delay for a
+            pilot group (for example a “Pilot” tag) and a longer one for everyone else. A newer update that replaces an older one keeps the older one’s start date.
+            Installing manually ignores the delay.
+          </p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {DELAY_FIELDS.map((f) => (
+              <NumberRow key={f.key} spec={f} value={form[f.key]} inherited={inherited?.[f.key] ?? 0} isGlobal={isGlobal} readOnly={readOnly} onChange={(v) => update(f.key, v)} />
+            ))}
+          </div>
+          {DELAY_FIELDS.some((f) => (form[f.key] ?? 0) > LONG_DELAY_DAYS) && (
+            <Alert tone="warn">
+              A delay longer than {LONG_DELAY_DAYS} days leaves endpoints without released fixes for over a month. Endpoints still count as compliant while updates
+              wait.
+            </Alert>
+          )}
+        </div>
+      </Card>
+
       <Card title="Scheduled restarts">
         <Row
           label="Restart schedule"
@@ -430,7 +495,7 @@ export function PolicyEditor({
 
       <Card title="Compliance and limits">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {NUMBER_FIELDS.filter((f) => f.key === 'scanStaleAfterHours' || (f.key === 'maxConcurrentInstallsPerSite' && !isEndpoint)).map((f) => (
+          {NUMBER_FIELDS.filter((f) => f.key === 'scanStaleAfterHours' || (f.key === 'maxConcurrentInstallsPerSite' && !isEndpoint && !isTag)).map((f) => (
             <NumberRow key={f.key} spec={f} value={form[f.key]} inherited={inherited?.[f.key] ?? null} isGlobal={isGlobal} readOnly={readOnly} onChange={(v) => update(f.key, v)} />
           ))}
         </div>
@@ -468,6 +533,10 @@ export function validatePolicy(form: PolicyRequest, isGlobal: boolean): string |
       continue;
     }
     if (!Number.isInteger(v) || v < f.min || v > f.max) return `${f.label} must be between ${f.min} and ${f.max} ${f.unit}.`;
+  }
+  for (const f of DELAY_FIELDS) {
+    const v = form[f.key];
+    if (v !== null && (!Number.isInteger(v) || v < f.min || v > f.max)) return `Rollout delay for ${f.label.toLowerCase()} must be between ${f.min} and ${f.max} days.`;
   }
   if (isGlobal && (form.includeOptional === null || form.acceptEulas === null || form.autoInstallEnabled === null)) {
     return 'Every setting is required in the global policy.';
