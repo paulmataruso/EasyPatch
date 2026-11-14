@@ -10,7 +10,7 @@ import type {
   OsSupportStatus,
   UpdateCategory,
 } from '../api/types';
-import { humanize } from '../lib/format';
+import { humanize, isLinux } from '../lib/format';
 import { Badge, Dot, type Tone } from './ui';
 
 export const complianceTone: Record<ComplianceStatus, Tone> = {
@@ -96,7 +96,7 @@ export function UpdateStateBadge({ state }: { state: EndpointUpdateState }) {
       icon={state === 'PendingReboot' ? <RotateCw className="size-3" aria-hidden /> : state === 'PendingVerification' ? <CircleDashed className="size-3" aria-hidden /> : undefined}
       title={
         state === 'PendingVerification'
-          ? 'Windows reported success; the next scan confirms it.'
+          ? 'The agent reported success; the next scan confirms it.'
           : state === 'PendingReboot'
             ? 'Installed; takes effect after the endpoint restarts.'
             : undefined
@@ -130,6 +130,16 @@ export function OsSupportBadge({ status }: { status: OsSupportStatus }) {
   if (status === 'ExtendedSecurityUpdates') return <Badge tone="info">ESU</Badge>;
   if (status === 'Unsupported') return <Badge tone="danger">Unsupported</Badge>;
   return <Badge tone="neutral">Unknown</Badge>;
+}
+
+/** "Windows" or "Linux" (EndpointSummaryDto.platform). */
+export function PlatformBadge({ platform }: { platform: string | null | undefined }) {
+  const linux = isLinux(platform);
+  return (
+    <Badge tone={linux ? 'info' : 'neutral'} title={linux ? 'Linux endpoint (apt or dnf)' : 'Windows endpoint'}>
+      {linux ? 'Linux' : 'Windows'}
+    </Badge>
+  );
 }
 
 export function EndpointStatusBadge({ status }: { status: EndpointStatus }) {

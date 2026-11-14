@@ -9,7 +9,7 @@ import { AgentUpdateDialog } from '../../components/AgentUpdateDialog';
 import { Dialog } from '../../components/Dialog';
 import { EnumSelect, OrganizationSelect, SearchInput, SiteSelect } from '../../components/Filters';
 import { MessageDialog, RestartDialog } from '../../components/RestartDialogs';
-import { ComplianceBadge, EndpointStatusBadge, OnlineBadge, OsSupportBadge } from '../../components/StatusBadges';
+import { ComplianceBadge, EndpointStatusBadge, OnlineBadge, OsSupportBadge, PlatformBadge } from '../../components/StatusBadges';
 import { useToast } from '../../components/Toast';
 import {
   Alert,
@@ -28,13 +28,13 @@ import {
   TableWrap,
   Toolbar,
 } from '../../components/ui';
-import { humanize, formatRelative } from '../../lib/format';
+import { humanize, formatRelative, osDetails } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 
 export function EndpointsPage() {
   return (
     <>
-      <PageHeader title="Endpoints" subtitle="Windows devices running the EasyPatch agent." />
+      <PageHeader title="Endpoints" subtitle="Windows and Linux devices running the EasyPatch agent." />
       <EndpointList />
     </>
   );
@@ -117,9 +117,19 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
         <Field label="OS" htmlFor="os-filter" className="min-w-36">
           <Select id="os-filter" value={url.get('os')} onChange={(e) => url.set({ os: e.target.value })}>
             <option value="">Any</option>
-            <option value="Windows 11">Windows 11</option>
-            <option value="Windows 10">Windows 10</option>
-            <option value="Windows Server">Windows Server</option>
+            <optgroup label="Windows">
+              <option value="Windows 11">Windows 11</option>
+              <option value="Windows 10">Windows 10</option>
+              <option value="Windows Server">Windows Server</option>
+            </optgroup>
+            <optgroup label="Linux">
+              <option value="Ubuntu">Ubuntu</option>
+              <option value="Debian">Debian</option>
+              <option value="Red Hat Enterprise Linux">Red Hat Enterprise Linux</option>
+              <option value="Rocky Linux">Rocky Linux</option>
+              <option value="AlmaLinux">AlmaLinux</option>
+              <option value="Oracle Linux">Oracle Linux</option>
+            </optgroup>
           </Select>
         </Field>
         <div className="flex flex-col gap-1.5 pb-1">
@@ -238,10 +248,14 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
                     {!fixedOrg && <td className="whitespace-nowrap">{e.organizationName}</td>}
                     <td className="whitespace-nowrap text-muted">{e.siteName ?? '—'}</td>
                     <td>
-                      <div className="whitespace-nowrap">{e.operatingSystem ?? 'Unknown'}</div>
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        {e.operatingSystem ?? 'Unknown'}
+                        <PlatformBadge platform={e.platform} />
+                      </div>
                       <div className="flex items-center gap-1.5 text-xs text-muted">
-                        {e.osVersion && <span>{e.osVersion}</span>}
-                        {e.osBuild && <span>build {e.osBuild}</span>}
+                        {osDetails(e).map((d) => (
+                          <span key={d}>{d}</span>
+                        ))}
                         {e.osSupportStatus !== 'Supported' && e.osSupportStatus !== 'Unknown' && <OsSupportBadge status={e.osSupportStatus} />}
                       </div>
                     </td>
@@ -330,8 +344,8 @@ function BulkInstallDialog({ open, count, loading, error, onClose, onConfirm }: 
     >
       <div className="flex flex-col gap-3 text-sm">
         <p>
-          Each endpoint receives an <strong>Install all missing updates</strong> job. The agent performs a fresh Windows Update scan and installs every update its
-          policy allows (allowed categories, optional updates and exclusions).
+          Each endpoint receives an <strong>Install all missing updates</strong> job. The agent performs a fresh update scan (Windows Update on Windows, apt or dnf
+          on Linux) and installs every update its policy allows (allowed categories, optional updates and exclusions).
         </p>
         <Alert tone="warn" title="Installing does not restart endpoints">
           Updates that need a restart are reported as <em>Pending restart</em>. Restart those endpoints with <strong>Restart…</strong> or a restart schedule in

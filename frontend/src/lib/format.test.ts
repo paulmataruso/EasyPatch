@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
   dayBoundary,
+  describeKeyProtection,
   describeSkipReason,
   describeUserAgent,
   formatBytes,
   formatDate,
   formatDays,
   formatDuration,
+  formatPackageFormat,
   formatPercent,
   formatRelative,
+  formatVersionChange,
   humanize,
+  isLinux,
   isValidTime,
   normalizeKb,
+  osDetails,
   truncate,
 } from './format';
 import { aggregateTrend } from './trend';
@@ -132,5 +137,40 @@ describe('aggregateTrend', () => {
     expect(out[1].totalEndpoints).toBe(40);
     expect(out[1].compliant).toBe(20);
     expect(out[1].compliancePercent).toBe(50);
+  });
+});
+
+describe('platforms', () => {
+  it('treats only "Linux" (any case) as Linux', () => {
+    expect(isLinux('Linux')).toBe(true);
+    expect(isLinux('linux')).toBe(true);
+    expect(isLinux('Windows')).toBe(false);
+    expect(isLinux(null)).toBe(false);
+    expect(isLinux(undefined)).toBe(false);
+  });
+  it('describes the OS version: build on Windows, kernel on Linux', () => {
+    expect(osDetails({ platform: 'Windows', operatingSystem: 'Windows 11 Pro', osVersion: '23H2', osBuild: '22631.4317' })).toEqual(['23H2', 'build 22631.4317']);
+    expect(osDetails({ platform: 'Windows', operatingSystem: null, osVersion: null, osBuild: null })).toEqual([]);
+    // VERSION_ID is dropped when PRETTY_NAME already contains it.
+    expect(osDetails({ platform: 'Linux', operatingSystem: 'Ubuntu 24.04.1 LTS', osVersion: '24.04', osBuild: '6.8.0-45-generic' })).toEqual([
+      'kernel 6.8.0-45-generic',
+    ]);
+    expect(osDetails({ platform: 'Linux', operatingSystem: 'Rocky Linux', osVersion: '9.4', osBuild: '5.14.0-427.el9.x86_64' })).toEqual([
+      '9.4',
+      'kernel 5.14.0-427.el9.x86_64',
+    ]);
+  });
+  it('describes key protection', () => {
+    expect(describeKeyProtection('systemd-creds-host')).toBe('systemd-creds (host key)');
+    expect(describeKeyProtection('file-permissions')).toBe('File permissions only');
+    expect(describeKeyProtection(null)).toBe('—');
+    expect(describeKeyProtection('something-new')).toBe('something-new');
+  });
+  it('formats package versions and formats', () => {
+    expect(formatVersionChange('3.0.13-0ubuntu3.1', '3.0.13-0ubuntu3.4')).toBe('3.0.13-0ubuntu3.1 → 3.0.13-0ubuntu3.4');
+    expect(formatVersionChange(null, '1.2-3')).toBe('1.2-3');
+    expect(formatVersionChange(null, null)).toBe('—');
+    expect(formatPackageFormat('deb')).toBe('DEB');
+    expect(formatPackageFormat(null)).toBe('—');
   });
 });

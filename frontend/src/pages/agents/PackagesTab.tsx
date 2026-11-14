@@ -3,7 +3,7 @@ import { useList } from '../../api/hooks';
 import type { AgentPackageDto, AgentVersionCountDto } from '../../api/types';
 import { CopyButton } from '../../components/Copy';
 import { Badge, buttonClasses, Card, EmptyState, ErrorState, ProgressBar, Spinner, TableWrap } from '../../components/ui';
-import { formatBytes, formatDateTime } from '../../lib/format';
+import { formatBytes, formatDateTime, formatPackageFormat } from '../../lib/format';
 
 export function PackagesTab() {
   const packages = useList<AgentPackageDto>('/agent-packages');
@@ -14,9 +14,10 @@ export function PackagesTab() {
     <div className="flex flex-col gap-5">
       <Card title="Agent packages" padded={false}>
         <p className="px-4 pt-3 text-sm text-muted">
-          MSI packages found in the server’s agent-packages directory (named <span className="font-mono">EasyPatchAgent-&lt;version&gt;-&lt;x64|arm64&gt;.msi</span>).
-          Publish a new agent version by copying the MSI and its <span className="font-mono">.sig</span> release signature there. Agents update themselves
-          only to signed packages, and check the signature against the release key built into them.
+          Agent packages found in the server’s agent-packages directory, named{' '}
+          <span className="font-mono">EasyPatchAgent-&lt;version&gt;-&lt;x64|arm64&gt;.&lt;msi|deb|rpm&gt;</span>: MSI for Windows, DEB for Debian and Ubuntu, RPM
+          for RHEL-family distributions. Publish a new agent version by copying the package and its <span className="font-mono">.sig</span> release signature
+          there. Agents update themselves only to signed packages of their own format, and check the signature against the release key built into them.
         </p>
         <div className="p-4">
           {packages.isPending ? (
@@ -25,7 +26,7 @@ export function PackagesTab() {
             <ErrorState error={packages.error} compact onRetry={() => void packages.refetch()} />
           ) : packages.page.items.length === 0 ? (
             <EmptyState title="No agent packages available" icon={<Package className="size-8" aria-hidden />}>
-              Build the MSI (see docs/agent-installation.md) and place it in the agent-packages directory on the server.
+              Build the MSI, DEB or RPM packages (see docs/agent-installation.md) and place them in the agent-packages directory on the server.
             </EmptyState>
           ) : (
             <TableWrap>
@@ -34,6 +35,7 @@ export function PackagesTab() {
                   <tr>
                     <th>File</th>
                     <th>Version</th>
+                    <th>Format</th>
                     <th>Architecture</th>
                     <th className="text-right">Size</th>
                     <th>SHA-256</th>
@@ -48,6 +50,9 @@ export function PackagesTab() {
                       <td className="font-mono text-xs whitespace-nowrap">{p.fileName}</td>
                       <td className="whitespace-nowrap">
                         {p.version} {p.isLatest && <Badge tone="ok">latest</Badge>}
+                      </td>
+                      <td>
+                        <Badge tone={p.format === 'msi' ? 'neutral' : 'info'}>{formatPackageFormat(p.format)}</Badge>
                       </td>
                       <td>{p.architecture}</td>
                       <td className="text-right whitespace-nowrap tabular-nums">{formatBytes(p.sizeBytes)}</td>
@@ -79,7 +84,7 @@ export function PackagesTab() {
                       <td className="text-right">
                         <a href={p.downloadUrl} className={buttonClasses('secondary', 'sm')} download>
                           <Download className="size-3.5" aria-hidden />
-                          MSI
+                          {formatPackageFormat(p.format)}
                         </a>
                       </td>
                     </tr>

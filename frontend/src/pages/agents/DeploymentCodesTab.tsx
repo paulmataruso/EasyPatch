@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { FileCode2, Plus, Terminal } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApi, useApiMutation, useList } from '../../api/hooks';
-import type { AgentPackageDto, CreateDeploymentCodeRequest, DeploymentCodeDto, InstallScriptResponse } from '../../api/types';
+import { AGENT_PACKAGE_FORMATS, type AgentPackageDto, type CreateDeploymentCodeRequest, type DeploymentCodeDto, type InstallScriptResponse } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { CodeBlock, DownloadButton } from '../../components/Copy';
 import { ConfirmDialog, Dialog } from '../../components/Dialog';
@@ -23,6 +23,7 @@ import {
   Select,
   Spinner,
   TableWrap,
+  Tabs,
   Textarea,
   TextField,
   Toolbar,
@@ -57,9 +58,10 @@ export function DeploymentCodesTab() {
   return (
     <>
       <Alert tone="info" className="mb-4" title="Tokenless installs for RMM tools">
-        A deployment code is not a secret. The generated PowerShell script downloads the agent, verifies its SHA-256 hash (and optionally its Authenticode
-        signature), installs it, and the endpoint then waits in <Link to="/agents?tab=approvals" className="text-accent hover:underline">Pending approvals</Link>.
-        Nothing is managed until an administrator approves it. Restrict codes to your RMM’s egress IP ranges where possible.
+        A deployment code is not a secret. The generated PowerShell script (Windows) or shell script (Linux) downloads the agent, verifies its SHA-256 hash (on
+        Windows optionally also its Authenticode signature), installs it, and the endpoint then waits in{' '}
+        <Link to="/agents?tab=approvals" className="text-accent hover:underline">Pending approvals</Link>. Nothing is managed until an administrator approves it.
+        Restrict codes to your RMM’s egress IP ranges where possible.
       </Alert>
       <Toolbar>
         <OrganizationSelect value={organizationId} onChange={(v) => url.set({ organizationId: v })} />
@@ -248,76 +250,149 @@ function CreateCodeDialog({ open, defaultOrganizationId, onClose, onCreated }: {
   );
 }
 
+type ScriptPlatform = 'windows' | 'linux';
+
 function InstallScriptDialog({ code, onClose }: { code: DeploymentCodeDto | null; onClose: () => void }) {
+  const [platform, setPlatform] = useState<ScriptPlatform>('windows');
+  return (
+    <Dialog open={code !== null} onClose={onClose} size="xl" title={code ? `Install script: ${code.name}` : ''} description={code ? `${code.organizationName}${code.siteName ? ` · ${code.siteName}` : ''} · code ${code.code}` : undefined}>
+      {code && (
+        <>
+          <Tabs
+            active={platform}
+            onChange={(id) => setPlatform(id as ScriptPlatform)}
+            tabs={[
+              { id: 'windows', label: 'Windows (PowerShell)' },
+              { id: 'linux', label: 'Linux (shell)' },
+            ]}
+          />
+          {platform === 'windows' ? <WindowsScript key={code.id} code={code} /> : <LinuxScript key={code.id} code={code} />}
+        </>
+      )}
+    </Dialog>
+  );
+}
+
+function WindowsScript({ code }: { code: DeploymentCodeDto }) {
   const [pkg, setPkg] = useState('');
   const [requireSignature, setRequireSignature] = useState(false);
-  const packages = useList<AgentPackageDto>(code ? '/agent-packages' : null);
-  useEffect(() => {
-    if (code) {
-      setPkg('');
-      setRequireSignature(false);
-    }
-  }, [code]);
-  const script = useApi<InstallScriptResponse>(code ? `/deployment-codes/${code.id}/install-script` : null, {
+  const packages = useList<AgentPackageDto>('/agent-packages');
+  const script = useApi<InstallScriptResponse>(`/deployment-codes/${code.id}/install-script`, {
     package: pkg || undefined,
     requireSignature: requireSignature || undefined,
   });
   const s = script.data;
+  // The PowerShell script installs MSI packages only.
+  const msiPackages = packages.page.items.filter((p) => (p.format ?? AGENT_PACKAGE_FORMATS.msi) === AGENT_PACKAGE_FORMATS.msi);
 
   return (
-    <Dialog open={code !== null} onClose={onClose} size="xl" title={code ? `Install script: ${code.name}` : ''} description={code ? `${code.organizationName}${code.siteName ? ` · ${code.siteName}` : ''} · code ${code.code}` : undefined}>
-      {code && (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-end gap-4">
-            <Field label="Agent package" htmlFor="script-pkg" className="min-w-64">
-              <Select id="script-pkg" value={pkg} onChange={(e) => setPkg(e.target.value)}>
-                <option value="">Latest x64 package</option>
-                {packages.page.items.map((p) => (
-                  <option key={p.fileName} value={p.fileName}>
-                    {p.fileName}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Checkbox
-              label="Require a valid Authenticode signature"
-              hint="Enable when your MSI is code-signed. The script refuses to install an unsigned or tampered package."
-              checked={requireSignature}
-              onChange={(e) => setRequireSignature(e.target.checked)}
-              className="pb-1"
-            />
-          </div>
-          {script.isPending ? (
-            <Spinner label="Generating script…" />
-          ) : script.isError ? (
-            <ErrorState error={script.error} compact onRetry={() => void script.refetch()} />
-          ) : (
-            s && (
-              <>
-                <div>
-                  <p className="mb-1 text-sm font-medium">One-liner for your RMM (run as SYSTEM or Administrator)</p>
-                  <CodeBlock code={s.oneLiner} />
-                  <p className="mt-1 text-xs text-muted">
-                    Downloads the script from <span className="font-mono">{s.scriptUrl}</span>. If your RMM can run a script file directly, use the full script below
-                    instead.
-                  </p>
-                </div>
-                <div>
-                  <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-medium">Full PowerShell script</p>
-                    <DownloadButton fileName={`EasyPatch-Install-${code.code}.ps1`} text={s.script} label="Download .ps1" />
-                  </div>
-                  <CodeBlock code={s.script} wrap={false} maxHeight="22rem" />
-                </div>
-                <p className="text-xs text-muted">
-                  Package <span className="font-mono">{s.packageFileName}</span> (version {s.packageVersion}), SHA-256 <span className="font-mono break-all">{s.sha256}</span>.
-                  The script contains no secrets.
-                </p>
-              </>
-            )
-          )}
-        </div>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-end gap-4">
+        <Field label="Agent package" htmlFor="script-pkg" className="min-w-64">
+          <Select id="script-pkg" value={pkg} onChange={(e) => setPkg(e.target.value)}>
+            <option value="">Latest x64 package</option>
+            {msiPackages.map((p) => (
+              <option key={p.fileName} value={p.fileName}>
+                {p.fileName}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Checkbox
+          label="Require a valid Authenticode signature"
+          hint="Enable when your MSI is code-signed. The script refuses to install an unsigned or tampered package."
+          checked={requireSignature}
+          onChange={(e) => setRequireSignature(e.target.checked)}
+          className="pb-1"
+        />
+      </div>
+      {script.isPending ? (
+        <Spinner label="Generating script…" />
+      ) : script.isError ? (
+        <ErrorState error={script.error} compact onRetry={() => void script.refetch()} />
+      ) : (
+        s && (
+          <>
+            <div>
+              <p className="mb-1 text-sm font-medium">One-liner for your RMM (run as SYSTEM or Administrator)</p>
+              <CodeBlock code={s.oneLiner} />
+              <p className="mt-1 text-xs text-muted">
+                Downloads the script from <span className="font-mono">{s.scriptUrl}</span>. If your RMM can run a script file directly, use the full script below
+                instead.
+              </p>
+            </div>
+            <div>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium">Full PowerShell script</p>
+                <DownloadButton fileName={`EasyPatch-Install-${code.code}.ps1`} text={s.script} label="Download .ps1" />
+              </div>
+              <CodeBlock code={s.script} wrap={false} maxHeight="22rem" />
+            </div>
+            <p className="text-xs text-muted">
+              Package <span className="font-mono">{s.packageFileName}</span> (version {s.packageVersion}), SHA-256 <span className="font-mono break-all">{s.sha256}</span>.
+              The script contains no secrets.
+            </p>
+          </>
+        )
       )}
-    </Dialog>
+    </div>
+  );
+}
+
+function LinuxScript({ code }: { code: DeploymentCodeDto }) {
+  const script = useApi<InstallScriptResponse>(`/deployment-codes/${code.id}/install-script`, { platform: 'linux' });
+  const s = script.data;
+  // For Linux the response lists every package the script can install (comma separated, in the same order).
+  const files = s ? s.packageFileName.split(', ') : [];
+  const hashes = s ? s.sha256.split(', ') : [];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted">
+        For Debian, Ubuntu, RHEL, Rocky Linux, AlmaLinux and Oracle Linux with systemd (x64 or arm64). The script picks the .deb or .rpm package for the
+        distribution and CPU, verifies its SHA-256 hash and installs it with apt or dnf.
+      </p>
+      {script.isPending ? (
+        <Spinner label="Generating script…" />
+      ) : script.isError ? (
+        <ErrorState error={script.error} compact onRetry={() => void script.refetch()} />
+      ) : (
+        s && (
+          <>
+            <div>
+              <p className="mb-1 text-sm font-medium">One-liner for your RMM or SSH session (runs as root through sudo)</p>
+              <CodeBlock code={s.oneLiner} />
+              <p className="mt-1 text-xs text-muted">
+                Downloads the script from <span className="font-mono">{s.scriptUrl}</span>. If your tool can run a script file directly, use the full script below
+                instead (run it as root).
+              </p>
+            </div>
+            <div>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium">Full shell script</p>
+                <DownloadButton fileName={`easypatch-install-${code.code}.sh`} text={s.script} label="Download .sh" mime="text/x-shellscript" />
+              </div>
+              <CodeBlock code={s.script} wrap={false} maxHeight="22rem" />
+            </div>
+            <div className="text-xs text-muted">
+              <p>Packages (version {s.packageVersion}); the script contains no secrets:</p>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {files.map((file, i) => (
+                  <li key={file}>
+                    <span className="font-mono">{file}</span>
+                    {hashes[i] && (
+                      <>
+                        {' '}
+                        SHA-256 <span className="font-mono break-all">{hashes[i]}</span>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
+        )
+      )}
+    </div>
   );
 }

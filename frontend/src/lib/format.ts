@@ -219,3 +219,51 @@ export function describeUserAgent(ua: string | null | undefined): string {
   if (browser && os) return `${browser} on ${os}`;
   return browser ?? os ?? truncate(ua, 60);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Platforms (Windows and Linux endpoints)
+// ---------------------------------------------------------------------------------------------
+
+/** True for a Linux endpoint ("Linux" platform); anything else (including a missing value) is Windows. */
+export function isLinux(platform: string | null | undefined): boolean {
+  return platform?.toLowerCase() === 'linux';
+}
+
+/**
+ * The secondary OS line: "23H2 · build 22631.4317" on Windows; "kernel 6.8.0-45-generic" on Linux, where the version
+ * (VERSION_ID) is only added when the distribution name does not already contain it.
+ */
+export function osDetails(os: { platform: string; operatingSystem: string | null; osVersion: string | null; osBuild: string | null }): string[] {
+  if (isLinux(os.platform)) {
+    const version = os.osVersion && !(os.operatingSystem ?? '').includes(os.osVersion) ? os.osVersion : null;
+    return [version, os.osBuild && `kernel ${os.osBuild}`].filter((v): v is string => !!v);
+  }
+  return [os.osVersion, os.osBuild && `build ${os.osBuild}`].filter((v): v is string => !!v);
+}
+
+/** How a Linux agent protects its private key (LinuxDetailsDto.keyProtection). */
+export function describeKeyProtection(value: string | null | undefined): string {
+  switch (value) {
+    case 'systemd-creds-host':
+      return 'systemd-creds (host key)';
+    case 'file-permissions':
+      return 'File permissions only';
+    case null:
+    case undefined:
+    case '':
+      return '—';
+    default:
+      return value;
+  }
+}
+
+/** "1.2-1 → 1.2-2"; only the new version when the installed one is unknown. */
+export function formatVersionChange(installed: string | null | undefined, version: string | null | undefined): string {
+  if (installed && version) return `${installed} → ${version}`;
+  return version || installed || '—';
+}
+
+/** Agent package format for display: "msi" → "MSI", "deb" → "DEB", "rpm" → "RPM". */
+export function formatPackageFormat(format: string | null | undefined): string {
+  return format ? format.toUpperCase() : '—';
+}

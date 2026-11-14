@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { Download, ExternalLink } from 'lucide-react';
 import { api } from '../../api/client';
@@ -7,6 +7,7 @@ import { ENDPOINT_UPDATE_STATES, type BulkResultDto, type FleetUpdateDetailDto, 
 import { useAuth } from '../../auth/AuthContext';
 import { Dialog } from '../../components/Dialog';
 import { EnumSelect, OrganizationSelect, SiteSelect } from '../../components/Filters';
+import { Advisories } from '../../components/PackageInfo';
 import { CategoryBadge, OnlineBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
 import { Alert, Badge, Button, Card, EmptyState, ErrorState, InlineError, KeyValueList, PageHeader, Pagination, Spinner, StatTile, TableWrap, Toolbar } from '../../components/ui';
 import { formatBytes, formatDate, formatRelative, humanize } from '../../lib/format';
@@ -34,6 +35,7 @@ export function UpdateDetailPage() {
   if (detail.isError) return <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />;
   const d = detail.data;
   const s = d.summary;
+  const pkg = s.package;
   const installable = (e: FleetUpdateEndpointDto) => (e.state === 'Missing' || e.state === 'Failed') && !e.isExcluded;
   const rows = endpoints.page.items;
   const selectable = rows.filter(installable);
@@ -46,7 +48,14 @@ export function UpdateDetailPage() {
         title={s.title}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
-            {d.kbNumbers.length > 0 && <span className="font-mono">{d.kbNumbers.join(', ')}</span>}
+            {pkg ? (
+              <span className="font-mono">
+                {pkg.name}
+                {pkg.architecture && ` (${pkg.architecture})`}
+              </span>
+            ) : (
+              d.kbNumbers.length > 0 && <span className="font-mono">{d.kbNumbers.join(', ')}</span>
+            )}
             <CategoryBadge category={s.category} />
             <SeverityBadge severity={s.msrcSeverity} />
             {d.rebootLikely && <Badge tone="info">Restart likely</Badge>}
@@ -72,9 +81,18 @@ export function UpdateDetailPage() {
         <KeyValueList
           items={[
             ['Description', d.description],
+            ...(pkg
+              ? ([
+                  ['Package', <span className="font-mono">{pkg.name}</span>],
+                  ['Version', pkg.version ? <span className="font-mono">{pkg.version}</span> : null],
+                  ['Architecture', pkg.architecture],
+                  ['Repository', pkg.repository],
+                  ['Advisories', pkg.advisories.length ? <Advisories advisories={pkg.advisories} max={pkg.advisories.length} /> : 'None reported'],
+                ] as [ReactNode, ReactNode][])
+              : []),
             ['Released', formatDate(s.releaseDate)],
             ['Download size', formatBytes(s.sizeBytes)],
-            ['Microsoft classification', d.msClassification],
+            ...(pkg ? [] : ([['Microsoft classification', d.msClassification]] as [ReactNode, ReactNode][])),
             ['Products', d.products.join(', ') || null],
             ['Supersedes', d.supersededUpdateGuids.length ? `${d.supersededUpdateGuids.length} older update(s)` : null],
             [

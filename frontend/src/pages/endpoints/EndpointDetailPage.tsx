@@ -3,13 +3,13 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { ArrowUpCircle, Ban, Download, MessageSquare, MoreHorizontal, Pencil, Power, RefreshCw, ScanSearch, Trash2, WifiOff } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
 import { useApi, useApiMutation, useSites } from '../../api/hooks';
-import { ESU_OVERRIDES, type EndpointDetailDto, type EsuOverride, type UpdateEndpointRequest } from '../../api/types';
+import { AGENT_CAPABILITIES, ESU_OVERRIDES, type EndpointDetailDto, type EsuOverride, type UpdateEndpointRequest } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AgentUpdateDialog } from '../../components/AgentUpdateDialog';
 import { ConfirmDialog, Dialog } from '../../components/Dialog';
 import { InstallUpdatesDialog, jobIdOf } from '../../components/InstallDialog';
 import { MessageDialog, RestartDialog } from '../../components/RestartDialogs';
-import { ComplianceBadge, EndpointStatusBadge, JobStatusBadge, OnlineBadge, OsSupportBadge } from '../../components/StatusBadges';
+import { ComplianceBadge, EndpointStatusBadge, JobStatusBadge, OnlineBadge, OsSupportBadge, PlatformBadge } from '../../components/StatusBadges';
 import { useToast } from '../../components/Toast';
 import {
   Alert,
@@ -26,7 +26,7 @@ import {
   Tabs,
   Textarea,
 } from '../../components/ui';
-import { formatDateTime, formatRelative, humanize } from '../../lib/format';
+import { formatDateTime, formatPackageFormat, formatRelative, humanize, isLinux, osDetails } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 import { ActivityTab, EffectivePolicyTab, HistoryTab, InstalledTab, JobsTab, OverviewTab, UpdatesTab } from './EndpointTabs';
 
@@ -48,6 +48,8 @@ export function EndpointDetailPage() {
   const e = endpoint.data;
   const s = e.summary;
   const managed = s.status === 'Active';
+  const linux = isLinux(s.platform);
+  const details = osDetails(s);
 
   return (
     <>
@@ -70,7 +72,11 @@ export function EndpointDetailPage() {
         subtitle={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <OnlineBadge online={s.isOnline} lastSeen={s.lastCheckInAt} />
-            <span>{s.operatingSystem ?? 'Unknown OS'}{s.osVersion ? ` ${s.osVersion}` : ''}{s.osBuild ? ` (build ${s.osBuild})` : ''}</span>
+            <PlatformBadge platform={s.platform} />
+            <span>
+              {s.operatingSystem ?? 'Unknown OS'}
+              {details.length > 0 ? ` (${details.join(', ')})` : ''}
+            </span>
             <OsSupportBadge status={s.osSupportStatus} />
             <span>Last check-in {formatRelative(s.lastCheckInAt)}</span>
             {s.currentActivity && <span className="text-accent">{s.currentActivity}</span>}
@@ -89,7 +95,7 @@ export function EndpointDetailPage() {
           <Alert tone="info" title={`Restart pending${e.rebootPendingSince ? ` since ${formatDateTime(e.rebootPendingSince)}` : ''}`}>
             <p>
               {e.pendingRebootUpdateCount > 0 && `${e.pendingRebootUpdateCount} installed update${e.pendingRebootUpdateCount === 1 ? '' : 's'} take effect after a restart. `}
-              {e.rebootReasons.length > 0 && <>Reported by Windows: {e.rebootReasons.join(', ')}. </>}
+              {e.rebootReasons.length > 0 && <>Reported by {linux ? 'the operating system' : 'Windows'}: {e.rebootReasons.join(', ')}. </>}
             </p>
             <p className="mt-1">
               <Power className="mr-1 inline size-3.5" aria-hidden />
@@ -140,8 +146,8 @@ export function EndpointDetailPage() {
       />
       {tab === 'overview' && <OverviewTab endpoint={e} />}
       {tab === 'updates' && <UpdatesTab endpoint={e} onInstallSelected={(guids) => setInstall({ mode: 'Selected', guids })} onInstallAll={() => setInstall({ mode: 'AllEligible' })} />}
-      {tab === 'installed' && <InstalledTab endpointId={e.summary.id} />}
-      {tab === 'history' && <HistoryTab endpointId={e.summary.id} />}
+      {tab === 'installed' && <InstalledTab endpointId={e.summary.id} linux={linux} />}
+      {tab === 'history' && <HistoryTab endpointId={e.summary.id} linux={linux} />}
       {tab === 'jobs' && <JobsTab endpointId={e.summary.id} />}
       {tab === 'activity' && <ActivityTab endpointId={e.summary.id} />}
       {tab === 'policy' && <EffectivePolicyTab endpoint={e} />}
@@ -162,7 +168,8 @@ export function EndpointDetailPage() {
 /** "Updates automatically", "1.3.0 available", or why the agent cannot update itself. */
 function agentHint(e: EndpointDetailDto): ReactNode {
   const u = e.agentUpdate;
-  if (!u?.supported) return e.summary.agentOutdated ? 'Newer version available (install the MSI once)' : undefined;
+  const pkg = u?.packageFormat ? `${formatPackageFormat(u.packageFormat)} package` : isLinux(e.summary.platform) ? 'package' : 'MSI';
+  if (!u?.supported) return e.summary.agentOutdated ? `Newer version available (install the ${pkg} once)` : undefined;
   if (u.availableVersion) return u.automaticUpdates ? `Updating to ${u.availableVersion} automatically` : `${u.availableVersion} available`;
   if (u.code === 'agent_up_to_date') return u.automaticUpdates ? 'Up to date, updates automatically' : 'Up to date';
   return <span className="text-warn" title={u.message ?? undefined}>Update not possible</span>;
@@ -209,6 +216,12 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
   const navigate = useNavigate();
   const [menu, setMenu] = useState(false);
   const [dialog, setDialog] = useState<'edit' | 'revoke' | 'delete' | 'message' | 'agent-update' | null>(null);
+  const canNotify = endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.notifyUser);
+  const notifyHint = canNotify
+    ? undefined
+    : isLinux(s.platform)
+      ? 'Linux agents have no EasyPatch tray, so they cannot show messages to users.'
+      : 'This agent cannot show messages. Install EasyPatch agent 1.1.0 or later.';
 
   const queueJob = useApiMutation((kind: 'scan' | 'inventory-refresh') => api.post<unknown>(`/endpoints/${s.id}/${kind}`), {
     invalidate: [`/endpoints/${s.id}`, '/jobs'],
@@ -274,7 +287,7 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
               <MenuItem icon={<Power className="size-4" aria-hidden />} onClick={() => { setMenu(false); onRestart(); }}>
                 Restart…
               </MenuItem>
-              <MenuItem icon={<MessageSquare className="size-4" aria-hidden />} onClick={() => { setMenu(false); setDialog('message'); }}>
+              <MenuItem icon={<MessageSquare className="size-4" aria-hidden />} disabled={!canNotify} hint={notifyHint} onClick={() => { setMenu(false); setDialog('message'); }}>
                 Send message to users…
               </MenuItem>
               <MenuItem icon={<RefreshCw className="size-4" aria-hidden />} onClick={() => { setMenu(false); queueJob.mutate('inventory-refresh'); }}>
@@ -330,13 +343,23 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
   );
 }
 
-function MenuItem({ children, icon, onClick, danger }: { children: string; icon: ReactNode; onClick: () => void; danger?: boolean }) {
+function MenuItem({ children, icon, onClick, danger, disabled, hint }: {
+  children: string;
+  icon: ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+  /** Tooltip, e.g. why the item is disabled. */
+  hint?: string;
+}) {
   return (
     <button
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-hover ${danger ? 'text-danger' : 'text-fg'}`}
+      disabled={disabled}
+      title={hint}
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-hover disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent ${danger ? 'text-danger' : 'text-fg'}`}
     >
       {icon}
       {children}
@@ -381,14 +404,18 @@ function EditEndpointDialog({ endpoint, open, onClose }: { endpoint: EndpointDet
           </Select>
         </Field>
         <Field
-          label="Extended Security Updates (ESU)"
+          label={isLinux(s.platform) ? 'Extended security maintenance (Ubuntu Pro ESM)' : 'Extended Security Updates (ESU)'}
           htmlFor="ep-esu"
-          hint={`Detected automatically: ${endpoint.esuLicenseDetected ? 'ESU license found' : 'no ESU license found'}. Override only if detection is wrong.`}
+          hint={
+            isLinux(s.platform)
+              ? `Detected automatically on Ubuntu: ${endpoint.esuLicenseDetected ? 'Ubuntu Pro ESM services enabled' : 'no Ubuntu Pro ESM services found'}. Override only if detection is wrong.`
+              : `Detected automatically: ${endpoint.esuLicenseDetected ? 'ESU license found' : 'no ESU license found'}. Override only if detection is wrong.`
+          }
         >
           <Select id="ep-esu" value={form.esuOverride ?? 'Auto'} onChange={(e) => setForm({ ...form, esuOverride: e.target.value as EsuOverride })}>
             {ESU_OVERRIDES.map((o) => (
               <option key={o} value={o}>
-                {o === 'Auto' ? 'Automatic detection' : o === 'Enrolled' ? 'Enrolled in ESU' : 'Not enrolled'}
+                {o === 'Auto' ? 'Automatic detection' : o === 'Enrolled' ? (isLinux(s.platform) ? 'Enrolled in extended support' : 'Enrolled in ESU') : 'Not enrolled'}
               </option>
             ))}
           </Select>

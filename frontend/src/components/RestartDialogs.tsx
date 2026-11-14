@@ -13,7 +13,7 @@ import {
   type UserMessagePreset,
   type UserMessagePresetDto,
 } from '../api/types';
-import { formatDuration } from '../lib/format';
+import { formatDuration, isLinux } from '../lib/format';
 import { Dialog } from './Dialog';
 import { jobIdOf } from './InstallDialog';
 import { EXPIRY_OPTIONS, RestartModeFields } from './PolicySections';
@@ -201,7 +201,7 @@ export function RestartDialog({ target, onClose, onBulkResult }: {
           }}
         />
         <Checkbox
-          label="Only if Windows reports a pending restart"
+          label="Only if the operating system reports a pending restart"
           hint="The agent checks when the job arrives and completes without restarting if nothing is pending."
           checked={onlyIfPending}
           onChange={(e) => setOnlyIfPending(e.target.checked)}
@@ -239,6 +239,14 @@ export function SessionSummary({ endpoint }: { endpoint: EndpointDetailDto }) {
   const trays = endpoint.trayConnectedSessions ?? 0;
   if (users === null) return <p className="text-xs text-muted">Signed-in users: unknown until the agent reports.</p>;
   if (users === 0) return <p className="text-xs text-muted">Nobody is signed in.</p>;
+  if (isLinux(endpoint.summary.platform) && !endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.tray)) {
+    return (
+      <p className="text-xs text-muted">
+        {users} signed-in user{users === 1 ? '' : 's'}. Linux agents have no EasyPatch tray: countdowns and deadlines warn users through the system's
+        shutdown messages, and “Ask users, no deadline” cannot be answered.
+      </p>
+    );
+  }
   return (
     <p className={cx('text-xs', trays < users ? 'text-warn' : 'text-muted')}>
       {users} signed-in user{users === 1 ? '' : 's'}; the EasyPatch tray is running in {trays} of {users} session{users === 1 ? '' : 's'}.
@@ -314,8 +322,13 @@ export function MessageDialog({ target, onClose, onBulkResult }: {
       <div className="flex flex-col gap-4 text-sm">
         {unsupported && (
           <Alert tone="danger" title="This agent cannot show messages">
-            Install EasyPatch agent 1.1.0 or later on this endpoint.
+            {endpoint && isLinux(endpoint.summary.platform)
+              ? 'Linux agents have no EasyPatch tray, so they cannot show messages to users.'
+              : 'Install EasyPatch agent 1.1.0 or later on this endpoint.'}
           </Alert>
+        )}
+        {target?.kind === 'bulk' && (
+          <p className="text-muted">Endpoints whose agent cannot show messages (Linux agents and agents older than 1.1.0) are skipped and listed in the results.</p>
         )}
         {endpoint && !unsupported && <SessionSummary endpoint={endpoint} />}
         {presets.isPending ? (

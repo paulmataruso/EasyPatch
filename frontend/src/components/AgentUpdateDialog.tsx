@@ -3,6 +3,7 @@ import { ArrowUpCircle } from 'lucide-react';
 import { ApiError, api } from '../api/client';
 import { useApiMutation } from '../api/hooks';
 import type { AgentUpdateRequest, BulkAgentUpdateRequest, BulkResultDto } from '../api/types';
+import { formatPackageFormat, isLinux } from '../lib/format';
 import { Dialog } from './Dialog';
 import { jobIdOf } from './InstallDialog';
 import type { RestartTarget } from './RestartDialogs';
@@ -18,6 +19,7 @@ export function AgentUpdateDialog({ target, onClose, onBulkResult }: {
   const toast = useToast();
   const endpoint = target?.kind === 'endpoint' ? target.endpoint : null;
   const info = endpoint?.agentUpdate ?? null;
+  const linux = endpoint !== null && isLinux(endpoint.summary.platform);
 
   const update = useApiMutation(
     () =>
@@ -85,7 +87,7 @@ export function AgentUpdateDialog({ target, onClose, onBulkResult }: {
         {endpoint && info?.availableVersion && (
           <p>
             EasyPatch Agent <span className="font-mono">{endpoint.summary.agentVersion ?? '—'}</span> will be updated to{' '}
-            <span className="font-mono">{info.availableVersion}</span> ({info.architecture}).
+            <span className="font-mono">{info.availableVersion}</span> ({[info.architecture, info.packageFormat && `${formatPackageFormat(info.packageFormat)} package`].filter(Boolean).join(', ')}).
           </p>
         )}
         {endpoint && !endpoint.summary.isOnline && info?.availableVersion && (
@@ -93,14 +95,24 @@ export function AgentUpdateDialog({ target, onClose, onBulkResult }: {
         )}
         {target?.kind === 'bulk' && (
           <p>
-            Each endpoint gets its own job and installs the newest signed agent package for its architecture. Endpoints that are up to date, older than 1.2.0
+            Each endpoint gets its own job and installs the newest signed agent package for its architecture and package format (MSI, DEB or RPM). Endpoints that are up to date, older than 1.2.0
             (those need one manual install), or that do not trust the package's release key are skipped and listed in the results.
           </p>
         )}
         <p className="text-muted">
-          The agent checks the package's release signature against the key built into it, downloads the package from this server, checks its hash and lets
-          Windows Installer replace it. The agent service restarts and the tray icon disappears for a moment; the computer is not restarted and nobody is
-          asked anything. The job completes when the new version checks in, and fails if the old version comes back.
+          {linux ? (
+            <>
+              The agent checks the package's release signature against the key built into it, downloads the package from this server, checks its hash and
+              installs it with apt or dnf. The agent service restarts; the computer is not restarted and nobody is asked anything.
+            </>
+          ) : (
+            <>
+              The agent checks the package's release signature against the key built into it, downloads the package from this server, checks its hash and lets
+              {target?.kind === 'bulk' ? ' Windows Installer (or apt/dnf on Linux)' : ' Windows Installer'} replace it. The agent service restarts and the tray icon
+              disappears for a moment; the computer is not restarted and nobody is asked anything.
+            </>
+          )}{' '}
+          The job completes when the new version checks in, and fails if the old version comes back.
         </p>
         {duplicate ? <Alert tone="warn">An agent update is already queued or running for this endpoint.</Alert> : <InlineError error={update.error} />}
       </div>

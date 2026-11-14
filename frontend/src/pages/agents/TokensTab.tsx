@@ -42,8 +42,9 @@ export function TokensTab() {
   return (
     <>
       <Alert tone="info" className="mb-4">
-        Enrollment tokens are secrets for <code>msiexec</code> or Group Policy installs. Endpoints enrolled with a token are active immediately. Tokens are stored
-        hashed, expire, and are limited to a number of uses. For RMM scripts without a secret, use a deployment code instead.
+        Enrollment tokens are secrets for <code>msiexec</code> or Group Policy installs on Windows, and for <code>easypatch-agent enroll</code> on Linux. Endpoints
+        enrolled with a token are active immediately. Tokens are stored hashed, expire, and are limited to a number of uses. For RMM scripts without a secret, use
+        a deployment code instead.
       </Alert>
       <Toolbar>
         <OrganizationSelect value={organizationId} onChange={(v) => url.set({ organizationId: v })} />
@@ -211,7 +212,7 @@ function CreatedTokensDialog({ tokens, onClose }: { tokens: CreatedTokenDto[] | 
   useEffect(() => {
     if (tokens) setSaved(false);
   }, [tokens]);
-  const text = (tokens ?? []).map((t) => `${t.plaintextToken}\t${t.msiExecCommand}`).join('\n');
+  const text = (tokens ?? []).map((t) => `${t.plaintextToken}\t${t.msiExecCommand}\t${t.linuxEnrollCommand ?? ''}`).join('\n');
   return (
     <Dialog
       open={tokens !== null}
@@ -237,7 +238,7 @@ function CreatedTokensDialog({ tokens, onClose }: { tokens: CreatedTokenDto[] | 
           {tokens.length > 1 && (
             <div className="flex gap-2">
               <CopyButton text={tokens.map((t) => t.plaintextToken).join('\n')} label="Copy all tokens" />
-              <DownloadButton fileName="easypatch-enrollment-tokens.tsv" text={`token\tmsiexec\n${text}\n`} label="Download (TSV)" mime="text/tab-separated-values" />
+              <DownloadButton fileName="easypatch-enrollment-tokens.tsv" text={`token\tmsiexec\tlinux\n${text}\n`} label="Download (TSV)" mime="text/tab-separated-values" />
             </div>
           )}
           {tokens.map((t, i) => (
@@ -246,8 +247,17 @@ function CreatedTokensDialog({ tokens, onClose }: { tokens: CreatedTokenDto[] | 
                 Token {tokens.length > 1 ? `${i + 1} ` : ''}· expires {formatDateTime(t.token.expiresAt)} · {t.token.maxUses} use{t.token.maxUses === 1 ? '' : 's'}
               </p>
               <CodeBlock code={t.plaintextToken} />
-              <p className="text-xs text-muted">Silent install command (run as administrator; download the MSI from the Agent packages tab):</p>
+              <p className="text-xs text-muted">Windows: silent install command (run as administrator; download the MSI from the Agent packages tab):</p>
               <CodeBlock code={t.msiExecCommand} />
+              {t.linuxEnrollCommand && (
+                <>
+                  <p className="text-xs text-muted">
+                    Linux: install the .deb or .rpm package from the Agent packages tab, then enroll (the token is piped in, so it does not appear in the process
+                    list):
+                  </p>
+                  <CodeBlock code={t.linuxEnrollCommand} />
+                </>
+              )}
             </div>
           ))}
         </div>

@@ -3,6 +3,7 @@ import { PackageCheck } from 'lucide-react';
 import { useList } from '../../api/hooks';
 import { ENDPOINT_UPDATE_STATES, UPDATE_CATEGORIES, type FleetUpdateDto } from '../../api/types';
 import { EnumSelect, OrganizationSelect, SearchInput, SiteSelect } from '../../components/Filters';
+import { PackageFacts } from '../../components/PackageInfo';
 import { CategoryBadge, SeverityBadge } from '../../components/StatusBadges';
 import { EmptyState, ErrorState, PageHeader, Pagination, SortHeader, Spinner, TableWrap, Toolbar } from '../../components/ui';
 import { formatBytes, formatDate, formatNumber, humanize } from '../../lib/format';
@@ -33,7 +34,7 @@ export function UpdatesPage() {
     <>
       <PageHeader title="Update Management" subtitle="Every update reported by your endpoints, aggregated across the fleet." />
       <Toolbar>
-        <SearchInput value={url.get('search')} onChange={(v) => url.set({ search: v })} placeholder="Title or KB number" />
+        <SearchInput value={url.get('search')} onChange={(v) => url.set({ search: v })} placeholder="Title, KB or package" />
         <OrganizationSelect value={organizationId} onChange={(v) => url.set({ organizationId: v, siteId: null })} />
         <SiteSelect organizationId={organizationId} value={url.get('siteId')} onChange={(v) => url.set({ siteId: v })} />
         <EnumSelect label="Category" value={url.get('category')} onChange={(v) => url.set({ category: v })} options={UPDATE_CATEGORIES} format={humanize} />
@@ -45,7 +46,7 @@ export function UpdatesPage() {
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : list.page.items.length === 0 ? (
         <EmptyState title="No updates found" icon={<PackageCheck className="size-8" aria-hidden />}>
-          Updates appear after endpoints complete a Windows Update scan.
+          Updates appear after endpoints complete an update scan (Windows Update, or apt/dnf on Linux).
         </EmptyState>
       ) : (
         <>
@@ -74,7 +75,11 @@ export function UpdatesPage() {
                         <Link to={to} className="font-medium hover:text-accent" onClick={(e) => e.stopPropagation()}>
                           {u.title}
                         </Link>
-                        {u.kbNumber && <div className="font-mono text-xs text-muted">{u.kbNumber}</div>}
+                        {u.package ? (
+                          <PackageFacts pkg={u.package} />
+                        ) : (
+                          u.kbNumber && <div className="font-mono text-xs text-muted">{u.kbNumber}</div>
+                        )}
                       </td>
                       <td>
                         <CategoryBadge category={u.category} />

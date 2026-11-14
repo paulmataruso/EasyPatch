@@ -19,7 +19,7 @@ export function AgentManagementPage() {
         title="Agent Management"
         subtitle={
           canOperate
-            ? 'Deploy the EasyPatch agent with enrollment tokens (msiexec) or tokenless deployment codes (RMM scripts with approval).'
+            ? 'Deploy the EasyPatch agent with enrollment tokens (msiexec on Windows, easypatch-agent enroll on Linux) or tokenless deployment codes (RMM scripts with approval).'
             : 'Enrollment tokens, deployment codes, pending approvals and agent packages.'
         }
       />

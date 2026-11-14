@@ -98,7 +98,7 @@ interface NumberSpec {
 
 const NUMBER_FIELDS: NumberSpec[] = [
   { key: 'checkInIntervalSeconds', label: 'Check-in interval', unit: 'seconds', min: 15, max: 3600, hint: 'How often idle agents contact the server. Agents with an active job check in every 15 s.' },
-  { key: 'scanIntervalMinutes', label: 'Scan interval', unit: 'minutes', min: 30, max: 10080, hint: 'How often agents run a Windows Update scan.' },
+  { key: 'scanIntervalMinutes', label: 'Scan interval', unit: 'minutes', min: 30, max: 10080, hint: 'How often agents scan for updates (Windows Update, or apt/dnf on Linux).' },
   { key: 'inventoryIntervalMinutes', label: 'Inventory interval', unit: 'minutes', min: 60, max: 10080, hint: 'How often agents report OS and hardware inventory.' },
   { key: 'jitterPercent', label: 'Jitter', unit: '%', min: 0, max: 50, hint: 'Randomizes intervals so endpoints do not all check in together.' },
   { key: 'scanStaleAfterHours', label: 'Scan considered stale after', unit: 'hours', min: 1, max: 720, hint: 'Endpoints without a successful scan for this long are reported as Scan stale.' },
@@ -116,6 +116,7 @@ export function PolicyEditor({
   onSave,
   onReset,
   timeZone,
+  linux = false,
 }: {
   scope: PolicyScope;
   policy: PolicyDto | null;
@@ -128,6 +129,8 @@ export function PolicyEditor({
   /** Removes this policy layer (everything inherits). Not offered for the global policy. */
   onReset?: () => void;
   timeZone?: string;
+  /** Endpoint policy for a Linux endpoint: hides the tray and Windows Update settings, which Linux agents do not use. */
+  linux?: boolean;
 }) {
   const isGlobal = scope === 'Global';
   const isEndpoint = scope === 'Endpoint';
@@ -249,7 +252,10 @@ export function PolicyEditor({
 
           <div>
             <p className="text-sm font-medium">Excluded KBs</p>
-            <p className="text-xs text-muted">Never installed by EasyPatch at this scope or below. Use for updates with known problems.</p>
+            <p className="text-xs text-muted">
+              Never installed by EasyPatch at this scope or below. Use for updates with known problems.
+              {linux && ' KB exclusions apply to Windows updates only; exclude a Linux package update on the endpoint’s Updates tab.'}
+            </p>
             {!isGlobal && inherited && inherited.excludedKbs.length > 0 && (
               <p className="mt-1 text-xs text-muted">Inherited: {inherited.excludedKbs.join(', ')}</p>
             )}
@@ -367,32 +373,34 @@ export function PolicyEditor({
         </Row>
       </Card>
 
-      <Card title="User experience">
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-          <BoolRow
-            label="EasyPatch icon in the notification area"
-            hint="When hidden, the icon appears only while a message or a restart request is shown."
-            value={form.trayIconEnabled}
-            inherited={isGlobal ? true : (inherited?.trayIconEnabled ?? true)}
-            isGlobal={isGlobal}
-            readOnly={readOnly}
-            onChange={(v) => update('trayIconEnabled', v)}
-            onLabel="Show"
-            offLabel="Hide"
-          />
-          <BoolRow
-            label="Installation notifications"
-            hint="Tell signed-in users when updates start installing and when they have finished (or need a restart)."
-            value={form.installNotificationsEnabled}
-            inherited={isGlobal ? true : (inherited?.installNotificationsEnabled ?? true)}
-            isGlobal={isGlobal}
-            readOnly={readOnly}
-            onChange={(v) => update('installNotificationsEnabled', v)}
-            onLabel="On"
-            offLabel="Off"
-          />
-        </div>
-      </Card>
+      {!linux && (
+        <Card title="User experience">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            <BoolRow
+              label="EasyPatch icon in the notification area"
+              hint="When hidden, the icon appears only while a message or a restart request is shown."
+              value={form.trayIconEnabled}
+              inherited={isGlobal ? true : (inherited?.trayIconEnabled ?? true)}
+              isGlobal={isGlobal}
+              readOnly={readOnly}
+              onChange={(v) => update('trayIconEnabled', v)}
+              onLabel="Show"
+              offLabel="Hide"
+            />
+            <BoolRow
+              label="Installation notifications"
+              hint="Tell signed-in users when updates start installing and when they have finished (or need a restart)."
+              value={form.installNotificationsEnabled}
+              inherited={isGlobal ? true : (inherited?.installNotificationsEnabled ?? true)}
+              isGlobal={isGlobal}
+              readOnly={readOnly}
+              onChange={(v) => update('installNotificationsEnabled', v)}
+              onLabel="On"
+              offLabel="Off"
+            />
+          </div>
+        </Card>
+      )}
 
       <Card title="EasyPatch agent">
         <BoolRow
@@ -408,15 +416,17 @@ export function PolicyEditor({
         />
       </Card>
 
-      <Card title="Windows Update settings">
-        <WindowsUpdateSection
-          value={form.windowsUpdate}
-          inherited={inherited?.windowsUpdate ?? null}
-          isGlobal={isGlobal}
-          readOnly={readOnly}
-          onChange={(v) => update('windowsUpdate', v)}
-        />
-      </Card>
+      {!linux && (
+        <Card title="Windows Update settings">
+          <WindowsUpdateSection
+            value={form.windowsUpdate}
+            inherited={inherited?.windowsUpdate ?? null}
+            isGlobal={isGlobal}
+            readOnly={readOnly}
+            onChange={(v) => update('windowsUpdate', v)}
+          />
+        </Card>
+      )}
 
       <Card title="Compliance and limits">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { Ban, CheckCircle2, Download, ExternalLink, EyeOff, Pencil, ShieldCheck } from 'lucide-react';
+import { Ban, CheckCircle2, Download, ExternalLink, EyeOff, History, Pencil, ShieldCheck } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApi, useApiMutation, useList, usePolicy } from '../../api/hooks';
 import {
@@ -23,6 +23,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { Dialog } from '../../components/Dialog';
 import { EnumSelect } from '../../components/Filters';
 import { JobTable } from '../../components/JobTable';
+import { PackageFacts } from '../../components/PackageInfo';
 import { PolicyEditor, resolveInherited } from '../../components/PolicyEditor';
 import { describeRestartSchedule, describeWindowsUpdateGroup, WU_GROUPS } from '../../components/PolicySections';
 import { SessionSummary } from '../../components/RestartDialogs';
@@ -45,7 +46,19 @@ import {
   TextField,
   Toolbar,
 } from '../../components/ui';
-import { formatBytes, formatDate, formatDateTime, formatDays, formatDuration, formatRelative, humanize } from '../../lib/format';
+import {
+  describeKeyProtection,
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatDays,
+  formatDuration,
+  formatPackageFormat,
+  formatRelative,
+  formatVersionChange,
+  humanize,
+  isLinux,
+} from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 
 // ---------------------------------------------------------------------------------------------
@@ -54,74 +67,66 @@ import { useUrlState } from '../../lib/urlState';
 
 export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
   const s = e.summary;
+  const linux = isLinux(s.platform);
   const yesNo = (v: boolean | null) => (v === null ? '—' : v ? 'Yes' : 'No');
-  const wsus = e.updateSourceType?.toLowerCase().includes('wsus');
   const diskLow = e.systemDriveFreeBytes !== null && e.systemDriveFreeBytes < 10 * 1024 ** 3;
-  const auOff = e.windowsUpdateServiceStartMode?.toLowerCase() === 'disabled';
+  const lastScanItems: [ReactNode, ReactNode][] = [
+    ['Last scan', s.lastScanAt ? `${formatDateTime(s.lastScanAt)} (${formatRelative(s.lastScanAt)})` : 'Never'],
+    ['Last scan attempt', formatDateTime(e.lastScanAttemptAt)],
+  ];
+  const supportStatus: [ReactNode, ReactNode] = [
+    'Support status',
+    <span className="flex flex-wrap items-center gap-2">
+      {humanize(s.osSupportStatus)}
+      {e.osEndOfServicing && <span className="text-muted">end of servicing {formatDate(e.osEndOfServicing)}</span>}
+    </span>,
+  ];
+  const esuOverride = e.esuOverride !== 'Auto' ? ` (override: ${humanize(e.esuOverride)})` : '';
+  const lastBoot: [ReactNode, ReactNode] = ['Last boot', e.lastBootAt ? `${formatDateTime(e.lastBootAt)} (${formatRelative(e.lastBootAt)})` : null];
 
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
       <Card title="Operating system">
         <KeyValueList
-          items={[
-            ['Operating system', s.operatingSystem],
-            ['Edition', e.osEdition],
-            ['Version / build', [s.osVersion, s.osBuild && `build ${s.osBuild}`].filter(Boolean).join(' · ') || null],
-            ['Product type', e.osProductType],
-            ['Architecture', s.architecture],
-            ['Installed', formatDate(e.osInstallDate)],
-            [
-              'Support status',
-              <span className="flex flex-wrap items-center gap-2">
-                {humanize(s.osSupportStatus)}
-                {e.osEndOfServicing && <span className="text-muted">end of servicing {formatDate(e.osEndOfServicing)}</span>}
-              </span>,
-            ],
-            ['ESU', `${e.esuLicenseDetected ? 'License detected' : 'No license detected'}${e.esuOverride !== 'Auto' ? ` (override: ${humanize(e.esuOverride)})` : ''}`],
-            ['Last boot', e.lastBootAt ? `${formatDateTime(e.lastBootAt)} (${formatRelative(e.lastBootAt)})` : null],
-            ['Time zone', e.timeZoneId],
-          ]}
+          items={
+            linux
+              ? [
+                  ['Operating system', s.operatingSystem],
+                  ['Distribution', [e.linux?.osId, e.linux?.osVersion ?? s.osVersion].filter(Boolean).join(' ') || null],
+                  ['Kernel', e.linux?.kernelVersion ?? s.osBuild],
+                  ['Product type', e.osProductType],
+                  ['Architecture', s.architecture],
+                  supportStatus,
+                  ...(e.linux?.osId === 'ubuntu' || e.esuLicenseDetected || e.esuOverride !== 'Auto'
+                    ? [['Ubuntu Pro (ESM)', `${e.esuLicenseDetected ? 'ESM services enabled' : 'Not detected'}${esuOverride}`] as [ReactNode, ReactNode]]
+                    : []),
+                  lastBoot,
+                  ['Time zone', e.timeZoneId],
+                ]
+              : [
+                  ['Operating system', s.operatingSystem],
+                  ['Edition', e.osEdition],
+                  ['Version / build', [s.osVersion, s.osBuild && `build ${s.osBuild}`].filter(Boolean).join(' · ') || null],
+                  ['Product type', e.osProductType],
+                  ['Architecture', s.architecture],
+                  ['Installed', formatDate(e.osInstallDate)],
+                  supportStatus,
+                  ['ESU', `${e.esuLicenseDetected ? 'License detected' : 'No license detected'}${esuOverride}`],
+                  lastBoot,
+                  ['Time zone', e.timeZoneId],
+                ]
+          }
         />
         {s.osSupportStatus === 'Unsupported' && (
           <Alert tone="danger" className="mt-4" title="Operating system out of support">
-            This version no longer receives security updates from Microsoft. Upgrade it or enroll it in Extended Security Updates.
+            {linux
+              ? 'This release no longer receives security updates from its vendor. Upgrade it to a supported release.'
+              : 'This version no longer receives security updates from Microsoft. Upgrade it or enroll it in Extended Security Updates.'}
           </Alert>
         )}
       </Card>
 
-      <Card title="Windows Update configuration">
-        <KeyValueList
-          items={[
-            ['Update source', e.updateSourceType ? `${e.updateSourceType}${e.updateSourceServer ? ` (${e.updateSourceServer})` : ''}` : null],
-            ['Microsoft Update registered', yesNo(e.microsoftUpdateRegistered)],
-            ['Automatic Updates', e.automaticUpdatesMode],
-            ['WUfB policies', e.wufbPoliciesConfigured ? 'Configured' : 'Not configured'],
-            ['Quality update deferral', e.deferQualityUpdatesDays !== null ? `${e.deferQualityUpdatesDays} days` : null],
-            ['Feature update deferral', e.deferFeatureUpdatesDays !== null ? `${e.deferFeatureUpdatesDays} days` : null],
-            ['Target release version', e.targetReleaseVersion],
-            ['Managed by MDM', yesNo(e.managedByMdm)],
-            ['Windows Update service', [e.windowsUpdateServiceState, e.windowsUpdateServiceStartMode && `start: ${e.windowsUpdateServiceStartMode}`].filter(Boolean).join(' · ') || null],
-            ['Last scan', s.lastScanAt ? `${formatDateTime(s.lastScanAt)} (${formatRelative(s.lastScanAt)})` : 'Never'],
-            ['Last scan attempt', formatDateTime(e.lastScanAttemptAt)],
-          ]}
-        />
-        <div className="mt-4 flex flex-col gap-2">
-          {wsus && (
-            <Alert tone="warn" title="Managed by WSUS">
-              This endpoint gets updates from {e.updateSourceServer ?? 'a WSUS server'}. Only updates approved there are visible and installable. EasyPatch reports this
-              configuration and does not change it.
-            </Alert>
-          )}
-          {e.wufbPoliciesConfigured && (
-            <Alert tone="warn" title="Windows Update for Business policies detected">
-              Deferral or release-targeting policies apply (from EasyPatch policy or another source). Installing through EasyPatch can install updates before the
-              deferral period ends.
-            </Alert>
-          )}
-          {auOff && <Alert tone="danger" title="Windows Update service disabled">Scans and installations fail until the service start mode is restored.</Alert>}
-          {e.lastScanError && <Alert tone="danger" title="Last scan failed">{e.lastScanError}</Alert>}
-        </div>
-      </Card>
+      {linux ? <PackageManagerCard endpoint={e} lastScanItems={lastScanItems} /> : <WindowsUpdateCard endpoint={e} lastScanItems={lastScanItems} />}
 
       <Card title="Hardware">
         <KeyValueList
@@ -132,11 +137,11 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
             ['Processor', e.processorName],
             ['Memory', formatBytes(e.totalMemoryBytes)],
             [
-              'System drive',
+              linux ? 'Root file system' : 'System drive',
               e.systemDriveTotalBytes !== null ? (
                 <span className={diskLow ? 'text-warn' : undefined}>
                   {formatBytes(e.systemDriveFreeBytes)} free of {formatBytes(e.systemDriveTotalBytes)}
-                  {diskLow && ' — low; cumulative updates may need 10 GB or more'}
+                  {diskLow && (linux ? ' — low' : ' — low; cumulative updates may need 10 GB or more')}
                 </span>
               ) : null,
             ],
@@ -151,14 +156,23 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
         <KeyValueList
           items={[
             ['Agent version', <span className="flex items-center gap-2"><Mono>{s.agentVersion ?? '—'}</Mono>{s.agentOutdated && <Badge tone="warn">update available</Badge>}</span>],
+            ...(e.agentUpdate?.packageFormat
+              ? [['Agent package', `${formatPackageFormat(e.agentUpdate.packageFormat)}${e.agentUpdate.architecture ? ` (${e.agentUpdate.architecture})` : ''}`] as [ReactNode, ReactNode]]
+              : []),
             ['Agent installed', formatDateTime(e.agentInstalledAt)],
             ['Enrolled', formatDateTime(e.enrolledAt)],
             ['Last check-in', s.lastCheckInAt ? `${formatDateTime(s.lastCheckInAt)} (${formatRelative(s.lastCheckInAt)})` : 'Never'],
             ['Signed-in users', <SessionSummary endpoint={e} />],
+            ...(linux ? [['Key protection', describeKeyProtection(e.linux?.keyProtection)] as [ReactNode, ReactNode]] : []),
             ['Compliance evaluated', formatDateTime(e.complianceEvaluatedAt)],
             ['Notes', e.notes ? <span className="whitespace-pre-wrap">{e.notes}</span> : null],
           ]}
         />
+        {linux && e.linux?.keyProtection === 'file-permissions' && (
+          <p className="mt-3 text-xs text-muted">
+            The agent's private key relies on root-only file permissions: systemd-creds (systemd 250 or later) was not available or did not work.
+          </p>
+        )}
         <h3 className="mt-5 mb-2 text-xs font-semibold tracking-wide text-muted uppercase">Credentials</h3>
         {e.credentials.length === 0 ? (
           <p className="text-sm text-muted">No credentials.</p>
@@ -180,6 +194,66 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
         )}
       </Card>
     </div>
+  );
+}
+
+function WindowsUpdateCard({ endpoint: e, lastScanItems }: { endpoint: EndpointDetailDto; lastScanItems: [ReactNode, ReactNode][] }) {
+  const yesNo = (v: boolean | null) => (v === null ? '—' : v ? 'Yes' : 'No');
+  const wsus = e.updateSourceType?.toLowerCase().includes('wsus');
+  const auOff = e.windowsUpdateServiceStartMode?.toLowerCase() === 'disabled';
+  return (
+    <Card title="Windows Update configuration">
+      <KeyValueList
+        items={[
+          ['Update source', e.updateSourceType ? `${e.updateSourceType}${e.updateSourceServer ? ` (${e.updateSourceServer})` : ''}` : null],
+          ['Microsoft Update registered', yesNo(e.microsoftUpdateRegistered)],
+          ['Automatic Updates', e.automaticUpdatesMode],
+          ['WUfB policies', e.wufbPoliciesConfigured ? 'Configured' : 'Not configured'],
+          ['Quality update deferral', e.deferQualityUpdatesDays !== null ? `${e.deferQualityUpdatesDays} days` : null],
+          ['Feature update deferral', e.deferFeatureUpdatesDays !== null ? `${e.deferFeatureUpdatesDays} days` : null],
+          ['Target release version', e.targetReleaseVersion],
+          ['Managed by MDM', yesNo(e.managedByMdm)],
+          ['Windows Update service', [e.windowsUpdateServiceState, e.windowsUpdateServiceStartMode && `start: ${e.windowsUpdateServiceStartMode}`].filter(Boolean).join(' · ') || null],
+          ...lastScanItems,
+        ]}
+      />
+      <div className="mt-4 flex flex-col gap-2">
+        {wsus && (
+          <Alert tone="warn" title="Managed by WSUS">
+            This endpoint gets updates from {e.updateSourceServer ?? 'a WSUS server'}. Only updates approved there are visible and installable. EasyPatch reports this
+            configuration and does not change it.
+          </Alert>
+        )}
+        {e.wufbPoliciesConfigured && (
+          <Alert tone="warn" title="Windows Update for Business policies detected">
+            Deferral or release-targeting policies apply (from EasyPatch policy or another source). Installing through EasyPatch can install updates before the
+            deferral period ends.
+          </Alert>
+        )}
+        {auOff && <Alert tone="danger" title="Windows Update service disabled">Scans and installations fail until the service start mode is restored.</Alert>}
+        {e.lastScanError && <Alert tone="danger" title="Last scan failed">{e.lastScanError}</Alert>}
+      </div>
+    </Card>
+  );
+}
+
+function PackageManagerCard({ endpoint: e, lastScanItems }: { endpoint: EndpointDetailDto; lastScanItems: [ReactNode, ReactNode][] }) {
+  return (
+    <Card title="Package management">
+      <KeyValueList
+        items={[
+          ['Package manager', e.linux?.packageManager ? <Mono>{e.linux.packageManager}</Mono> : null],
+          ['Update source', e.updateSourceType ? humanize(e.updateSourceType) : null],
+          ['Automatic updates', e.automaticUpdatesMode],
+          ...lastScanItems,
+        ]}
+      />
+      {e.lastScanError && (
+        <Alert tone="danger" className="mt-4" title="Last scan failed">
+          {e.lastScanError}
+        </Alert>
+      )}
+    </Card>
   );
 }
 
@@ -313,7 +387,11 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
                       {u.title}
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted">
-                      {u.kbNumbers.length > 0 && <span className="font-mono">{u.kbNumbers.join(', ')}</span>}
+                      {u.package ? (
+                        <PackageFacts pkg={u.package} className="contents" />
+                      ) : (
+                        u.kbNumbers.length > 0 && <span className="font-mono">{u.kbNumbers.join(', ')}</span>
+                      )}
                       {!u.isRequired && <span title="Not installed by policy (category, optional or excluded)">not required by policy</span>}
                       {u.rebootLikely && <span className="text-info">restart likely</span>}
                       {u.supportUrl && (
@@ -405,8 +483,10 @@ function ExcludeDialog({ endpointId, update, onClose }: { endpointId: string; up
       {update && (
         <div className="flex flex-col gap-3 text-sm">
           <p>
-            <strong>{update.title}</strong> will not be installed on this endpoint and no longer counts against its compliance. To exclude a KB everywhere, add it to a
-            policy instead.
+            <strong>{update.title}</strong> will not be installed on this endpoint and no longer counts against its compliance.{' '}
+            {update.package
+              ? 'The exclusion applies to this package version only; a newer version is reported as a new update.'
+              : 'To exclude a KB everywhere, add it to a policy instead.'}
           </p>
           <TextField label="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} placeholder="e.g. breaks line-of-business app" />
           <InlineError error={exclude.error} />
@@ -420,17 +500,23 @@ function ExcludeDialog({ endpointId, update, onClose }: { endpointId: string; up
 // Installed, history, jobs, activity, effective policy
 // ---------------------------------------------------------------------------------------------
 
-export function InstalledTab({ endpointId }: { endpointId: string }) {
+export function InstalledTab({ endpointId, linux = false }: { endpointId: string; linux?: boolean }) {
   const [search, setSearch] = useState('');
   const list = useList<EndpointUpdateDto>(`/endpoints/${endpointId}/installed-updates`);
-  const items = list.page.items.filter((u) => !search || `${u.title} ${u.kbNumbers.join(' ')}`.toLowerCase().includes(search.toLowerCase()));
+  const items = list.page.items.filter(
+    (u) => !search || `${u.title} ${u.kbNumbers.join(' ')} ${u.package?.name ?? ''}`.toLowerCase().includes(search.toLowerCase()),
+  );
   if (list.isPending) return <Spinner />;
   if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
   return (
     <>
       <Toolbar>
-        <TextField label="Filter" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Title or KB" className="w-72" />
-        <p className="pb-2 text-xs text-muted">Only updates confirmed installed by a Windows Update scan appear here.</p>
+        <TextField label="Filter" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={linux ? 'Title or package' : 'Title or KB'} className="w-72" />
+        <p className="pb-2 text-xs text-muted">
+          {linux
+            ? 'Package updates the agent reported as available and later found installed appear here. The full list of installed packages is not reported.'
+            : 'Only updates confirmed installed by a Windows Update scan appear here.'}
+        </p>
       </Toolbar>
       {items.length === 0 ? (
         <EmptyState title="No installed updates reported" />
@@ -440,7 +526,7 @@ export function InstalledTab({ endpointId }: { endpointId: string }) {
             <thead>
               <tr>
                 <th>Update</th>
-                <th>KB</th>
+                <th>{linux ? 'Package' : 'KB'}</th>
                 <th>Category</th>
                 <th>Installed</th>
               </tr>
@@ -449,7 +535,19 @@ export function InstalledTab({ endpointId }: { endpointId: string }) {
               {items.map((u) => (
                 <tr key={u.updateGuid}>
                   <td className="min-w-72">{u.title}</td>
-                  <td className="font-mono text-xs whitespace-nowrap">{u.kbNumbers.join(', ') || '—'}</td>
+                  <td className="text-xs">
+                    {u.package ? (
+                      <span className="flex flex-col gap-0.5">
+                        <span className="font-mono">{u.package.name}</span>
+                        <span className="font-mono text-muted">
+                          {formatVersionChange(u.package.installedVersion, u.package.version)}
+                          {u.package.architecture && ` · ${u.package.architecture}`}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="font-mono whitespace-nowrap">{u.kbNumbers.join(', ') || '—'}</span>
+                    )}
+                  </td>
                   <td>
                     <CategoryBadge category={u.category} />
                   </td>
@@ -464,9 +562,16 @@ export function InstalledTab({ endpointId }: { endpointId: string }) {
   );
 }
 
-export function HistoryTab({ endpointId }: { endpointId: string }) {
+export function HistoryTab({ endpointId, linux = false }: { endpointId: string; linux?: boolean }) {
   const [page, setPage] = useState(1);
-  const list = useList<UpdateHistoryDto>(`/endpoints/${endpointId}/update-history`, { page, pageSize: 100 }, { keepPrevious: true });
+  const list = useList<UpdateHistoryDto>(linux ? null : `/endpoints/${endpointId}/update-history`, { page, pageSize: 100 }, { keepPrevious: true });
+  if (linux) {
+    return (
+      <EmptyState title="No update history" icon={<History className="size-8" aria-hidden />}>
+        Linux agents do not report package-manager history. Installations made through EasyPatch are listed on the Jobs tab.
+      </EmptyState>
+    );
+  }
   if (list.isPending) return <Spinner />;
   if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
   if (list.page.items.length === 0) return <EmptyState title="No Windows Update history reported yet" />;
@@ -609,6 +714,7 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
     </span>,
   ];
   const report = endpoint.windowsUpdatePolicy;
+  const linux = isLinux(endpoint.summary.platform);
   const supportsWu = endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.windowsUpdatePolicy);
   const anyManaged = WINDOWS_UPDATE_POLICY_GROUPS.some((g) => p.windowsUpdate?.[WU_GROUPS[g].key]);
   return (
@@ -635,7 +741,14 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
               row('Allowed categories', 'allowedCategories', p.allowedCategories.map(humanize).join(', ')),
               row('Include optional updates', 'includeOptional', p.includeOptional ? 'Yes' : 'No'),
               row('Accept license agreements', 'acceptEulas', p.acceptEulas ? 'Yes' : 'No'),
-              row('Excluded KBs', 'excludedKbs', p.excludedKbs.length ? <span className="font-mono text-xs">{p.excludedKbs.join(', ')}</span> : 'None'),
+              row(
+                'Excluded KBs',
+                'excludedKbs',
+                <>
+                  {p.excludedKbs.length ? <span className="font-mono text-xs">{p.excludedKbs.join(', ')}</span> : 'None'}
+                  {linux && <span className="text-xs text-muted">(Windows updates only)</span>}
+                </>,
+              ),
               row('Automatic installation', 'autoInstallEnabled', p.autoInstallEnabled ? 'On (inside maintenance window; installing never restarts)' : 'Off'),
               row(
                 'Maintenance window',
@@ -651,8 +764,12 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
           <KeyValueList
             items={[
               row('Restart schedule', 'restartSchedule', p.restartSchedule ? `${describeRestartSchedule(p.restartSchedule)} (${p.timeZone})` : 'None'),
-              row('EasyPatch icon', 'trayIconEnabled', p.trayIconEnabled ? 'Shown' : 'Hidden (shown only with a message or restart request)'),
-              row('Installation notifications', 'installNotificationsEnabled', p.installNotificationsEnabled ? 'On' : 'Off'),
+              ...(linux
+                ? []
+                : [
+                    row('EasyPatch icon', 'trayIconEnabled', p.trayIconEnabled ? 'Shown' : 'Hidden (shown only with a message or restart request)'),
+                    row('Installation notifications', 'installNotificationsEnabled', p.installNotificationsEnabled ? 'On' : 'Off'),
+                  ]),
               row('Agent updates', 'agentAutoUpdateEnabled', p.agentAutoUpdateEnabled ? 'Automatic' : 'Manual'),
               ['Signed-in users', <SessionSummary endpoint={endpoint} />],
               [
@@ -660,83 +777,87 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
                 endpoint.agentCapabilities.length > 0 ? (
                   endpoint.agentCapabilities.map(humanize).join(', ')
                 ) : (
-                  <span className="text-warn">None: restarts, messages and Windows Update settings need agent 1.1.0 or later</span>
+                  <span className="text-warn">
+                    {linux ? 'None reported' : 'None: restarts, messages and Windows Update settings need agent 1.1.0 or later'}
+                  </span>
                 ),
               ],
             ]}
           />
         </Card>
-        <Card title="Windows Update settings" className="xl:col-span-2">
-          {!supportsWu && anyManaged && (
-            <Alert tone="warn" className="mb-4">
-              This agent does not apply Windows Update settings. Install EasyPatch agent 1.1.0 or later.
-            </Alert>
-          )}
-          {report?.mdmUpdatePoliciesPresent && (
-            <Alert tone="info" className="mb-4">
-              MDM (for example Intune) update policies are present on this endpoint. Windows may apply those instead of the values below.
-            </Alert>
-          )}
-          <TableWrap>
-            <table className="table-base">
-              <thead>
-                <tr>
-                  <th>Group</th>
-                  <th>Effective setting</th>
-                  <th>On the endpoint</th>
-                </tr>
-              </thead>
-              <tbody>
-                {WINDOWS_UPDATE_POLICY_GROUPS.map((group) => {
-                  const status = report?.groups.find((g) => g.group === group);
-                  const value = p.windowsUpdate?.[WU_GROUPS[group].key] ?? null;
-                  return (
-                    <tr key={group}>
-                      <td className="font-medium whitespace-nowrap">{WU_GROUPS[group].label}</td>
-                      <td>
-                        <span className="flex flex-wrap items-center gap-2">
-                          {describeWindowsUpdateGroup(group, value)}
-                          <ScopeBadge scope={sourceOf(p.sources, `WindowsUpdate.${group}`)} />
-                        </span>
-                      </td>
-                      <td>
-                        {status ? (
-                          <div className="flex flex-col gap-1">
-                            <span className="flex flex-wrap items-center gap-2">
-                              <Badge tone={WU_STATE_TONE[status.state]}>{humanize(status.state)}</Badge>
-                              {status.appliedAt && <span className="text-xs text-muted">since {formatDateTime(status.appliedAt)}</span>}
-                            </span>
-                            {status.message && <span className="text-xs text-muted">{status.message}</span>}
-                            {status.conflictingValues.length > 0 && (
-                              <span className="font-mono text-xs text-warn">{status.conflictingValues.join('; ')}</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted">{supportsWu ? 'Not reported yet' : '—'}</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </TableWrap>
-          {p.windowsUpdateValues && p.windowsUpdateValues.length > 0 && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-medium">Registry values EasyPatch sets</summary>
-              <ul className="mt-2 flex flex-col gap-1 font-mono text-xs">
-                {p.windowsUpdateValues.map((v) => (
-                  <li key={`${v.path}\\${v.name}`}>
-                    {v.path}\<strong>{v.name}</strong> = {v.value}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {endpoint.windowsUpdatePolicyReportedAt && (
-            <p className="mt-3 text-xs text-muted">Last reported by the agent {formatRelative(endpoint.windowsUpdatePolicyReportedAt)}.</p>
-          )}
-        </Card>
+        {!linux && (
+          <Card title="Windows Update settings" className="xl:col-span-2">
+            {!supportsWu && anyManaged && (
+              <Alert tone="warn" className="mb-4">
+                This agent does not apply Windows Update settings. Install EasyPatch agent 1.1.0 or later.
+              </Alert>
+            )}
+            {report?.mdmUpdatePoliciesPresent && (
+              <Alert tone="info" className="mb-4">
+                MDM (for example Intune) update policies are present on this endpoint. Windows may apply those instead of the values below.
+              </Alert>
+            )}
+            <TableWrap>
+              <table className="table-base">
+                <thead>
+                  <tr>
+                    <th>Group</th>
+                    <th>Effective setting</th>
+                    <th>On the endpoint</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {WINDOWS_UPDATE_POLICY_GROUPS.map((group) => {
+                    const status = report?.groups.find((g) => g.group === group);
+                    const value = p.windowsUpdate?.[WU_GROUPS[group].key] ?? null;
+                    return (
+                      <tr key={group}>
+                        <td className="font-medium whitespace-nowrap">{WU_GROUPS[group].label}</td>
+                        <td>
+                          <span className="flex flex-wrap items-center gap-2">
+                            {describeWindowsUpdateGroup(group, value)}
+                            <ScopeBadge scope={sourceOf(p.sources, `WindowsUpdate.${group}`)} />
+                          </span>
+                        </td>
+                        <td>
+                          {status ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="flex flex-wrap items-center gap-2">
+                                <Badge tone={WU_STATE_TONE[status.state]}>{humanize(status.state)}</Badge>
+                                {status.appliedAt && <span className="text-xs text-muted">since {formatDateTime(status.appliedAt)}</span>}
+                              </span>
+                              {status.message && <span className="text-xs text-muted">{status.message}</span>}
+                              {status.conflictingValues.length > 0 && (
+                                <span className="font-mono text-xs text-warn">{status.conflictingValues.join('; ')}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted">{supportsWu ? 'Not reported yet' : '—'}</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableWrap>
+            {p.windowsUpdateValues && p.windowsUpdateValues.length > 0 && (
+              <details className="mt-4">
+                <summary className="cursor-pointer text-sm font-medium">Registry values EasyPatch sets</summary>
+                <ul className="mt-2 flex flex-col gap-1 font-mono text-xs">
+                  {p.windowsUpdateValues.map((v) => (
+                    <li key={`${v.path}\\${v.name}`}>
+                      {v.path}\<strong>{v.name}</strong> = {v.value}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {endpoint.windowsUpdatePolicyReportedAt && (
+              <p className="mt-3 text-xs text-muted">Last reported by the agent {formatRelative(endpoint.windowsUpdatePolicyReportedAt)}.</p>
+            )}
+          </Card>
+        )}
         <Card title="Agent schedule and compliance" className="xl:col-span-2">
           <KeyValueList
             items={[
@@ -790,6 +911,7 @@ function EndpointPolicyDialog({ endpoint, open, onClose }: { endpoint: EndpointD
         ) : (
           <PolicyEditor
             scope="Endpoint"
+            linux={isLinux(s.platform)}
             policy={policy.data ?? null}
             inherited={resolveInherited([global.data, org.data, site.data])}
             readOnly={false}

@@ -547,6 +547,29 @@ export interface EndpointSummaryDto {
   osSupportStatus: OsSupportStatus;
   currentActivity: string | null;
   lastSeenIp: string | null;
+  /** "Windows" or "Linux" (see ENDPOINT_PLATFORMS). */
+  platform: string;
+}
+
+export const ENDPOINT_PLATFORMS = { windows: 'Windows', linux: 'Linux' } as const;
+
+/** shared/EasyPatch.Contracts/Agent/AgentRelease.cs package formats. */
+export const AGENT_PACKAGE_FORMATS = { msi: 'msi', deb: 'deb', rpm: 'rpm' } as const;
+
+/** Update source type a Linux agent reports (its apt or dnf repositories). */
+export const UPDATE_SOURCE_PACKAGE_REPOSITORIES = 'PackageRepositories';
+
+/** Linux-only endpoint details (null for Windows endpoints). */
+export interface LinuxDetailsDto {
+  /** os-release ID, e.g. "ubuntu", "debian", "rhel", "rocky". */
+  osId: string | null;
+  /** os-release VERSION_ID. */
+  osVersion: string | null;
+  kernelVersion: string | null;
+  /** "apt" or "dnf". */
+  packageManager: string | null;
+  /** How the agent's private key is protected: "systemd-creds-host" or "file-permissions". */
+  keyProtection: string | null;
 }
 
 export interface CredentialDto {
@@ -611,6 +634,8 @@ export interface EndpointDetailDto {
   windowsUpdatePolicyReportedAt: Instant | null;
   hasOwnPolicy: boolean;
   agentUpdate: AgentUpdateInfoDto | null;
+  /** Null for Windows endpoints. */
+  linux: LinuxDetailsDto | null;
 }
 
 /** Whether the agent can update itself and to which version (see the "Agent updates" policy). */
@@ -625,6 +650,8 @@ export interface AgentUpdateInfoDto {
   availableVersion: string | null;
   code: string | null;
   message: string | null;
+  /** The agent's package format: "msi", "deb" or "rpm". */
+  packageFormat: string | null;
 }
 
 export interface AgentUpdateRequest {
@@ -677,6 +704,20 @@ export interface EndpointUpdateDto {
   errorCode: string | null;
   errorMessage: string | null;
   activeJob: JobOverlayDto | null;
+  /** The Linux package behind the update; null for Windows updates. */
+  package: PackageInfoDto | null;
+}
+
+/** A Linux package update. `installedVersion` is the endpoint's current version (endpoint views only). */
+export interface PackageInfoDto {
+  name: string;
+  architecture: string | null;
+  /** The version the update installs. */
+  version: string | null;
+  installedVersion: string | null;
+  repository: string | null;
+  /** Security advisories (e.g. USN, DSA, RHSA) that the update fixes. */
+  advisories: string[];
 }
 
 export interface UpdateHistoryDto {
@@ -791,6 +832,8 @@ export interface FleetUpdateDto {
   installedCount: number;
   pendingRebootCount: number;
   excludedCount: number;
+  /** The Linux package behind the update; null for Windows updates. */
+  package: PackageInfoDto | null;
 }
 
 export interface FleetUpdateDetailDto {
@@ -920,6 +963,8 @@ export interface CreatedTokenDto {
   token: EnrollmentTokenDto;
   plaintextToken: string;
   msiExecCommand: string;
+  /** Enrolls an installed Linux agent; the token is piped in so it never shows in the process list. */
+  linuxEnrollCommand: string | null;
 }
 
 export interface DeploymentCodeDto {
@@ -940,6 +985,9 @@ export interface DeploymentCodeDto {
   state: string;
   oneLiner: string;
   scriptUrl: string;
+  /** `curl … | sudo sh` command that installs and enrolls a Linux agent. */
+  linuxOneLiner: string | null;
+  linuxScriptUrl: string | null;
 }
 
 export interface CreateDeploymentCodeRequest {
@@ -959,6 +1007,8 @@ export interface InstallScriptResponse {
   packageVersion: string;
   sha256: string;
   requireSignature: boolean;
+  /** "Windows" or "Linux". For Linux, packageFileName and sha256 list every package the script can install. */
+  platform: string;
 }
 
 export interface EnrollmentRequestDto {
@@ -1013,6 +1063,8 @@ export interface AgentPackageDto {
   releaseKeyId: string | null;
   /** Why a .sig file next to the package was ignored. */
   signatureProblem: string | null;
+  /** "msi", "deb" or "rpm". */
+  format: string;
 }
 
 export interface AgentVersionCountDto {
