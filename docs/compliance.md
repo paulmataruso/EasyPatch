@@ -86,11 +86,14 @@ Windows Update offers is missing, and also `Unsupported`, because Windows Update
 offers it security fixes. Reports show both columns.
 
 The table also has entries for Debian 11 to 13, Ubuntu 20.04 to 26.04 LTS, Red Hat Enterprise
-Linux, Rocky Linux and AlmaLinux 8 to 10, and Oracle Linux 8 and 9, matched by the distribution
-and its major release (Ubuntu by `YY.MM`). The Debian dates include Debian LTS, which needs no subscription.
+Linux, Rocky Linux, AlmaLinux and Oracle Linux 8 to 10, CentOS Stream 9 and 10, and Fedora 44
+and 45, matched by the distribution and its major release (Ubuntu by `YY.MM`). The Debian dates
+include Debian LTS, which needs no subscription. The Fedora dates are the `SUPPORT_END` values
+from each release's `/etc/os-release`; Fedora releases a new version every six months, so add
+each new release under **Settings → OS lifecycle** (product `Fedora`, build number = release).
 For Ubuntu, `ExtendedSecurityUpdates` means Ubuntu Pro (ESM) is enabled on the endpoint, as
-reported by `pro status`. Other distributions and releases (Ubuntu interim releases, CentOS
-Stream, Fedora) are `Unknown`.
+reported by `pro status`. Other releases (Ubuntu interim releases such as 26.10, Fedora releases
+that are not in the table) are `Unknown`.
 
 ## Percentages and snapshots
 

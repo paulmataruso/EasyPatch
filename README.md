@@ -74,7 +74,7 @@ on one computer, a site, or a whole customer, and tracks compliance across every
   public key goes to the server. Every request is signed with a timestamp and nonce for replay
   protection, and keys rotate automatically. The agent contains no shared secret.
 * **Linux agent** for Debian and Ubuntu (apt) and Red Hat Enterprise Linux, Rocky Linux,
-  AlmaLinux and Oracle Linux (dnf), as `.deb` and `.rpm` packages with a one-line install script
+  AlmaLinux, Oracle Linux, CentOS Stream and Fedora (dnf4 and dnf5), as `.deb` and `.rpm` packages with a one-line install script
   for deployment codes. It reports and installs upgrades of installed packages at exact versions,
   classifies security updates from the distribution's security repositories and advisories, and
   uses the same policies, jobs, restarts and compliance reporting. See
@@ -178,7 +178,7 @@ docs/        Documentation
 
 ## Project status
 
-Version 1.3.0, pre-release. Server, console and agent logic are covered by automated tests on
+Version 1.3.2, pre-release. Server, console and agent logic are covered by automated tests on
 Linux. The following have not yet been validated by this repository's automated tests:
 
 * the Windows-specific agent components on real Windows: Windows Update Agent COM calls, WMI
@@ -190,8 +190,9 @@ Linux. The following have not yet been validated by this repository's automated 
 * the PowerShell install script on Windows;
 * the Linux agent against real package managers. Its apt and dnf handling is tested with
   simulated package managers; scanning, package installation, the install script and
-  self-update were exercised by hand on Debian 12 and 13, Ubuntu 22.04 and 24.04 and Rocky Linux
-  8 and 9 containers, not by automated tests.
+  self-update were exercised by hand on Debian 12 and 13, Ubuntu 22.04, 24.04, 26.04 and 26.10,
+  Rocky Linux 8 and 9, AlmaLinux 10.2 (x86-64-v2 build) and Fedora 45 containers, not by
+  automated tests.
 
 Validate them on test endpoints before rolling out to production.
 

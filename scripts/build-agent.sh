@@ -10,7 +10,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="1.3.0"
+version="1.3.2"
 run_tests=1
 rids=("win-x64")
 
