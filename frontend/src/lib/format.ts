@@ -137,7 +137,7 @@ export function describeSkipReason(reason: string | null | undefined): string {
     case 'PendingReboot':
       return 'Installed, waiting for a restart';
     case 'NotApplicable':
-      return 'No longer offered by Windows Update';
+      return 'No longer offered by the update source';
     case 'NotSelected':
       return 'Not selected';
     case 'CategoryNotAllowed':

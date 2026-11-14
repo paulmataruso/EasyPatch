@@ -86,6 +86,14 @@ public sealed class LinuxAgentTests(PostgresFixture postgres) : AgentUpdateTestB
     }
 
     [Fact]
+    public async Task Messages_to_users_are_refused_for_linux_endpoints_with_a_clear_reason()
+    {
+        var agent = await EnrollLinuxAsync();
+        await Root.ExpectAsync(HttpMethod.Post, $"/api/v1/endpoints/{agent.EndpointId}/notify", new NotifyRequest(UserMessagePreset.SaveYourWork, null),
+            HttpStatusCode.Conflict, "not_supported_on_linux");
+    }
+
+    [Fact]
     public async Task A_linux_endpoint_reports_its_distribution_kernel_and_key_protection()
     {
         var agent = await EnrollLinuxAsync();

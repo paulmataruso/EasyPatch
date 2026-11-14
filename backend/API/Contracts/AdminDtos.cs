@@ -622,7 +622,8 @@ public sealed record ComplianceReportRow(
     bool IsOnline,
     OsSupportStatus OsSupportStatus,
     DateTimeOffset? LastScanAt,
-    DateTimeOffset? LastCheckInAt);
+    DateTimeOffset? LastCheckInAt,
+    string Platform = "Windows");
 
 public sealed record ComplianceReportDto(
     int Total,

@@ -1115,6 +1115,8 @@ export interface ComplianceReportRow {
   osSupportStatus: OsSupportStatus;
   lastScanAt: Instant | null;
   lastCheckInAt: Instant | null;
+  /** "Windows" or "Linux". On Linux, osBuild is the kernel version. */
+  platform: string;
 }
 
 export interface ComplianceReportDto {

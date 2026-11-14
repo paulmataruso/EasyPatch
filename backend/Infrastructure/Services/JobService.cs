@@ -63,6 +63,12 @@ public sealed class JobService(
         if (request.Type != JobType.AgentUpdate && AgentCapabilities.RequiredFor(request.Type) is { } capability &&
             !endpoint.AgentCapabilities.Contains(capability))
         {
+            if (endpoint.Platform == AgentPlatforms.Linux && request.Type == JobType.NotifyUser)
+            {
+                throw AppException.Conflict($"{endpoint.Hostname} is a Linux endpoint. Messages to users are only available on Windows.",
+                    "not_supported_on_linux");
+            }
+
             throw AppException.Conflict(
                 $"The EasyPatch agent on {endpoint.Hostname} (version {endpoint.AgentVersion ?? "unknown"}) cannot run this job. Upgrade the agent first.",
                 "agent_upgrade_required");

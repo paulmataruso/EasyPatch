@@ -272,7 +272,7 @@ public static class SkipReasons
     {
         AlreadyInstalled => "Already installed",
         PendingReboot => "Installed, waiting for a restart",
-        NotApplicable => "No longer offered by Windows Update",
+        NotApplicable => "No longer offered by the update source",
         NotSelected => "Not selected",
         CategoryNotAllowed => "Category not allowed by policy",
         OptionalNotAllowed => "Optional update not allowed by policy",

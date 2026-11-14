@@ -102,11 +102,11 @@ public static class ReportingEndpoints
         {
             var rows = await ComplianceRowsAsync(q, db, tenant, ct);
             var csv = new CsvWriter("Hostname", "Organization", "Site", "Operating system", "Build", "Compliance", "Missing required", "Missing total",
-                "Failed", "Reboot pending", "Online", "OS support", "Last scan (UTC)", "Last check-in (UTC)");
+                "Failed", "Reboot pending", "Online", "OS support", "Last scan (UTC)", "Last check-in (UTC)", "Platform");
             foreach (var r in rows)
             {
                 csv.Row(r.Hostname, r.OrganizationName, r.SiteName, r.OperatingSystem, r.OsBuild, r.ComplianceStatus.ToString(), r.MissingRequiredCount,
-                    r.MissingTotalCount, r.FailedCount, r.RebootPending, r.IsOnline, r.OsSupportStatus.ToString(), r.LastScanAt, r.LastCheckInAt);
+                    r.MissingTotalCount, r.FailedCount, r.RebootPending, r.IsOnline, r.OsSupportStatus.ToString(), r.LastScanAt, r.LastCheckInAt, r.Platform);
             }
 
             return csv.ToResult($"easypatch-compliance-{clock.GetUtcNow():yyyyMMdd-HHmm}.csv");
@@ -237,11 +237,11 @@ public static class ReportingEndpoints
             {
                 e.Id, e.Hostname, Org = e.Organization!.Name, Site = e.Site != null ? e.Site.Name : null, e.OperatingSystem, e.OsBuildNumber, e.OsProductType,
                 e.OsBuild, e.ComplianceStatus, e.MissingRequiredCount, e.MissingTotalCount, e.FailedCount, e.RebootPending, e.IsOnline, e.OsSupportStatus,
-                e.LastScanAt, e.LastCheckInAt,
+                e.LastScanAt, e.LastCheckInAt, e.Platform,
             }).ToListAsync(ct);
         return rows.Select(r => new ComplianceReportRow(r.Id, r.Hostname, r.Org, r.Site, OsNaming.Describe(r.OperatingSystem, r.OsBuildNumber, r.OsProductType),
             r.OsBuild, r.ComplianceStatus, r.MissingRequiredCount, r.MissingTotalCount, r.FailedCount, r.RebootPending, r.IsOnline, r.OsSupportStatus,
-            r.LastScanAt, r.LastCheckInAt)).ToList();
+            r.LastScanAt, r.LastCheckInAt, r.Platform)).ToList();
     }
 
     private static IQueryable<InstallationReportRow> InstallationQuery(InstallationReportQuery q, EasyPatchDbContext db, ITenantContext tenant, TimeProvider clock)

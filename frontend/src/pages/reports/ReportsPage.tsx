@@ -30,7 +30,7 @@ import {
   Tabs,
   Toolbar,
 } from '../../components/ui';
-import { dayBoundary, describeSkipReason, formatDate, formatDateTime, formatPercent, formatRelative, humanize } from '../../lib/format';
+import { dayBoundary, describeSkipReason, formatDate, formatDateTime, formatPercent, formatRelative, humanize, isLinux } from '../../lib/format';
 import { aggregateTrend, daysAgo, isoDate } from '../../lib/trend';
 import { useUrlState } from '../../lib/urlState';
 
@@ -146,7 +146,7 @@ function ComplianceReport() {
                       <td>
                         <div className="whitespace-nowrap">{r.operatingSystem ?? '—'}</div>
                         <div className="flex items-center gap-1.5 text-xs text-muted">
-                          {r.osBuild && <span>build {r.osBuild}</span>}
+                          {r.osBuild && <span>{isLinux(r.platform) ? 'kernel' : 'build'} {r.osBuild}</span>}
                           {r.osSupportStatus !== 'Supported' && r.osSupportStatus !== 'Unknown' && <OsSupportBadge status={r.osSupportStatus} />}
                         </div>
                       </td>
