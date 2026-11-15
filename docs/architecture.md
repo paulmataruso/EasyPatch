@@ -431,8 +431,10 @@ server never signs anything; see [security.md](security.md#agent-release-signing
   6. Finish as `Completed` or `Failed`, with `reboot_required` if needed.
 * **Reboot.** The agent reports pending-reboot state from WUA `SystemInfo.RebootRequired`,
   the CBS `RebootPending` and `PackagesPending` keys, the WU `RebootRequired` key and
-  `PendingFileRenameOperations`, and lists the reasons. From 1.5.3 it also reports what is behind
-  them while a restart is pending (`RebootDetails`): the update IDs under the WU key, the
+  `PendingFileRenameOperations`, and lists the reasons. From 1.8.0, `PendingFileRenameOperations`
+  counts only when a file is waiting to be replaced: files queued only for deletion (for example
+  temporary files left by installers) are cleanup at the next start and need no restart. From
+  1.5.3 it also reports what is behind them while a restart is pending (`RebootDetails`): the update IDs under the WU key, the
   servicing package names under the CBS keys, and the files queued in
   `PendingFileRenameOperations` (deleted or replaced; at most 25 listed, user names in profile
   paths replaced by `*`). The server names the updates from its catalog and the endpoint's

@@ -49,6 +49,14 @@ public static class WindowsRebootSignals
         return operations.Distinct().ToList();
     }
 
+    /// <summary>
+    /// Whether the queued file operations need a restart: only replacements do (a file in use waits for the restart to be
+    /// updated). Deletions are cleanup that Windows does at the next start, for example temporary files left by
+    /// installers, so they alone do not make a restart necessary.
+    /// </summary>
+    public static bool NeedRestart(IReadOnlyList<PendingFileOperation> operations) =>
+        operations.Any(o => o.Action != PendingFileOperation.Delete);
+
     /// <summary>See <see cref="RebootDetails.CleanPath"/>: a plain path without user names.</summary>
     public static string CleanPath(string? raw) => RebootDetails.CleanPath(raw);
 }

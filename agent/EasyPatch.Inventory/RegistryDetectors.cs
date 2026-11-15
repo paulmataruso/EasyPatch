@@ -83,11 +83,12 @@ public sealed class RegistryRebootDetector : IRebootDetector
             packages.AddRange(WindowsRebootSignals.Packages(Reg.GetNames(ServicingPackagesKey)));
         }
 
+        // Only files waiting to be replaced need the restart; files queued for deletion are cleanup (WindowsRebootSignals.NeedRestart).
         if (Reg.GetValue(@"SYSTEM\CurrentControlSet\Control\Session Manager", "PendingFileRenameOperations") is string[] { Length: > 0 } renames &&
-            renames.Any(r => !string.IsNullOrWhiteSpace(r)))
+            WindowsRebootSignals.FileOperations(renames) is var operations && WindowsRebootSignals.NeedRestart(operations))
         {
             reasons.Add("Pending file rename operations");
-            fileOperations = WindowsRebootSignals.FileOperations(renames);
+            fileOperations = operations;
         }
 
         if (Reg.GetInt(@"SOFTWARE\Microsoft\Updates", "UpdateExeVolatile") is { } volatileFlag && volatileFlag != 0)

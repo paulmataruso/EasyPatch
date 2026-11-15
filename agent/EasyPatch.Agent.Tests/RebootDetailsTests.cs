@@ -9,6 +9,25 @@ namespace EasyPatch.Agent.Tests;
 public sealed class RebootDetailsTests
 {
     [Fact]
+    public void Files_queued_only_for_deletion_do_not_need_a_restart()
+    {
+        var cleanup = WindowsRebootSignals.FileOperations(
+        [
+            @"*1\??\C:\Users\alice\AppData\Local\Temp\~nsuA.tmp\Un_A.exe", "",
+            @"\??\C:\Windows\System32\drivers\SET9947.tmp", "",
+        ]);
+        Assert.False(WindowsRebootSignals.NeedRestart(cleanup));
+        Assert.False(WindowsRebootSignals.NeedRestart([]));
+
+        var replacement = WindowsRebootSignals.FileOperations(
+        [
+            @"\??\C:\Windows\Temp\a.tmp", "",
+            @"\??\C:\Program Files\Contoso\contoso.dll.new", @"!\??\C:\Program Files\Contoso\contoso.dll",
+        ]);
+        Assert.True(WindowsRebootSignals.NeedRestart(replacement));
+    }
+
+    [Fact]
     public void Pending_file_renames_become_deletes_and_replacements_without_user_names()
     {
         // REG_MULTI_SZ pairs: source, destination (empty destination: delete the source at the restart).
