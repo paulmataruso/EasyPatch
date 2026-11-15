@@ -77,8 +77,35 @@ public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> optio
             .OrderByDescending(v => Version.TryParse(v, out var parsed) ? parsed : new Version(0, 0))
             .FirstOrDefault();
 
-    public AgentPackage? Find(string fileName) =>
-        List().FirstOrDefault(p => p.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// The listed package with this file name. A package file copied in after the last scan is found too: the worker keeps
+    /// its own list and may already have offered it to agents, so a cache miss rescans the folder (at most once a second).
+    /// </summary>
+    public AgentPackage? Find(string fileName)
+    {
+        var package = FindIn(List(), fileName);
+        if (package is not null || string.IsNullOrEmpty(fileName) || !FileNamePattern().IsMatch(fileName) ||
+            !File.Exists(Path.Combine(options.Value.AgentPackagesPath, fileName)))
+        {
+            return package;
+        }
+
+        lock (gate)
+        {
+            if (clock.GetUtcNow() - cachedAt >= MinimumRescanInterval)
+            {
+                cached = Scan();
+                cachedAt = clock.GetUtcNow();
+            }
+
+            return FindIn(cached, fileName);
+        }
+    }
+
+    private static readonly TimeSpan MinimumRescanInterval = TimeSpan.FromSeconds(1);
+
+    private static AgentPackage? FindIn(IReadOnlyList<AgentPackage> packages, string fileName) =>
+        packages.FirstOrDefault(p => p.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Resolves a package file path, refusing anything that is not a listed package (no path traversal).</summary>
     public string? GetPath(string fileName)

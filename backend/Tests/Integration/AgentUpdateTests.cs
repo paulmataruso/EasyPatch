@@ -129,6 +129,28 @@ public sealed class AgentUpdateTests(PostgresFixture postgres) : AgentUpdateTest
     }
 
     [Fact]
+    public async Task A_package_copied_in_after_the_last_scan_can_be_downloaded_at_once()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Publish("1.2.0");
+        Assert.Single(await Root.GetAsync<List<AgentPackageDto>>("/api/v1/agent-packages")); // the API caches this list for a minute
+
+        // The worker keeps its own list and may offer a new package to agents before the API's list is refreshed.
+        var bytes = RandomNumberGenerator.GetBytes(2048);
+        await File.WriteAllBytesAsync(Path.Combine(Factory.PackagesPath, "EasyPatchAgent-1.3.0-x64.msi"), bytes, ct);
+        await File.WriteAllBytesAsync(Path.Combine(Factory.PackagesPath, "notes.msi"), bytes, ct);
+        Clock.Advance(TimeSpan.FromSeconds(2));
+
+        var http = NewHttpClient();
+        Assert.Equal(bytes, await http.GetByteArrayAsync("/downloads/agent/EasyPatchAgent-1.3.0-x64.msi", ct));
+        foreach (var name in new[] { "notes.msi", "EasyPatchAgent-1.4.0-x64.msi", "EasyPatchAgent-1.2.0-x64.msi.sig" })
+        {
+            using var missing = await http.GetAsync("/downloads/agent/" + name, ct);
+            Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task A_specific_version_can_be_requested_but_never_a_downgrade()
     {
         var agent = await UpdatableAgentAsync("PC-VER");
