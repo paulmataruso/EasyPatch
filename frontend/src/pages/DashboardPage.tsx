@@ -215,7 +215,7 @@ function SummaryTiles({ s }: { s: DashboardSummaryDto }) {
         value={formatNumber(s.pendingApprovals)}
         tone={s.pendingApprovals > 0 ? 'warn' : undefined}
         icon={<UserCheck className="size-4" aria-hidden />}
-        to={link('/agents?tab=approvals', 'Review')}
+        to={link('/approvals', 'Review')}
       />
       <StatTile
         label="Unsupported OS / outdated agents"

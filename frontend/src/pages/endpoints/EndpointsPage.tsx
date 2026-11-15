@@ -209,7 +209,7 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
         <EmptyState title={anyFilter ? 'No endpoints match these filters' : 'No endpoints yet'} icon={<Monitor className="size-8" aria-hidden />}>
           {!anyFilter && (
             <>
-              Deploy the agent from <Link to="/agents" className="text-accent hover:underline">Agent Management</Link> using an enrollment token or a deployment code.
+              Deploy the agent from <Link to="/deploy" className="text-accent hover:underline">Deploy</Link> using an enrollment token or a deployment code.
             </>
           )}
         </EmptyState>

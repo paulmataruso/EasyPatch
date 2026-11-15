@@ -60,7 +60,7 @@ export function DeploymentCodesTab() {
       <Alert tone="info" className="mb-4" title="Tokenless installs for RMM tools">
         A deployment code is not a secret. The generated PowerShell script (Windows) or shell script (Linux) downloads the agent, verifies its SHA-256 hash (on
         Windows optionally also its Authenticode signature), installs it, and the endpoint then waits in{' '}
-        <Link to="/agents?tab=approvals" className="text-accent hover:underline">Pending approvals</Link>. Nothing is managed until an administrator approves it.
+        <Link to="/approvals" className="text-accent hover:underline">Pending Approvals</Link>. Nothing is managed until an administrator approves it.
         Restrict codes to your RMM’s egress IP ranges where possible.
       </Alert>
       <Toolbar>
@@ -108,7 +108,7 @@ export function DeploymentCodesTab() {
                     </td>
                     <td className="text-right tabular-nums">
                       {c.pendingCount > 0 ? (
-                        <Link to="/agents?tab=approvals" className="font-medium text-warn hover:underline">
+                        <Link to="/approvals" className="font-medium text-warn hover:underline">
                           {c.pendingCount}
                         </Link>
                       ) : (

@@ -216,7 +216,7 @@ export function AlertsPage() {
 }
 
 function AlertTitle({ alert }: { alert: AlertDto }) {
-  const to = alert.endpointId ? `/endpoints/${alert.endpointId}` : alert.ruleType === 'EnrollmentPending' ? '/agents?tab=approvals' : null;
+  const to = alert.endpointId ? `/endpoints/${alert.endpointId}` : alert.ruleType === 'EnrollmentPending' ? '/approvals' : null;
   return to ? (
     <Link to={to} className="font-medium hover:text-accent">
       {alert.title}

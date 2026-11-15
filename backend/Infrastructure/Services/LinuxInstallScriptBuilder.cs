@@ -27,7 +27,7 @@ public static class LinuxInstallScriptBuilder
         var sb = new StringBuilder();
         sb.Append("#!/bin/sh\n");
         sb.Append(CultureInfo.InvariantCulture, $"# EasyPatch Linux agent installer for deployment code {deploymentCode} ({OneLine(label)})\n");
-        sb.Append(CultureInfo.InvariantCulture, $"# Generated {generatedAt:u}. The endpoint will appear under Agent Management > Pending approvals.\n");
+        sb.Append(CultureInfo.InvariantCulture, $"# Generated {generatedAt:u}. The endpoint will appear under Pending Approvals in the EasyPatch console.\n");
         sb.Append("# This script contains no secrets: an administrator must approve the endpoint before it is managed.\n");
         sb.Append("# Optional: EASYPATCH_PROXY_URL=http://proxy:3128 (used by the agent to reach the server, not by apt/dnf).\n");
         sb.Append("set -eu\n");
@@ -123,7 +123,7 @@ public static class LinuxInstallScriptBuilder
               fi
               i=$((i + 1))
             done
-            echo "EasyPatch agent installed. Approve this endpoint in the EasyPatch console (Agent Management > Pending approvals) after comparing the key fingerprint."
+            echo "EasyPatch agent installed. Approve this endpoint in the EasyPatch console (Pending Approvals) after comparing the key fingerprint."
 
             """);
         return sb.ToString();

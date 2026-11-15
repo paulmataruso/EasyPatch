@@ -22,7 +22,8 @@ import { JobsPage } from './pages/jobs/JobsPage';
 import { AlertsPage } from './pages/alerts/AlertsPage';
 import { JobDetailPage } from './pages/jobs/JobDetailPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
-import { AgentManagementPage } from './pages/agents/AgentManagementPage';
+import { DeployPage, LegacyAgentsRedirect } from './pages/agents/DeployPage';
+import { ApprovalsPage } from './pages/agents/ApprovalsPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { AccountPage } from './pages/account/AccountPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -99,7 +100,9 @@ export function App() {
         <Route path="jobs/:id" element={<JobDetailPage />} />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="reports" element={<ReportsPage />} />
-        <Route path="agents" element={<AgentManagementPage />} />
+        <Route path="approvals" element={<ApprovalsPage />} />
+        <Route path="deploy" element={<DeployPage />} />
+        <Route path="agents" element={<LegacyAgentsRedirect />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="account" element={<AccountPage />} />
         <Route path="*" element={<NotFoundPage />} />

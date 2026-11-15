@@ -137,7 +137,7 @@ SmartScreen may warn when an MSI is opened by hand. To build the packages yourse
   world-readable.
 * The server computes each package's SHA-256 itself. The package list is refreshed at most once a
   minute.
-* Packages appear under **Agent Management → Packages**. The console uses the newest MSI to
+* Packages appear under **Deploy → Agent packages**. The console uses the newest MSI to
   build `msiexec` commands and the PowerShell install script for deployment codes. That script
   verifies the package's SHA-256, and optionally its Authenticode signature, before installing.
   The Linux install script offers the newest `.deb` and `.rpm` for each architecture and

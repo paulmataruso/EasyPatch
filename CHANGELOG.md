@@ -18,6 +18,9 @@ the web console and both agents share one version number.
 ### Changed
 
 - The tray's status window, menus and restart prompts follow the Windows app mode (dark or light).
+- Console: *Pending Approvals* is its own item in the sidebar (with the count of waiting
+  computers), and *Agent Management* is renamed *Deploy* (enrollment tokens, deployment codes and
+  agent packages). Old `/agents` links still work.
 
 ## [1.5.0] - 2026-11-15
 

@@ -260,7 +260,7 @@ public sealed class AlertEngine(
             var names = await db.Organizations.AsNoTracking().Where(o => counts.Select(c => c.Key).Contains(o.Id)).ToDictionaryAsync(o => o.Id, o => o.Name, ct);
             return counts.Select(c => new AlertMatch(c.Key, null,
                 $"{names.GetValueOrDefault(c.Key, "Organization")}: {Plural(c.Count, "computer")} waiting for enrollment approval",
-                "Approve or reject the requests under Agent Management → Pending approvals.")).ToList();
+                "Approve or reject the requests under Pending Approvals.")).ToList();
         }
 
         var endpoints = db.Endpoints.AsNoTracking()

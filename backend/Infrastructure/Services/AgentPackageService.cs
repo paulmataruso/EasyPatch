@@ -207,7 +207,7 @@ public static class InstallScriptBuilder
         var sb = new StringBuilder();
         sb.AppendLine("#Requires -Version 5.1");
         sb.AppendLine($"# EasyPatch agent installer for deployment code {deploymentCode} ({label.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal)})");
-        sb.AppendLine($"# Generated {generatedAt:u}. The endpoint will appear under Agent Management > Pending approvals.");
+        sb.AppendLine($"# Generated {generatedAt:u}. The endpoint will appear under Pending Approvals in the EasyPatch console.");
         sb.AppendLine("# This script contains no secrets: an administrator must approve the endpoint before it is managed.");
         sb.AppendLine("$ErrorActionPreference = 'Stop'");
         sb.AppendLine("$ProgressPreference = 'SilentlyContinue'");
@@ -278,7 +278,7 @@ public static class InstallScriptBuilder
                     if ($status -match 'Fingerprint') { Write-Output $status; break }
                 }
             }
-            Write-Output 'EasyPatch agent installed. Approve this endpoint in the EasyPatch console (Agent Management > Pending approvals) after comparing the key fingerprint.'
+            Write-Output 'EasyPatch agent installed. Approve this endpoint in the EasyPatch console (Pending Approvals) after comparing the key fingerprint.'
             exit 0
             """);
         return sb.ToString();

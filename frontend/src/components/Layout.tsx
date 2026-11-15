@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
-  Activity,
   Bell,
   Building2,
   ClipboardList,
@@ -11,9 +10,11 @@ import {
   LogOut,
   Menu,
   Monitor,
+  MonitorDown,
   Moon,
   PackageCheck,
   Settings,
+  ShieldCheck,
   Sun,
   UserCircle,
   X,
@@ -103,6 +104,13 @@ export function AppLayout() {
     { to: '/', label: 'Dashboard', icon: <LayoutDashboard className="size-4" aria-hidden />, end: true },
     { to: '/organizations', label: 'Organizations', icon: <Building2 className="size-4" aria-hidden /> },
     { to: '/endpoints', label: 'Endpoints', icon: <Monitor className="size-4" aria-hidden /> },
+    {
+      to: '/approvals',
+      label: 'Pending Approvals',
+      icon: <ShieldCheck className="size-4" aria-hidden />,
+      badge: summary.data?.pendingApprovals ?? 0,
+      badgeTitle: `${summary.data?.pendingApprovals ?? 0} pending approval(s)`,
+    },
     { to: '/updates', label: 'Update Management', icon: <PackageCheck className="size-4" aria-hidden /> },
     { to: '/jobs', label: 'Jobs', icon: <ListChecks className="size-4" aria-hidden /> },
     {
@@ -114,13 +122,7 @@ export function AppLayout() {
       badgeTone: (alerts.data?.critical ?? 0) > 0 ? 'danger' : 'warn',
     },
     { to: '/reports', label: 'Reports', icon: <FileBarChart className="size-4" aria-hidden /> },
-    {
-      to: '/agents',
-      label: 'Agent Management',
-      icon: <Activity className="size-4" aria-hidden />,
-      badge: summary.data?.pendingApprovals ?? 0,
-      badgeTitle: `${summary.data?.pendingApprovals ?? 0} pending approval(s)`,
-    },
+    { to: '/deploy', label: 'Deploy', icon: <MonitorDown className="size-4" aria-hidden /> },
     { to: '/settings', label: 'Settings', icon: <Settings className="size-4" aria-hidden /> },
   ];
 

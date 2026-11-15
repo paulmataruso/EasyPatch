@@ -34,7 +34,7 @@ Update Agent API that Windows itself uses. The agent:
 | Method | Use it for | Secret? | Approval |
 |---|---|---|---|
 | **Enrollment token** (`ENROLLMENTTOKEN`) | Hands-on installs, GPO/Intune deployments where the token is protected | Yes: limited-use, expiring | No, the agent is active immediately |
-| **Deployment code** (`DEPLOYMENTCODE`) | RMM scripts and other tokenless mass deployment | No | Yes: each computer appears under *Agent Management → Pending approvals* until an administrator approves it |
+| **Deployment code** (`DEPLOYMENTCODE`) | RMM scripts and other tokenless mass deployment | No | Yes: each computer appears under *Pending Approvals* until an administrator approves it |
 
 Both are created in the EasyPatch console. The console can also generate the complete
 `msiexec` command (tokens) or a PowerShell install script (deployment codes).
@@ -200,7 +200,7 @@ two ways to install agents on such computers:
 * **Trust the CA on the computer.** Import the CA's root certificate into *Trusted Root
   Certification Authorities* of the local computer (for example by Group Policy). Every
   program on the computer then trusts that CA.
-* **Skip certificate check** in the console's install script dialog (*Agent Management →
+* **Skip certificate check** in the console's install script dialog (*Deploy →
   Deployment codes → Install script*, Windows tab). The script then:
   1. downloads itself, the server's CA certificate and the MSI **without checking the server
      certificate** (the MSI's SHA-256 is still checked against the value in the script);
@@ -360,7 +360,7 @@ Agents 1.2.0 and later update themselves. To release a new version:
 1. Build it with the release key (see [Building from source](#building-from-source)), which
    produces `EasyPatchAgent-<version>-<arch>.msi` and its release signature
    `EasyPatchAgent-<version>-<arch>.msi.sig`.
-2. Copy both files to `data/agent-packages` on the server. *Agent Management → Packages*
+2. Copy both files to `data/agent-packages` on the server. *Deploy → Agent packages*
    shows the package as **signed** with the key ID. A package without a valid `.sig` is still
    offered for manual download, but agents do not update to it.
 
@@ -417,14 +417,14 @@ need them.
 |---|---|
 | `status` shows `NotEnrolled` and the log says no token or deployment code | Install was done without `ENROLLMENTTOKEN`/`DEPLOYMENTCODE`, or the token was already consumed. Run `enroll` |
 | Enrollment rejected (exit code 4, event 1003) | Token expired, revoked or used up, deployment code revoked, or the request was rejected by an administrator. Create a new token or code |
-| Stays at `PendingApproval` | Approve the request in the console (*Agent Management → Pending approvals*). Requests expire after 7 days; the agent then submits a new one |
+| Stays at `PendingApproval` | Approve the request in the console (*Pending Approvals*). Requests expire after 7 days; the agent then submits a new one |
 | `Revoked` (event 1004) | The endpoint was removed or its credential revoked in the console. Re-enroll with `enroll --force` |
 | "Could not reach the EasyPatch server" | DNS, firewall, proxy (`PROXYURL`), or TLS: the server certificate must chain to a root trusted by the computer, or to the CA recorded with `SERVERCACERT` (see [Servers with a private certificate authority](#servers-with-a-private-certificate-authority)) |
 | Scans fail with `0x8024402C`, `0x80244022` or similar | The Windows Update source (Microsoft or WSUS) is unreachable. The error code and its description are shown in the console |
 | Updates not offered that you expected | WSUS approvals, Windows Update for Business deferrals or a target release version apply. The console shows the detected update source, and the endpoint's *Policy* tab shows any Windows Update settings EasyPatch applied |
 | No tray icon | On Windows 11, look in the hidden-icons flyout (**^**) first. Otherwise the policy setting *EasyPatch icon in the notification area* is *Hide*, the user signed in less than 15 seconds ago, or the session is a remote session that is disconnected. *Signed-in users* on the endpoint's overview shows how many sessions have a tray. If a session is signed in but has no tray, the agent log says *did not connect to the service*. Agent 1.1.0 had this problem for every user who was not running as administrator; install 1.1.1 or later |
 | Windows Update settings show *Conflict* | Another policy source (usually domain Group Policy or Intune) set different values. Remove that policy, or change the EasyPatch setting to match; changing the EasyPatch setting applies it again |
-| Agent update failed with `update_untrusted_key` or `update_signature_invalid` | The package was signed with a key this agent was not built with, or the `.sig` file does not belong to the package. Check the key ID under *Agent Management → Packages*. Agents keep trusting only the keys they were built with; to change keys see [security.md](security.md#agent-release-signing) |
+| Agent update failed with `update_untrusted_key` or `update_signature_invalid` | The package was signed with a key this agent was not built with, or the `.sig` file does not belong to the package. Check the key ID under *Deploy → Agent packages*. Agents keep trusting only the keys they were built with; to change keys see [security.md](security.md#agent-release-signing) |
 | Agent update failed with `update_hash_mismatch` | The file downloaded from the server is not the one that was signed (it was replaced, rebuilt or truncated). Copy the MSI and its `.sig` from the same build again |
 | Agent update failed with `update_install_failed` | Windows Installer failed or rolled back, and the previous version is still running. The job message has the Windows Installer error; the full log is `C:\ProgramData\EasyPatch\updates\install-<version>.log` |
 | Agent update failed with `update_download_failed` | The agent could not download the package from `downloads/agent/<file>` (network, proxy, or the file was removed from the server) |

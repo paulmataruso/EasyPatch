@@ -427,7 +427,7 @@ function DeployTab({ org }: { org: OrganizationDto }) {
           Endpoints enrolled with a token become active immediately.
         </p>
         <div className="mt-3 flex gap-2">
-          <Link to={`/agents?tab=tokens&organizationId=${org.id}${canOperate ? '&create=1' : ''}`} className={buttonClasses(canOperate ? 'primary' : 'secondary')}>
+          <Link to={`/deploy?tab=tokens&organizationId=${org.id}${canOperate ? '&create=1' : ''}`} className={buttonClasses(canOperate ? 'primary' : 'secondary')}>
             {canOperate ? 'Create token' : 'View tokens'}
           </Link>
         </div>
@@ -435,15 +435,15 @@ function DeployTab({ org }: { org: OrganizationDto }) {
       <Card title={<span className="flex items-center gap-2"><Terminal className="size-4" aria-hidden /> Deployment codes (RMM)</span>}>
         <p className="text-sm text-muted">
           Tokenless PowerShell (Windows) or shell (Linux) installer for RMM tools. The script contains no secret; each new endpoint waits in{' '}
-          <strong>Pending approvals</strong> until an administrator approves it.
+          <strong>Pending Approvals</strong> until an administrator approves it.
         </p>
         <div className="mt-3 flex gap-2">
-          <Link to={`/agents?tab=codes&organizationId=${org.id}${canOperate ? '&create=1' : ''}`} className={buttonClasses(canOperate ? 'primary' : 'secondary')}>
+          <Link to={`/deploy?tab=codes&organizationId=${org.id}${canOperate ? '&create=1' : ''}`} className={buttonClasses(canOperate ? 'primary' : 'secondary')}>
             {canOperate ? 'Create deployment code' : 'View deployment codes'}
           </Link>
-          <Link to="/agents?tab=approvals" className={buttonClasses('secondary')}>
+          <Link to="/approvals" className={buttonClasses('secondary')}>
             <ScrollText className="size-4" aria-hidden />
-            Pending approvals
+            Pending Approvals
           </Link>
         </div>
       </Card>
