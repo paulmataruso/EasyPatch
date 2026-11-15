@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EasyPatch.Agent.Core.Abstractions;
 using EasyPatch.Agent.Core.Ipc;
+using EasyPatch.Agent.Core.Logging;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -218,8 +219,10 @@ internal sealed class TrayLauncher : BackgroundService
 /// <summary>Creates the broker that serves the trays, counting the signed-in sessions with WTS.</summary>
 internal static class TrayBrokerFactory
 {
-    public static TrayBroker Create(ILoggerFactory loggerFactory) =>
-        new(() => WindowsUserSessions.SignedIn().Select(s => s.SessionId).ToList(), loggerFactory.CreateLogger<TrayBroker>());
+    /// <param name="logDirectory">The agent log, shown (first lines, redacted) in the status window.</param>
+    public static TrayBroker Create(ILoggerFactory loggerFactory, string logDirectory) =>
+        new(() => WindowsUserSessions.SignedIn().Select(s => s.SessionId).ToList(), loggerFactory.CreateLogger<TrayBroker>(),
+            () => AgentLogTail.Read(logDirectory));
 }
 
 /// <summary>Restarts Windows with InitiateShutdown (planned, operating system: hotfix).</summary>

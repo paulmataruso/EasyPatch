@@ -16,9 +16,18 @@ public enum TrayMessageType
     /// <summary>The tray should exit (the service is stopping or being uninstalled).</summary>
     Exit,
 
+    /// <summary>The answer to a <see cref="CheckIn"/> or <see cref="CheckForUpdates"/> request.</summary>
+    RequestResult,
+
+    /// <summary>Recent agent log entries, in answer to <see cref="GetLog"/>.</summary>
+    Log,
+
     // tray -> service
     RestartNow,
     Postpone,
+    CheckIn,
+    CheckForUpdates,
+    GetLog,
 }
 
 /// <summary>One message on the tray pipe. Only the fields relevant to <see cref="Type"/> are set.</summary>
@@ -33,15 +42,28 @@ public sealed record TrayMessage
 
     public Guid? JobId { get; init; }
     public int? Minutes { get; init; }
+
+    /// <summary>For <see cref="TrayMessageType.RequestResult"/>: the request answered.</summary>
+    public UserRequestKind? Request { get; init; }
+
+    public UserRequestResult? Result { get; init; }
+
+    /// <summary>For <see cref="TrayMessageType.Log"/>, oldest first.</summary>
+    public IReadOnlyList<TrayLogEntry>? Log { get; init; }
 }
 
-/// <summary>Length-prefixed (32-bit little-endian) UTF-8 JSON frames, at most <see cref="MaxFrameBytes"/>.</summary>
+/// <summary>Length-prefixed (32-bit little-endian) UTF-8 JSON frames. A tray may send at most
+/// <see cref="MaxRequestBytes"/>; the service at most <see cref="MaxFrameBytes"/> (the log needs more room).</summary>
 public static class TrayFrames
 {
     /// <summary>\\.\pipe\EasyPatchAgent</summary>
     public const string PipeName = "EasyPatchAgent";
 
-    public const int MaxFrameBytes = 16 * 1024;
+    /// <summary>Largest frame the service accepts from a tray.</summary>
+    public const int MaxRequestBytes = 16 * 1024;
+
+    /// <summary>Largest frame either side writes, and the tray accepts.</summary>
+    public const int MaxFrameBytes = 256 * 1024;
 
     /// <summary>The rights the tray requests when it opens the pipe.</summary>
     /// <remarks>Not GENERIC_READ | GENERIC_WRITE (what a <see cref="System.IO.Pipes.PipeDirection"/> constructor asks
@@ -53,6 +75,9 @@ public static class TrayFrames
     /// <summary>The rights interactive users have on the pipe: everything <see cref="ClientAccess"/> requests, but not
     /// <see cref="PipeAccessRights.CreateNewInstance"/>, so no user process can serve the pipe.</summary>
     public const PipeAccessRights InteractiveUserAccess = PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize;
+
+    /// <summary>Size of <paramref name="message"/> as a frame body.</summary>
+    public static int Measure(TrayMessage message) => JsonSerializer.SerializeToUtf8Bytes(message, ContractJson.Options).Length;
 
     public static async Task WriteAsync(Stream stream, TrayMessage message, CancellationToken cancellationToken)
     {
@@ -70,8 +95,9 @@ public static class TrayFrames
         await stream.FlushAsync(cancellationToken);
     }
 
-    /// <summary>Reads the next message; null at end of stream. Throws <see cref="InvalidDataException"/> on a bad frame.</summary>
-    public static async Task<TrayMessage?> ReadAsync(Stream stream, CancellationToken cancellationToken)
+    /// <summary>Reads the next message; null at end of stream. Throws <see cref="InvalidDataException"/> on a bad frame
+    /// or one longer than <paramref name="maxBytes"/>.</summary>
+    public static async Task<TrayMessage?> ReadAsync(Stream stream, int maxBytes, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         var header = new byte[4];
@@ -88,7 +114,7 @@ public static class TrayFrames
         }
 
         var length = BinaryPrimitives.ReadInt32LittleEndian(header);
-        if (length is <= 0 or > MaxFrameBytes)
+        if (length <= 0 || length > Math.Min(maxBytes, MaxFrameBytes))
         {
             throw new InvalidDataException("Invalid tray frame length.");
         }

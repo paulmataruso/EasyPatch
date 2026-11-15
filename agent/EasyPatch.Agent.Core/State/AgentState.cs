@@ -64,6 +64,17 @@ public sealed class AgentState
 
     public DateTimeOffset? LastScanAttemptAt { get; set; }
 
+    /// <summary>Applicable updates not installed, found by the last successful scan.</summary>
+    public int? LastScanMissingCount { get; set; }
+
+    /// <summary>Why the most recent scan failed; null when it succeeded.</summary>
+    public string? LastScanError { get; set; }
+
+    /// <summary>The most recent installation job that installed at least one update, and how many it installed.</summary>
+    public DateTimeOffset? LastInstallAt { get; set; }
+
+    public int? LastInstallCount { get; set; }
+
     public DateTimeOffset? LastInventoryAt { get; set; }
 
     public DateTimeOffset? LastHistorySyncAt { get; set; }

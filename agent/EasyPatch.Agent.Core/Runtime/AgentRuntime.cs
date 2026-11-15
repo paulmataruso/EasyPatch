@@ -22,8 +22,14 @@ namespace EasyPatch.Agent.Core.Runtime;
 /// <see cref="RunScanAsync"/>, <see cref="SendInventoryAsync"/>, <see cref="FlushOutboxAsync"/>) drive the same
 /// logic deterministically for tests and integration scenarios.
 /// </summary>
-public sealed class AgentRuntime : IDisposable
+public sealed class AgentRuntime : IUserRequestHandler, IDisposable
 {
+    /// <summary>Minimum time between check-ins requested by users (for the whole computer).</summary>
+    public static readonly TimeSpan UserCheckInInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>Minimum time between update checks requested by users (for the whole computer).</summary>
+    public static readonly TimeSpan UserUpdateCheckInterval = TimeSpan.FromMinutes(5);
+
     private readonly AgentRuntimeOptions _options;
     private readonly AgentPlatform _platform;
     private readonly TimeProvider _time;
@@ -40,8 +46,15 @@ public sealed class AgentRuntime : IDisposable
     private readonly AgentUpdateHandler _agentUpdate;
     private readonly WindowsUpdatePolicyManager? _policy;
     private readonly SemaphoreSlim _flushSignal = new(0, int.MaxValue);
+    private readonly Lock _userRequestLock = new();
     private string? _announcedVersion;
     private bool _rebootPending;
+    private DateTimeOffset? _lastUserCheckIn;
+    private DateTimeOffset? _lastUserUpdateCheck;
+    private volatile bool _checkInRequested;
+    private volatile bool _updateCheckRequested;
+    private volatile string? _scanActivity;
+    private DateTimeOffset? _unreachableSince;
 
     public AgentRuntime(
         AgentRuntimeOptions options,
@@ -187,6 +200,13 @@ public sealed class AgentRuntime : IDisposable
         }
 
         var config = AgentConfigLimits.Normalize(response.Config);
+        lock (_userRequestLock)
+        {
+            _unreachableSince = null;
+        }
+
+        _checkInRequested = false; // a successful check-in answers a user's request
+
         State.Update(s =>
         {
             s.LastCheckInAt = _time.GetUtcNow();
@@ -242,8 +262,118 @@ public sealed class AgentRuntime : IDisposable
     /// <summary>Runs a scan and queues the result (plus history). Returns the scan ID, or null if skipped.</summary>
     public async Task<Guid?> RunScanAsync(ScanTrigger trigger = ScanTrigger.Scheduled, CancellationToken cancellationToken = default)
     {
-        var report = await _scans.RunScanAsync(trigger, jobId: null, gateHeld: false, cancellationToken);
-        return report?.ScanId;
+        _scanActivity = "Checking for updates";
+        PublishTrayStatus();
+        try
+        {
+            var report = await _scans.RunScanAsync(trigger, jobId: null, gateHeld: false, cancellationToken);
+            return report?.ScanId;
+        }
+        finally
+        {
+            _scanActivity = null;
+            PublishTrayStatus();
+        }
+    }
+
+    /// <summary>Runs the update check a user asked for (<see cref="UserRequestKind.CheckForUpdates"/>), if one is
+    /// waiting. Returns the scan ID, or null when none was requested.</summary>
+    public async Task<Guid?> RunRequestedUpdateCheckAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_updateCheckRequested)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await RunScanAsync(ScanTrigger.User, cancellationToken);
+        }
+        finally
+        {
+            _updateCheckRequested = false;
+            PublishTrayStatus();
+        }
+    }
+
+    /// <summary>True while a check-in a user asked for has not run yet.</summary>
+    public bool CheckInRequested => _checkInRequested;
+
+    /// <summary>
+    /// A request from the status window. Both requests are rate-limited for the whole computer (not per user), never
+    /// take input, and never install or restart anything: a check-in is the regular heartbeat, and an update check is
+    /// the regular scan.
+    /// </summary>
+    public UserRequestResult HandleUserRequest(UserRequestKind kind, int sessionId)
+    {
+        var status = State.Read(s => s.Status);
+        if (status != AgentEnrollmentStatus.Active)
+        {
+            return new UserRequestResult(false, status == AgentEnrollmentStatus.PendingApproval
+                ? "This computer is waiting for approval in the EasyPatch console."
+                : "This computer is not connected to an EasyPatch server.");
+        }
+
+        UserRequestResult result;
+        var now = _time.GetUtcNow();
+        lock (_userRequestLock)
+        {
+            result = kind switch
+            {
+                UserRequestKind.CheckIn => RequestCheckIn(now, sessionId),
+                UserRequestKind.CheckForUpdates => RequestUpdateCheck(now, sessionId),
+                _ => new UserRequestResult(false, "Unknown request."),
+            };
+        }
+
+        PublishTrayStatus();
+        return result;
+    }
+
+    UserRequestResult IUserRequestHandler.Handle(UserRequestKind kind, int sessionId) => HandleUserRequest(kind, sessionId);
+
+    private UserRequestResult RequestCheckIn(DateTimeOffset now, int sessionId)
+    {
+        if (_checkInRequested)
+        {
+            return new UserRequestResult(true, "Checking in with the server…");
+        }
+
+        if (_lastUserCheckIn is { } last && now - last < UserCheckInInterval)
+        {
+            var wait = (int)Math.Ceiling((UserCheckInInterval - (now - last)).TotalSeconds);
+            return new UserRequestResult(false, $"A check-in was requested moments ago. Try again in {wait} seconds.");
+        }
+
+        _lastUserCheckIn = now;
+        _checkInRequested = true;
+        _flushSignal.Release(); // wakes the communication loop
+        _logger.LogInformation("A user in session {SessionId} asked for a check-in.", sessionId);
+        return new UserRequestResult(true, "Checking in with the server…");
+    }
+
+    private UserRequestResult RequestUpdateCheck(DateTimeOffset now, int sessionId)
+    {
+        if (_updateCheckRequested)
+        {
+            return new UserRequestResult(true, "Checking for updates…");
+        }
+
+        if (_gate.IsBusy)
+        {
+            return new UserRequestResult(false, "Updates are being checked or installed right now. Try again when that has finished.");
+        }
+
+        if (_lastUserUpdateCheck is { } last && now - last < UserUpdateCheckInterval)
+        {
+            var wait = (int)Math.Ceiling((UserUpdateCheckInterval - (now - last)).TotalMinutes);
+            return new UserRequestResult(false, $"Updates were checked a few minutes ago. Try again in {wait} minute{(wait == 1 ? string.Empty : "s")}.");
+        }
+
+        _lastUserUpdateCheck = now;
+        _updateCheckRequested = true;
+        _logger.LogInformation("A user in session {SessionId} asked for an update check.", sessionId);
+        return new UserRequestResult(true, "Checking for updates. This can take a few minutes.");
     }
 
     /// <summary>Collects inventory and queues it.</summary>
@@ -360,6 +490,7 @@ public sealed class AgentRuntime : IDisposable
             try
             {
                 var outcome = await _enrollment.EnsureEnrolledAsync(stoppingToken);
+                PublishTrayStatus();
                 var revoked = State.Read(s => s.Status == AgentEnrollmentStatus.Revoked);
                 switch (outcome)
                 {
@@ -438,9 +569,10 @@ public sealed class AgentRuntime : IDisposable
                 }
             }
 
+            var userCheckIn = _checkInRequested;
             try
             {
-                if (flushRequested && _time.GetUtcNow() < nextCheckIn && backoff.Attempt == 0)
+                if (flushRequested && !userCheckIn && _time.GetUtcNow() < nextCheckIn && backoff.Attempt == 0)
                 {
                     DrainSignal();
                     await FlushOutboxAsync(token);
@@ -464,6 +596,7 @@ public sealed class AgentRuntime : IDisposable
             {
                 var delay = backoff.NextDelay(ex.RetryAfter);
                 nextCheckIn = _time.GetUtcNow() + delay;
+                MarkUnreachable();
                 _logger.LogWarning("Server unreachable; retrying in {Delay:g}. {Message}", delay, ex.Message);
             }
             catch (AgentAuthException ex) when (ex.IsFatal)
@@ -481,13 +614,24 @@ public sealed class AgentRuntime : IDisposable
                     s.LastAuthFailureCode = ex.ErrorCode;
                     s.LastAuthFailureAt = _time.GetUtcNow();
                 });
+                MarkUnreachable();
                 _logger.LogError("The server rejected a request ({Code}); retrying in {Delay:g}.", ex.ErrorCode, delay);
             }
             catch (Exception ex)
             {
                 var delay = backoff.NextDelay();
                 nextCheckIn = _time.GetUtcNow() + delay;
+                MarkUnreachable();
                 _logger.LogError(ex, "Check-in failed; retrying in {Delay:g}.", delay);
+            }
+            finally
+            {
+                if (userCheckIn)
+                {
+                    _checkInRequested = false;
+                }
+
+                PublishTrayStatus();
             }
         }
     }
@@ -537,7 +681,14 @@ public sealed class AgentRuntime : IDisposable
 
                 var config = State.Read(s => s.Config);
                 now = _time.GetUtcNow();
-                if (now >= scanDue)
+                if (_updateCheckRequested)
+                {
+                    // A user's update check replaces the next scheduled scan.
+                    await RunRequestedUpdateCheckAsync(token);
+                    scanTrigger = ScanTrigger.Scheduled;
+                    scanDue = _time.GetUtcNow() + Jitter.Apply(TimeSpan.FromMinutes(config.ScanIntervalMinutes), config.JitterPercent);
+                }
+                else if (now >= scanDue)
                 {
                     var scanId = await RunScanAsync(scanTrigger, token);
                     scanTrigger = ScanTrigger.Scheduled;
@@ -631,6 +782,7 @@ public sealed class AgentRuntime : IDisposable
             s.LastAuthFailureAt = _time.GetUtcNow();
             s.Jobs.Clear();
         });
+        PublishTrayStatus();
     }
 
     private void RestoreWindowsUpdatePolicy()
@@ -665,15 +817,58 @@ public sealed class AgentRuntime : IDisposable
             return;
         }
 
-        var (lastContact, showIcon) = State.Read(s => (s.LastCheckInAt, s.Config.UserExperience.TrayIcon));
+        var snapshot = State.Read(s => new
+        {
+            s.Status,
+            s.ServerUrl,
+            s.LastCheckInAt,
+            s.Config.UserExperience.TrayIcon,
+            s.LastScanAt,
+            s.LastScanMissingCount,
+            s.LastScanError,
+            s.LastInstallAt,
+            s.LastInstallCount,
+        });
+        DateTimeOffset? unreachableSince;
+        lock (_userRequestLock)
+        {
+            unreachableSince = _unreachableSince;
+        }
+
+        var connection = snapshot.Status switch
+        {
+            AgentEnrollmentStatus.Active => unreachableSince is null ? TrayConnection.Connected : TrayConnection.Unreachable,
+            AgentEnrollmentStatus.PendingApproval => TrayConnection.PendingApproval,
+            AgentEnrollmentStatus.Revoked or AgentEnrollmentStatus.Rejected => TrayConnection.Revoked,
+            _ => TrayConnection.NotEnrolled,
+        };
+
         SafeUserCall(u => u.SetStatus(new TrayStatus
         {
-            Activity = _jobs.CurrentActivity,
-            LastContactAt = lastContact,
+            Activity = _scanActivity ?? _jobs.CurrentActivity,
+            LastContactAt = snapshot.LastCheckInAt,
             RebootPending = _rebootPending,
             AgentVersion = _options.AgentVersion,
-            ShowIcon = showIcon,
+            ShowIcon = snapshot.TrayIcon,
+            Connection = connection,
+            UnreachableSince = connection == TrayConnection.Unreachable ? unreachableSince : null,
+            ServerHost = Uri.TryCreate(snapshot.ServerUrl, UriKind.Absolute, out var server) ? server.Host : null,
+            LastScanAt = snapshot.LastScanAt,
+            UpdatesAvailable = snapshot.LastScanMissingCount,
+            LastScanError = snapshot.LastScanError,
+            LastInstallAt = snapshot.LastInstallAt,
+            LastInstallCount = snapshot.LastInstallCount,
+            CheckInRequested = _checkInRequested,
+            UpdateCheckRequested = _updateCheckRequested,
         }));
+    }
+
+    private void MarkUnreachable()
+    {
+        lock (_userRequestLock)
+        {
+            _unreachableSince ??= _time.GetUtcNow();
+        }
     }
 
     private void SafeUserCall(Action<IUserInteraction> action)

@@ -311,4 +311,24 @@ public sealed class AgentLifecycleTests(PostgresFixture postgres) : IntegrationT
         Assert.Null(agent.Runtime.State.Read(s => s.CredentialId));
         Assert.Null(await agent.Runtime.CheckInOnceAsync());
     }
+
+    [Fact]
+    public async Task An_update_check_a_user_asked_for_from_the_tray_is_recorded_as_such()
+    {
+        var admin = await SuperAdminAsync();
+        var (org, site) = await CreateOrgAsync(admin);
+        using var agent = new TestAgent(NewHttpClient(), Clock);
+        agent.Bootstrap.EnrollmentToken = await CreateTokenAsync(admin, org.Id, site.Id);
+        await agent.Runtime.EnsureEnrolledAsync();
+        agent.WindowsUpdate.Add("Security Update for Microsoft Edge (KB5046700)", MicrosoftClassifications.SecurityUpdates, "5046700");
+
+        Assert.True(agent.Runtime.HandleUserRequest(UserRequestKind.CheckForUpdates, sessionId: 2).Accepted);
+        var scanId = await agent.Runtime.RunRequestedUpdateCheckAsync();
+        Assert.NotNull(scanId);
+        Assert.True(await agent.Runtime.FlushOutboxAsync());
+
+        var scan = await WithDbAsync(db => db.UpdateScans.AsNoTracking().SingleAsync(s => s.AgentScanId == scanId));
+        Assert.Equal(ScanTrigger.User, scan.Trigger);
+        Assert.Equal(ScanStatus.Succeeded, scan.Status);
+    }
 }

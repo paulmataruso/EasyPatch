@@ -99,7 +99,12 @@ public sealed class ScanService
                 Installed = scan.Installed.Select(u => u with { Description = null }).ToList(),
                 Applications = scan.Applications,
             };
-            _state.Update(s => s.LastScanAt = completedAt);
+            _state.Update(s =>
+            {
+                s.LastScanAt = completedAt;
+                s.LastScanMissingCount = report.Missing.Count;
+                s.LastScanError = null;
+            });
             _logger.LogInformation("Scan completed: {Missing} applicable updates not installed, {Installed} installed.",
                 report.Missing.Count, report.Installed.Count);
         }
@@ -107,6 +112,8 @@ public sealed class ScanService
         {
             var (code, message) = _platform.Updates.DescribeFailure(ex);
             _logger.LogError(ex, "{Name} scan failed ({Code}).", _platform.Updates.Name, code);
+            var reason = string.IsNullOrWhiteSpace(message) ? code : message;
+            _state.Update(s => s.LastScanError = reason.Length > 300 ? reason[..300] : reason);
             report = new ScanResultReport
             {
                 ScanId = Guid.NewGuid(),

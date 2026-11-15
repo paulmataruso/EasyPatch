@@ -104,10 +104,12 @@ All screenshots show fictional demo data.
   recurring restart schedule set in policy (optionally only when Windows needs a restart).
   Signed-in users see a countdown, or can postpone up to a deadline. A restart job completes
   only when the computer's boot time shows that it actually restarted.
-* **Tray icon and user messages.** The agent shows an EasyPatch icon in the notification area
-  of every signed-in user, with its status and the time of its last contact with the server.
-  Users are told when updates are being installed (this can be turned off in policy), and
-  administrators can send preset messages. There is no free-text messaging.
+* **Tray icon, status window and user messages.** The agent shows an EasyPatch icon in the
+  notification area of every signed-in user; hovering shows the agent version and status.
+  Clicking it opens a status window with the connection and update status, *Check in now*,
+  *Check for updates* (a scan only, rate-limited) and the recent agent log. Administrators can
+  hide the icon in policy. Users are told when updates are being installed (this can be turned
+  off in policy), and administrators can send preset messages. There is no free-text messaging.
 * **Windows Update policy overrides** per organization, site or endpoint: Automatic Updates
   mode, feature update deferral and target version, quality update deferral and pausing, and
   restart behaviour with active hours. Each group is *Not configured* by default. The console

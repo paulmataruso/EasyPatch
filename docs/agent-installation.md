@@ -14,7 +14,8 @@ Update Agent API that Windows itself uses. The agent:
   policy, never the WSUS server settings, and puts the original values back when the setting is
   removed or the agent is uninstalled. Otherwise WSUS, Group Policy, Windows Update for Business
   and Intune settings are honored and only reported;
-* shows an EasyPatch icon in the notification area of signed-in users (see [Tray icon](#tray-icon));
+* shows an EasyPatch icon in the notification area of signed-in users, with a status window
+  (see [Tray icon](#tray-icon));
 * cannot run commands. It executes five job types: update scan, inventory refresh, install
   updates, restart, and preset messages to signed-in users.
 
@@ -266,15 +267,47 @@ Windows 11 puts new notification-area icons in the hidden-icons flyout (the **^*
 clock) until the user moves them. To keep it on the taskbar, drag it out of the flyout or turn
 it on under *Settings → Personalization → Taskbar → Other system tray icons*.
 
-The icon's menu shows the agent's status, its last contact with the server and whether a
-restart is pending. Notifications show the preset messages. During a restart request a small
-window offers *Restart now* and, where the administrator allowed it, *Postpone*. Users cannot
-change the agent, run anything, or stop it from the tray.
+Hovering over the icon shows the agent version and a one-line status (for example
+*EasyPatch Agent 1.5.0 / This computer is up to date*). The right-click menu shows the same
+version, the current activity, the last check-in and whether a restart is pending.
+Notifications show the preset messages. During a restart request a small window offers
+*Restart now* and, where the administrator allowed it, *Postpone*.
 
-To hide the icon, turn off **Tray icon** in the policy for the organization, site or endpoint.
-The icon then appears only while a message or a restart request is shown. In a session
-without a tray (for example right after sign-in, before the tray has started) messages cannot
-be shown, and restart countdowns use Windows' own shutdown warning instead.
+### Status window
+
+Clicking the icon (or **Open EasyPatch status** in its menu) opens the status window. Agent
+1.5.0 and later have it.
+
+* **Summary.** A colored heading: *up to date*, *N updates available*, *restart required*,
+  *checking for updates* or *installing updates*, *can't reach the EasyPatch server*,
+  *waiting for approval*, *not enrolled*, or *the EasyPatch service is not responding*. A
+  failed update check, or none for three days, is also shown here.
+* **Details.** Server connection, last check-in, the server's host name (*Managed by*), the
+  last update check and the number of applicable updates it found, the last installation
+  (time and number of updates), whether a restart is needed, the current activity, the
+  computer name and the agent version.
+* **Check in now.** Contacts the server at once, which also delivers waiting results and picks
+  up waiting jobs.
+* **Check for updates.** Runs an update scan at once. The scan is reported to the server like
+  any other and is recorded with the trigger `User`. It never installs anything: the
+  administrator's schedules and jobs still decide what is installed and when.
+* **Restart options…** appears while a restart request is waiting.
+* **Recent activity.** The newest 200 entries of the agent log (information, warnings and
+  errors; the first line of each entry only), newest first. It refreshes every 30 seconds while
+  the window is open. **Copy** copies the selected entries, or all of them, for a support
+  ticket. The full log stays in `C:\ProgramData\EasyPatch\logs`.
+
+The two buttons are limited for the whole computer, not per user: a check-in at most every 30
+seconds, and an update check at most every 5 minutes and not while Windows Update is busy
+with a scan or an installation. Each request is written to the agent log with the session it
+came from. Users cannot change the agent's settings, install or remove anything, run commands
+or stop the agent from the tray or the status window.
+
+To hide the icon, set **EasyPatch icon in the notification area** to *Hide* under *User
+experience* in the policy for the organization, site, tag or endpoint. The icon then appears
+only while a message or a restart request is shown, so users cannot open the status window.
+In a session without a tray (for example right after sign-in, before the tray has started)
+messages cannot be shown, and restart countdowns use Windows' own shutdown warning instead.
 
 ## Upgrading
 
@@ -347,7 +380,7 @@ need them.
 | "Could not reach the EasyPatch server" | DNS, firewall, proxy (`PROXYURL`), or TLS: the server certificate must chain to a root trusted by the computer |
 | Scans fail with `0x8024402C`, `0x80244022` or similar | The Windows Update source (Microsoft or WSUS) is unreachable. The error code and its description are shown in the console |
 | Updates not offered that you expected | WSUS approvals, Windows Update for Business deferrals or a target release version apply. The console shows the detected update source, and the endpoint's *Policy* tab shows any Windows Update settings EasyPatch applied |
-| No tray icon | On Windows 11, look in the hidden-icons flyout (**^**) first. Otherwise the *Tray icon* policy is off, the user signed in less than 15 seconds ago, or the session is a remote session that is disconnected. *Signed-in users* on the endpoint's overview shows how many sessions have a tray. If a session is signed in but has no tray, the agent log says *did not connect to the service*. Agent 1.1.0 had this problem for every user who was not running as administrator; install 1.1.1 or later |
+| No tray icon | On Windows 11, look in the hidden-icons flyout (**^**) first. Otherwise the policy setting *EasyPatch icon in the notification area* is *Hide*, the user signed in less than 15 seconds ago, or the session is a remote session that is disconnected. *Signed-in users* on the endpoint's overview shows how many sessions have a tray. If a session is signed in but has no tray, the agent log says *did not connect to the service*. Agent 1.1.0 had this problem for every user who was not running as administrator; install 1.1.1 or later |
 | Windows Update settings show *Conflict* | Another policy source (usually domain Group Policy or Intune) set different values. Remove that policy, or change the EasyPatch setting to match; changing the EasyPatch setting applies it again |
 | Agent update failed with `update_untrusted_key` or `update_signature_invalid` | The package was signed with a key this agent was not built with, or the `.sig` file does not belong to the package. Check the key ID under *Agent Management → Packages*. Agents keep trusting only the keys they were built with; to change keys see [security.md](security.md#agent-release-signing) |
 | Agent update failed with `update_hash_mismatch` | The file downloaded from the server is not the one that was signed (it was replaced, rebuilt or truncated). Copy the MSI and its `.sig` from the same build again |

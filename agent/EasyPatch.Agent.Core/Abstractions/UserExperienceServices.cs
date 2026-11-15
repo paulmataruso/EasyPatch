@@ -46,7 +46,23 @@ public sealed record RestartPrompt
 /// <summary>A signed-in user's answer to a <see cref="RestartPrompt"/>.</summary>
 public sealed record RestartPromptResponse(Guid JobId, bool RestartNow, int? PostponeMinutes, int SessionId);
 
-/// <summary>Summary shown in the tray menu.</summary>
+/// <summary>The agent's connection to its server, as shown in the status window.</summary>
+public enum TrayConnection
+{
+    Connected,
+
+    /// <summary>The last check-in attempt failed (see <see cref="TrayStatus.UnreachableSince"/>).</summary>
+    Unreachable,
+
+    NotEnrolled,
+    PendingApproval,
+
+    /// <summary>The server rejected or revoked this computer's enrollment.</summary>
+    Revoked,
+}
+
+/// <summary>Summary shown in the tray menu, its tooltip and the status window. Scalar values only, so two statuses
+/// compare by value and an unchanged status is not sent again.</summary>
 public sealed record TrayStatus
 {
     public string Activity { get; init; } = "Idle";
@@ -56,11 +72,68 @@ public sealed record TrayStatus
 
     /// <summary>When false the icon is hidden except while a message or restart request is shown.</summary>
     public bool ShowIcon { get; init; } = true;
+
+    public TrayConnection Connection { get; init; } = TrayConnection.Connected;
+
+    /// <summary>First failed check-in attempt since the last successful one.</summary>
+    public DateTimeOffset? UnreachableSince { get; init; }
+
+    /// <summary>Host name of the EasyPatch server (shown as "Managed by").</summary>
+    public string? ServerHost { get; init; }
+
+    /// <summary>Last successful update scan, and the number of applicable updates it found not installed.</summary>
+    public DateTimeOffset? LastScanAt { get; init; }
+
+    public int? UpdatesAvailable { get; init; }
+
+    /// <summary>Set when the most recent scan failed (the reason, for example "Windows Update error 0x8024402C").</summary>
+    public string? LastScanError { get; init; }
+
+    /// <summary>The most recent installation job that installed at least one update, and how many it installed.</summary>
+    public DateTimeOffset? LastInstallAt { get; init; }
+
+    public int? LastInstallCount { get; init; }
+
+    /// <summary>A user's check-in or update check is waiting to run (the status window disables the button meanwhile).</summary>
+    public bool CheckInRequested { get; init; }
+
+    public bool UpdateCheckRequested { get; init; }
 }
+
+/// <summary>What a signed-in user can ask for from the status window. Neither request carries any input.</summary>
+public enum UserRequestKind
+{
+    /// <summary>Check in with the server now (also delivers queued reports and picks up waiting jobs).</summary>
+    CheckIn,
+
+    /// <summary>Scan for missing updates now. Never installs anything.</summary>
+    CheckForUpdates,
+}
+
+/// <summary>The answer shown to the user in the status window.</summary>
+public sealed record UserRequestResult(bool Accepted, string Message);
+
+/// <summary>Runs the requests users make from the status window, rate-limited for the whole computer.</summary>
+public interface IUserRequestHandler
+{
+    /// <param name="sessionId">The requesting user's session, from Windows (for the log only).</param>
+    UserRequestResult Handle(UserRequestKind kind, int sessionId);
+}
+
+public enum TrayLogLevel
+{
+    Information,
+    Warning,
+    Error,
+}
+
+/// <summary>One entry of the agent log as shown in the status window: the first line of the message only.</summary>
+public sealed record TrayLogEntry(DateTimeOffset At, TrayLogLevel Level, string Message);
 
 /// <summary>
 /// Talks to the signed-in users through the EasyPatch tray. Implementations never execute anything on behalf of a
-/// user: the only input accepted from a tray is a restart-now or postpone answer to the current restart request.
+/// user: the only input accepted from a tray is a restart-now or postpone answer to the current restart request,
+/// and the fixed, parameterless requests of <see cref="UserRequestKind"/> (handled by <see cref="IUserRequestHandler"/>).
 /// </summary>
 public interface IUserInteraction
 {

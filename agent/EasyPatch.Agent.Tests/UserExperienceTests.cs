@@ -1,4 +1,5 @@
 using EasyPatch.Agent.Core.Abstractions;
+using EasyPatch.Agent.Core.Runtime;
 using EasyPatch.Agent.Core.State;
 using EasyPatch.Agent.Tests.Infrastructure;
 using EasyPatch.Contracts;
@@ -395,6 +396,92 @@ public sealed class UserExperienceTests
         Assert.Equal(h.Time.GetUtcNow(), status.LastContactAt);
         Assert.False(status.ShowIcon);
         Assert.Equal("Idle", status.Activity);
+    }
+
+    [Fact]
+    public async Task Users_can_ask_for_a_check_in_but_not_more_than_every_30_seconds()
+    {
+        using var h = new AgentHarness();
+        Assert.False(h.Runtime.HandleUserRequest(UserRequestKind.CheckIn, 2).Accepted); // not enrolled
+        await h.EnrollWithTokenAsync();
+
+        Assert.True(h.Runtime.HandleUserRequest(UserRequestKind.CheckIn, 2).Accepted);
+        Assert.True(h.Runtime.CheckInRequested);
+        Assert.True(h.Users.Status!.CheckInRequested);
+        Assert.True(h.Runtime.HandleUserRequest(UserRequestKind.CheckIn, 3).Accepted); // already on its way
+
+        await h.Runtime.CheckInOnceAsync(Ct);
+        Assert.False(h.Runtime.CheckInRequested);
+        Assert.False(h.Users.Status!.CheckInRequested);
+        Assert.Equal(TrayConnection.Connected, h.Users.Status.Connection);
+        Assert.Equal("easypatch.test", h.Users.Status.ServerHost);
+
+        var tooSoon = h.Runtime.HandleUserRequest(UserRequestKind.CheckIn, 2);
+        Assert.False(tooSoon.Accepted);
+        Assert.Contains("30 seconds", tooSoon.Message, StringComparison.Ordinal);
+        Assert.False(h.Runtime.CheckInRequested);
+
+        h.Time.Advance(AgentRuntime.UserCheckInInterval);
+        Assert.True(h.Runtime.HandleUserRequest(UserRequestKind.CheckIn, 2).Accepted);
+    }
+
+    [Fact]
+    public async Task Users_can_check_for_updates_which_scans_without_installing_and_is_rate_limited()
+    {
+        using var h = new AgentHarness();
+        await h.EnrollWithTokenAsync();
+        var update = h.AddSecurityUpdate("KB5009001");
+
+        Assert.Null(await h.Runtime.RunRequestedUpdateCheckAsync(Ct)); // nothing requested
+        Assert.True(h.Runtime.HandleUserRequest(UserRequestKind.CheckForUpdates, 2).Accepted);
+        Assert.True(h.Users.Status!.UpdateCheckRequested);
+        Assert.True(h.Runtime.HandleUserRequest(UserRequestKind.CheckForUpdates, 4).Accepted); // already waiting
+
+        var scanId = await h.Runtime.RunRequestedUpdateCheckAsync(Ct);
+        Assert.NotNull(scanId);
+        Assert.Null(await h.Runtime.RunRequestedUpdateCheckAsync(Ct)); // ran once
+        var status = h.Users.Status!;
+        Assert.False(status.UpdateCheckRequested);
+        Assert.Equal(1, status.UpdatesAvailable);
+        Assert.Equal(h.Time.GetUtcNow(), status.LastScanAt);
+        Assert.Null(status.LastScanError);
+        Assert.Equal("Idle", status.Activity);
+        Assert.False(update.Installed);
+        Assert.DoesNotContain(h.WindowsUpdate.Operations, o => o.StartsWith("install", StringComparison.Ordinal) || o.StartsWith("download", StringComparison.Ordinal));
+        Assert.True(await h.Runtime.FlushOutboxAsync(Ct));
+        Assert.Equal(ScanTrigger.User, Assert.Single(h.Server.ScanReports, r => r.ScanId == scanId).Trigger);
+
+        var tooSoon = h.Runtime.HandleUserRequest(UserRequestKind.CheckForUpdates, 2);
+        Assert.False(tooSoon.Accepted);
+        Assert.Contains("5 minutes", tooSoon.Message, StringComparison.Ordinal);
+
+        // A failed check is shown with its reason; the previous count stays.
+        h.Time.Advance(AgentRuntime.UserUpdateCheckInterval);
+        h.WindowsUpdate.ScanException = new InvalidOperationException("The service is not available.") { HResult = unchecked((int)0x8024402C) };
+        Assert.True(h.Runtime.HandleUserRequest(UserRequestKind.CheckForUpdates, 2).Accepted);
+        await h.Runtime.RunRequestedUpdateCheckAsync(Ct);
+        status = h.Users.Status!;
+        Assert.NotNull(status.LastScanError);
+        Assert.Equal(1, status.UpdatesAvailable);
+        Assert.False(status.UpdateCheckRequested);
+    }
+
+    [Fact]
+    public async Task The_tray_status_shows_the_last_installation()
+    {
+        using var h = new AgentHarness();
+        await h.EnrollWithTokenAsync();
+        h.AddSecurityUpdate("KB5009002");
+        h.AddSecurityUpdate("KB5009003");
+        await h.DeliverAsync(AgentHarness.InstallJob());
+        await h.RunJobsAndFlushAsync();
+        await h.Runtime.CheckInOnceAsync(Ct);
+
+        var status = h.Users.Status!;
+        Assert.Equal(2, status.LastInstallCount);
+        Assert.Equal(h.Time.GetUtcNow(), status.LastInstallAt);
+        Assert.Equal(0, status.UpdatesAvailable); // the verification scan after installing
+        Assert.Equal(h.Options.AgentVersion, status.AgentVersion);
     }
 
     [Fact]

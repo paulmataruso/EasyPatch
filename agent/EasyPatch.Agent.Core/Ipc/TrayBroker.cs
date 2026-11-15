@@ -7,14 +7,23 @@ namespace EasyPatch.Agent.Core.Ipc;
 
 /// <summary>
 /// The service side of the tray connection: keeps one connection per signed-in session, pushes status, messages and
-/// the restart prompt, and accepts exactly two kinds of input — "restart now" and "postpone" for the restart prompt
-/// that is currently shown, with a postponement the prompt offered. Nothing else a tray sends has any effect.
+/// the restart prompt, and accepts only these inputs:
+/// <list type="bullet">
+/// <item>"restart now" and "postpone" for the restart prompt that is currently shown, with a postponement the prompt offered;</item>
+/// <item>"check in" and "check for updates", passed to the <see cref="IUserRequestHandler"/> (which rate-limits them);</item>
+/// <item>"get log", answered with the recent agent log entries (first lines only, redacted).</item>
+/// </list>
+/// None of them carries input that is executed or stored. Anything else a tray sends has no effect.
 /// </summary>
 public sealed class TrayBroker : IUserInteraction
 {
     private const int MaxPendingResponses = 16;
 
+    /// <summary>A tray asking again sooner than this gets "please wait" (requests) or nothing (log).</summary>
+    private static readonly TimeSpan MinRequestInterval = TimeSpan.FromSeconds(2);
+
     private readonly Func<IReadOnlyCollection<int>> _signedInSessions;
+    private readonly Func<IReadOnlyList<TrayLogEntry>> _readLog;
     private readonly ILogger _logger;
     private readonly Lock _lock = new();
     private readonly Dictionary<int, Connection> _connections = [];
@@ -22,12 +31,25 @@ public sealed class TrayBroker : IUserInteraction
     private TrayStatus _status = new();
     private RestartPrompt? _prompt;
     private bool _suspended;
+    private IUserRequestHandler? _requests;
 
     /// <param name="signedInSessions">IDs of the sessions with a signed-in user.</param>
-    public TrayBroker(Func<IReadOnlyCollection<int>> signedInSessions, ILogger<TrayBroker> logger)
+    /// <param name="readLog">Recent agent log entries for the status window (none when null).</param>
+    public TrayBroker(Func<IReadOnlyCollection<int>> signedInSessions, ILogger<TrayBroker> logger, Func<IReadOnlyList<TrayLogEntry>>? readLog = null)
     {
         _signedInSessions = signedInSessions ?? throw new ArgumentNullException(nameof(signedInSessions));
         _logger = logger;
+        _readLog = readLog ?? (() => []);
+    }
+
+    /// <summary>Connects the status window's requests to the agent (set once the agent runtime exists).</summary>
+    public void SetRequestHandler(IUserRequestHandler handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        lock (_lock)
+        {
+            _requests = handler;
+        }
     }
 
     /// <summary>True while an agent update keeps the trays closed.</summary>
@@ -213,6 +235,68 @@ public sealed class TrayBroker : IUserInteraction
         }
     }
 
+    private void HandleRequest(Connection connection, UserRequestKind kind)
+    {
+        UserRequestResult result;
+        IUserRequestHandler? handler;
+        lock (_lock)
+        {
+            handler = _requests;
+        }
+
+        if (handler is null)
+        {
+            result = new UserRequestResult(false, "The EasyPatch agent is starting. Try again in a minute.");
+        }
+        else if (!connection.TryStart(kind.ToString()))
+        {
+            result = new UserRequestResult(false, "Please wait a moment before trying again.");
+        }
+        else
+        {
+            try
+            {
+                result = handler.Handle(kind, connection.SessionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "The {Request} request from the tray in session {SessionId} failed.", kind, connection.SessionId);
+                result = new UserRequestResult(false, "The request could not be completed.");
+            }
+        }
+
+        connection.Send(new TrayMessage { Type = TrayMessageType.RequestResult, Request = kind, Result = result });
+    }
+
+    private async Task SendLogAsync(Connection connection, CancellationToken cancellationToken)
+    {
+        if (!connection.TryStart(nameof(TrayMessageType.GetLog)))
+        {
+            return;
+        }
+
+        IReadOnlyList<TrayLogEntry> entries;
+        try
+        {
+            entries = await Task.Run(_readLog, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Could not read the agent log for the tray.");
+            entries = [];
+        }
+
+        // Keep the newest entries that fit in one frame.
+        var message = new TrayMessage { Type = TrayMessageType.Log, Log = entries };
+        while (entries.Count > 0 && TrayFrames.Measure(message) > TrayFrames.MaxFrameBytes)
+        {
+            entries = entries.Skip(Math.Max(1, entries.Count / 4)).ToList();
+            message = message with { Log = entries };
+        }
+
+        connection.Send(message);
+    }
+
     private static async Task WriteLoopAsync(Stream stream, Connection connection, CancellationToken cancellationToken)
     {
         await foreach (var message in connection.Outgoing.Reader.ReadAllAsync(cancellationToken))
@@ -225,9 +309,23 @@ public sealed class TrayBroker : IUserInteraction
     {
         try
         {
-            while (await TrayFrames.ReadAsync(stream, cancellationToken) is { } message)
+            while (await TrayFrames.ReadAsync(stream, TrayFrames.MaxRequestBytes, cancellationToken) is { } message)
             {
-                Handle(connection, message);
+                switch (message.Type)
+                {
+                    case TrayMessageType.CheckIn:
+                        HandleRequest(connection, UserRequestKind.CheckIn);
+                        break;
+                    case TrayMessageType.CheckForUpdates:
+                        HandleRequest(connection, UserRequestKind.CheckForUpdates);
+                        break;
+                    case TrayMessageType.GetLog:
+                        await SendLogAsync(connection, cancellationToken);
+                        break;
+                    default:
+                        Handle(connection, message);
+                        break;
+                }
             }
         }
         catch (InvalidDataException ex)
@@ -238,7 +336,25 @@ public sealed class TrayBroker : IUserInteraction
 
     private sealed class Connection(int sessionId, CancellationTokenSource cts)
     {
+        private readonly Dictionary<string, long> _lastRequest = new(StringComparer.Ordinal);
+
         public int SessionId { get; } = sessionId;
+
+        /// <summary>False when this tray made the same request less than <see cref="MinRequestInterval"/> ago.</summary>
+        public bool TryStart(string request)
+        {
+            lock (_lastRequest)
+            {
+                var now = Environment.TickCount64;
+                if (_lastRequest.TryGetValue(request, out var last) && now - last < (long)MinRequestInterval.TotalMilliseconds)
+                {
+                    return false;
+                }
+
+                _lastRequest[request] = now;
+                return true;
+            }
+        }
 
         public Channel<TrayMessage> Outgoing { get; } = Channel.CreateBounded<TrayMessage>(
             new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });

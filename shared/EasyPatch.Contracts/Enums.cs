@@ -115,6 +115,9 @@ public enum ScanTrigger
     Job,
     PostInstall,
     PostReboot,
+
+    /// <summary>A signed-in user chose <i>Check for updates</i> in the EasyPatch status window (Windows agent 1.5.0 and later).</summary>
+    User,
 }
 
 public enum UpdateSourceType

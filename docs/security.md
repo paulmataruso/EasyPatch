@@ -191,12 +191,27 @@ the named pipe `\\.\pipe\EasyPatchAgent`:
 * **Identity.** The service takes the client's session from Windows
   (`GetNamedPipeClientSessionId`), never from the message, and refuses session 0 (services).
   The tray checks that the pipe server runs in session 0 before trusting it.
-* **What a tray can do.** Exactly two things: answer the restart request that is currently
-  shown, with *Restart now* or one of the offered postponements. Anything else is ignored,
-  and a malformed or oversized frame (over 16 KB) closes the connection. A local user can
-  therefore at most restart the computer sooner or postpone a restart within the
-  administrator's deadline, which the restart prompt allows anyway. No input from the tray is
-  ever executed, and the tray cannot change the agent's configuration, jobs or credentials.
+* **What a tray can do.** Answer the restart request that is currently shown, with *Restart
+  now* or one of the offered postponements; and, from the status window (agent 1.5.0 and
+  later), ask for a check-in, ask for an update check, and read the recent agent log. The
+  three status-window requests carry no parameters. A check-in is the agent's regular
+  heartbeat and an update check is its regular scan: neither installs, removes or restarts
+  anything. They are limited for the whole computer (a check-in every 30 seconds, an update
+  check every 5 minutes and never while Windows Update is busy), so any number of signed-in
+  users cannot make the agent do more than that. Each request is logged with the session it
+  came from. Anything else is ignored, and a malformed frame, or one over 16 KB from a tray,
+  closes the connection. A local user can therefore at most restart the computer sooner,
+  postpone a restart within the administrator's deadline (which the restart prompt allows
+  anyway), or make the agent check in or scan sooner. No input from the tray is ever executed,
+  and the tray cannot change the agent's configuration, jobs or credentials.
+* **What the log shows.** Every signed-in user can read the newest 200 log entries in the
+  status window. Only the first line of each information, warning or error entry is sent, so
+  exception details and debug output stay in the file. The log never contains tokens, keys or
+  passwords, and every line passes through the redaction filter again before it is sent. It
+  does contain operational details such as update titles, job and endpoint IDs, the credential
+  ID (not a secret: every request is signed with the private key) and the server address. The
+  log files themselves stay readable only by SYSTEM and Administrators. To keep users from
+  opening the status window, hide the icon in policy.
 
 ## Linux agent
 
@@ -443,7 +458,7 @@ LocalSystem.
 | E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability. Windows updates come from the sources Windows is configured for, and Linux packages from the repositories the computer is configured for. Application updates (off by default) can only upgrade an installed application to the version the winget community repository offers; a compromised server could approve more applications, but not choose versions, sources or installers. See [Application updates](#application-updates-winget). Agent updates install only packages whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |
 | E2 | A local non-admin user reads agent secrets | Windows: ProgramData ACL (SYSTEM and Administrators), DPAPI, registry ACL on bootstrap values. Linux: root-only `/etc/easypatch` and `/var/lib/easypatch`, `systemd-creds` where available, no token on the command line |
 | E3 | Cross-site request forgery or XSS in the admin UI | SameSite=Strict, CSRF header check, a strict CSP from Caddy, and React escaping |
-| E4 | A local user abuses the tray pipe to make the service do something | The pipe accepts only *restart now* or an offered postponement for the current restart request, from interactive sessions; the session comes from Windows. See [Tray and local pipe](#tray-and-local-pipe). |
+| E4 | A local user abuses the tray pipe to make the service do something | The pipe accepts only *restart now* or an offered postponement for the current restart request, and the parameterless status-window requests (check in, check for updates, read the recent log), from interactive sessions; the session comes from Windows. Check-ins and update checks are rate-limited for the whole computer and never install or restart anything. See [Tray and local pipe](#tray-and-local-pipe). |
 | D3 | A compromised admin account or server restarts many computers or weakens Windows Update settings | Requires the Operator role and MFA; every manual restart and policy change is audited. Restarts warn signed-in users according to the chosen mode. Windows Update changes are limited to the listed values (never the WSUS server), are shown per endpoint in the console, and are restored when removed. This is a disruption risk, not code execution. |
 
 ## Server hardening checklist

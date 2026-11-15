@@ -13,7 +13,9 @@ namespace EasyPatch.Agent.Tray;
 /// <summary>
 /// <c>EasyPatch.Agent.exe tray</c>: the notification-area icon started by the service in each signed-in session. It
 /// runs as the user, holds no credentials, reads nothing from the agent's data directory and can only show what the
-/// service sends it. The only things it sends back are "restart now" and "postpone" for the restart request on screen.
+/// service sends it (status, messages, the restart request and, for the status window, the recent log). The only
+/// things it sends back are "restart now" and "postpone" for the restart request on screen, and the status window's
+/// parameterless "check in", "check for updates" and "get log" requests.
 /// </summary>
 internal static class TrayApplication
 {
@@ -55,10 +57,12 @@ internal sealed class TrayContext : ApplicationContext
     private readonly ToolStripMenuItem _statusItem = new() { Enabled = false };
     private readonly ToolStripMenuItem _contactItem = new() { Enabled = false };
     private readonly ToolStripMenuItem _rebootItem = new("A restart is pending to finish installing updates") { Enabled = false, Visible = false };
+    private readonly ToolStripMenuItem _openStatusItem = new("Open EasyPatch status");
     private readonly ToolStripMenuItem _restartItem = new("Restart options…") { Visible = false };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 5000 };
     private readonly TrayPipeClient _client;
     private RestartPromptForm? _form;
+    private StatusForm? _statusForm;
     private TrayStatus _status = new() { ShowIcon = false };
     private RestartPrompt? _prompt;
     private DateTime _noticeIconUntil;
@@ -66,17 +70,19 @@ internal sealed class TrayContext : ApplicationContext
     public TrayContext()
     {
         _invoker.CreateControl();
-        var header = new ToolStripMenuItem("EasyPatch") { Enabled = false };
+        var header = new ToolStripMenuItem($"EasyPatch Agent {AgentComposition.AgentVersion}") { Enabled = false };
         header.Font = new Font(header.Font, FontStyle.Bold);
-        _menu.Items.AddRange([header, _statusItem, _contactItem, _rebootItem, new ToolStripSeparator(), _restartItem]);
+        _openStatusItem.Font = new Font(_openStatusItem.Font, FontStyle.Bold); // the default action (left click)
+        _menu.Items.AddRange([header, _statusItem, _contactItem, _rebootItem, new ToolStripSeparator(), _openStatusItem, _restartItem]);
+        _openStatusItem.Click += (_, _) => ShowStatus();
         _restartItem.Click += (_, _) => ShowPrompt(activate: true);
 
-        _icon = new NotifyIcon { Icon = AppIcons.Small, Text = "EasyPatch", ContextMenuStrip = _menu, Visible = false };
+        _icon = new NotifyIcon { Icon = AppIcons.Small, Text = "EasyPatch Agent", ContextMenuStrip = _menu, Visible = false };
         _icon.MouseClick += (_, e) =>
         {
-            if (e.Button == MouseButtons.Left && _prompt is not null)
+            if (e.Button == MouseButtons.Left)
             {
-                ShowPrompt(activate: true);
+                ShowStatus();
             }
         };
         _icon.BalloonTipClicked += (_, _) =>
@@ -84,6 +90,10 @@ internal sealed class TrayContext : ApplicationContext
             if (_prompt is not null)
             {
                 ShowPrompt(activate: true);
+            }
+            else
+            {
+                ShowStatus();
             }
         };
 
@@ -93,7 +103,8 @@ internal sealed class TrayContext : ApplicationContext
 
         _client = new TrayPipeClient(
             message => Post(() => Handle(message)),
-            () => Post(ExitThread));
+            () => Post(ExitThread),
+            () => Post(Refresh));
         _client.Start();
     }
 
@@ -131,6 +142,12 @@ internal sealed class TrayContext : ApplicationContext
                 }
 
                 break;
+            case TrayMessageType.RequestResult when message.Request is { } request && message.Result is { } result:
+                _statusForm?.ShowRequestResult(request, result);
+                break;
+            case TrayMessageType.Log when message.Log is { } entries:
+                _statusForm?.ShowLog(entries);
+                break;
             case TrayMessageType.Exit:
                 ExitThread();
                 return;
@@ -146,6 +163,23 @@ internal sealed class TrayContext : ApplicationContext
         _noticeIconUntil = DateTime.UtcNow.AddSeconds(30);
         _icon.Visible = true;
         _icon.ShowBalloonTip(15000, title, body, ToolTipIcon.Info);
+    }
+
+    private void ShowStatus()
+    {
+        if (_statusForm is null || _statusForm.IsDisposed)
+        {
+            _statusForm = new StatusForm();
+            _statusForm.RequestClicked += kind => _client.Send(new TrayMessage
+            {
+                Type = kind == UserRequestKind.CheckIn ? TrayMessageType.CheckIn : TrayMessageType.CheckForUpdates,
+            });
+            _statusForm.LogRequested += () => _client.Send(new TrayMessage { Type = TrayMessageType.GetLog });
+            _statusForm.RestartOptionsClicked += () => ShowPrompt(activate: true);
+        }
+
+        _statusForm.Display(_status, _prompt, _client.IsConnected);
+        _statusForm.Open();
     }
 
     private void ShowPrompt(bool activate)
@@ -178,14 +212,22 @@ internal sealed class TrayContext : ApplicationContext
     {
         UpdateMenu();
         _icon.Visible = _status.ShowIcon || _prompt is not null || DateTime.UtcNow < _noticeIconUntil;
-        var tip = _prompt is not null ? "EasyPatch: restart required" : $"EasyPatch: {_status.Activity}";
-        _icon.Text = tip.Length > 63 ? tip[..63] : tip;
+
+        // The tooltip: "EasyPatch Agent 1.5.0" and the current state (at most 127 characters).
+        var summary = StatusSummary.From(_status, _prompt, _client.IsConnected);
+        var tip = $"EasyPatch Agent {AgentComposition.AgentVersion}\n{summary.Title}";
+        _icon.Text = tip.Length > 127 ? tip[..127] : tip;
+
+        if (_statusForm is { IsDisposed: false, Visible: true })
+        {
+            _statusForm.Display(_status, _prompt, _client.IsConnected);
+        }
     }
 
     private void UpdateMenu()
     {
         _statusItem.Text = $"Status: {_status.Activity}";
-        _contactItem.Text = $"Last contact with server: {TimeText.Ago(_status.LastContactAt)}";
+        _contactItem.Text = $"Last check-in: {TimeText.Ago(_status.LastContactAt)}";
         _rebootItem.Visible = _status.RebootPending;
         _restartItem.Visible = _prompt is not null;
     }
@@ -197,6 +239,7 @@ internal sealed class TrayContext : ApplicationContext
         _icon.Visible = false;
         _icon.Dispose();
         _form?.Dispose();
+        _statusForm?.Dispose();
         _menu.Dispose();
         _invoker.Dispose();
         base.ExitThreadCore();
@@ -210,15 +253,20 @@ internal sealed class TrayPipeClient : IDisposable
 
     private readonly Action<TrayMessage> _onMessage;
     private readonly Action _onLost;
+    private readonly Action _onConnectionChanged;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _writeLock = new(1, 1);
-    private NamedPipeClientStream? _pipe;
+    private volatile NamedPipeClientStream? _pipe;
 
-    public TrayPipeClient(Action<TrayMessage> onMessage, Action onLost)
+    public TrayPipeClient(Action<TrayMessage> onMessage, Action onLost, Action onConnectionChanged)
     {
         _onMessage = onMessage;
         _onLost = onLost;
+        _onConnectionChanged = onConnectionChanged;
     }
+
+    /// <summary>True while connected to the service.</summary>
+    public bool IsConnected => _pipe is not null;
 
     public void Start() => _ = Task.Run(RunAsync);
 
@@ -262,7 +310,8 @@ internal sealed class TrayPipeClient : IDisposable
                 }
 
                 _pipe = pipe;
-                while (await TrayFrames.ReadAsync(pipe, _cts.Token) is { } message)
+                _onConnectionChanged();
+                while (await TrayFrames.ReadAsync(pipe, TrayFrames.MaxFrameBytes, _cts.Token) is { } message)
                 {
                     _onMessage(message);
                     if (message.Type == TrayMessageType.Exit)
@@ -284,6 +333,7 @@ internal sealed class TrayPipeClient : IDisposable
                 {
                     _pipe = null;
                     lostSince = DateTime.UtcNow;
+                    _onConnectionChanged();
                 }
             }
 

@@ -384,6 +384,16 @@ public sealed class InstallUpdatesHandler
             message += " A restart is required to complete installation.";
         }
 
+        if (succeeded > 0)
+        {
+            var finishedAt = _time.GetUtcNow();
+            _state.Update(s =>
+            {
+                s.LastInstallAt = finishedAt;
+                s.LastInstallCount = succeeded;
+            });
+        }
+
         _notifier.InstallFinished(succeeded, rebootRequired);
         var firstFailure = items.FirstOrDefault(i => i.Status == JobItemStatus.Failed);
         _reporter.Report(jobId, status, "Completed", 100, message, items,

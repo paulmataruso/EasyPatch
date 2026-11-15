@@ -467,7 +467,7 @@ export function PolicyEditor({
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <BoolRow
               label="EasyPatch icon in the notification area"
-              hint="When hidden, the icon appears only while a message or a restart request is shown."
+              hint="Users open the EasyPatch status window from the icon (status, Check in now, Check for updates, recent log). When hidden, the icon appears only while a message or a restart request is shown, so users cannot open the status window."
               value={form.trayIconEnabled}
               inherited={isGlobal ? true : (inherited?.trayIconEnabled ?? true)}
               isGlobal={isGlobal}

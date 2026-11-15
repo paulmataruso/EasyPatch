@@ -84,7 +84,7 @@ static async Task<int> RunAgentAsync(string[] arguments)
     builder.Logging.AddFilter("System", LogLevel.Warning);
     builder.Services.AddSingleton<ILoggerProvider>(_ => new RollingFileLoggerProvider(new RollingFileLoggerOptions
     {
-        Directory = Path.Combine(dataDirectory, "logs"),
+        Directory = AgentComposition.LogDirectory,
         MinimumLevel = fileLevel,
     }));
     builder.Logging.AddEventLog(settings =>
@@ -105,9 +105,15 @@ static async Task<int> RunAgentAsync(string[] arguments)
 
     if (isService)
     {
-        // Trays in the users' sessions (messages and restart prompts). Only the LocalSystem service can start them.
-        builder.Services.AddSingleton(sp => TrayBrokerFactory.Create(sp.GetRequiredService<ILoggerFactory>()));
-        builder.Services.AddSingleton(sp => AgentComposition.CreateRuntime(sp.GetRequiredService<ILoggerFactory>(), sp.GetRequiredService<TrayBroker>()));
+        // Trays in the users' sessions (status window, messages and restart prompts). Only the LocalSystem service can start them.
+        builder.Services.AddSingleton(sp => TrayBrokerFactory.Create(sp.GetRequiredService<ILoggerFactory>(), AgentComposition.LogDirectory));
+        builder.Services.AddSingleton(sp =>
+        {
+            var broker = sp.GetRequiredService<TrayBroker>();
+            var runtime = AgentComposition.CreateRuntime(sp.GetRequiredService<ILoggerFactory>(), broker);
+            broker.SetRequestHandler(runtime); // "Check in now" and "Check for updates" in the status window
+            return runtime;
+        });
         builder.Services.AddHostedService<TrayPipeServer>();
         builder.Services.AddHostedService<TrayLauncher>();
     }

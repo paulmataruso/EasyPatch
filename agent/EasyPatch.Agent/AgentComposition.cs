@@ -26,6 +26,8 @@ internal static class AgentComposition
 
     public static string DataDirectory => SecureStorage.DefaultDataDirectory;
 
+    public static string LogDirectory => Path.Combine(DataDirectory, "logs");
+
     public static AgentRuntimeOptions CreateOptions() => new()
     {
         DataDirectory = DataDirectory,

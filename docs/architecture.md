@@ -458,14 +458,25 @@ signed-in user, not as SYSTEM) in every active session that has no tray, checkin
 seconds and waiting at least 2 minutes before starting it again in the same session. The tray
 exits when it cannot reach the service for a minute, or when the service stops.
 
-* **What it shows.** An icon with a menu: the agent's activity, the time of its last contact
-  with the server, and whether a restart is pending. Preset messages appear as notifications,
-  and a pending restart opens a small window with *Restart now* and, when allowed, *Postpone*.
-  When the *Tray icon* policy is off, the icon appears only while a message or restart request
+* **What it shows.** An icon whose tooltip shows the agent version and a one-line status, with
+  a menu: the agent's activity, the time of its last contact with the server, and whether a
+  restart is pending. Clicking it opens the status window (agent 1.5.0 and later): a summary,
+  connection and update details, *Check in now*, *Check for updates* and the recent agent
+  log. Preset messages appear as notifications, and a pending restart opens a small window
+  with *Restart now* and, when allowed, *Postpone*. When the policy setting *EasyPatch icon in
+  the notification area* is *Hide*, the icon appears only while a message or restart request
   is shown.
+* **Status window requests.** *Check in now* wakes the communication loop for an immediate
+  check-in; *Check for updates* makes the work loop run a scan with trigger `User` instead of
+  the next scheduled one. The runtime limits them for the whole computer (a check-in every 30
+  seconds; an update check every 5 minutes, and not while the Windows Update lock is held),
+  and the broker answers a tray that repeats a request within 2 seconds with "please wait".
+  The log comes from the tail of `agent.log` (and `agent.1.log` after a rotation): the newest
+  200 information, warning and error entries, first line only, redacted again.
 * **Connection.** The service listens on the named pipe `\\.\pipe\EasyPatchAgent`. Frames
-  are a 32-bit little-endian length and UTF-8 JSON, at most 16 KB; anything malformed closes
-  the connection.
+  are a 32-bit little-endian length and UTF-8 JSON. The service accepts frames of at most
+  16 KB from a tray and sends at most 256 KB (the log); anything malformed closes the
+  connection.
 
 ### Windows Update policy enforcement
 
