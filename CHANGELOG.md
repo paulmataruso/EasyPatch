@@ -3,6 +3,57 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and both agents share one version number.
 
+## [1.8.0] - 2026-11-15
+
+Items marked *Needs Windows agent 1.8.0* are not offered to older agents: removing an update from
+an endpoint with an older agent is refused with a message to update the agent first, and older
+agents are not sent downloads ahead of the maintenance window.
+
+### Added
+
+- **Roll back an installed Windows update**: operators can remove one installed update from an
+  endpoint (its **Installed** tab, or an update waiting for a restart), or from every endpoint
+  of an organization or site on the update's page. The agent uses Windows Update's own
+  uninstall when the update supports it, otherwise DISM (`/Remove-Package`, always with
+  `/NoRestart`). The removal counts only when the package is no longer installed, a scan
+  follows, and the computer is never restarted. By default the update is also excluded on each
+  endpoint so it is not installed again. Needs Windows agent 1.8.0.
+- **Update holds and the rollout guard**: when an update fails on at least 3 endpoints and on at
+  least 20% of the endpoints that tried it in the last 7 days, the worker puts it on hold for
+  every organization (on by default; thresholds under **Settings → Server settings → Rollout
+  guard**). Administrators can also hold an update for an organization (super administrators
+  for every organization) and release holds on the update's page. A held update is left out of
+  maintenance-window installations and *Install all missing*, including jobs already queued;
+  selecting it by hand still installs it, with a warning. New alert type and default rule
+  *Update on hold*, and an option to hold an update when removing it from endpoints.
+- **Download before the maintenance window**: a new policy setting (0 to 24 hours, off by
+  default) has Windows agents download the updates the next maintenance window will install in
+  the hours before it starts, so the window is spent installing. Downloads go through the
+  Windows Update Agent (WSUS and Group Policy still apply), install nothing, stop when the
+  window starts, skip held updates and never change compliance. They are limited per site by
+  the policy's maximum concurrent installations. Needs Windows agent 1.8.0.
+- **API tokens** for scripts and integrations (**Settings → API tokens**, super administrators):
+  read-only or operator, optionally limited to some organizations, expiring after at most 365
+  days, revocable, with the time and address of their last use. Sent as
+  `Authorization: Bearer ept_…`; only a hash is stored, the secret is shown once, and actions are
+  audited as `token:<name>`. Tokens cannot manage users, API tokens or server settings. See
+  [api.md](docs/api.md#api-tokens-apiv1api-tokens-superadmin).
+
+### Changed
+
+- Updates that Windows offers again right after a successful installation (for example the
+  Windows Security platform update KB5007651) are now **Reoffered** instead of **Failed**. They
+  do not count against compliance (they still count as known exploited), automatic
+  installations skip them, they can still be installed by selecting them, and a new revision
+  makes them Missing again. Existing rows are migrated.
+
+### Fixed
+
+- The Windows agent reported a pending restart when the only queued file operations were
+  deletions of temporary files (`PendingFileRenameOperations` entries without a destination),
+  which Windows carries out at the next start without anything waiting for it. Only file
+  replacements now count. Needs Windows agent 1.8.0.
+
 ## [1.7.1] - 2026-11-15
 
 ### Fixed
