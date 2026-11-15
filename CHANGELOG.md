@@ -3,6 +3,16 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and both agents share one version number.
 
+## [1.7.1] - 2026-11-15
+
+### Fixed
+
+- Agent updates could fail with `Downloading EasyPatchAgent-… failed with HTTP 404` right after
+  new packages were copied into `data/agent-packages/`: the worker offered the new version to
+  agents while the API still served its package list from before the copy (each refreshes it
+  once a minute), and the failed update was only retried 6 hours later. The API now looks at
+  the folder again when an agent asks for a package that is there but not in its list yet.
+
 ## [1.7.0] - 2026-11-15
 
 The first published release since 1.4.0. It also contains the changes listed under 1.5.0, 1.5.1,
