@@ -1,7 +1,7 @@
 Package: easypatch-agent
 Version: @VERSION@
 Architecture: @DEBARCH@
-Maintainer: DHI Technical Services LLC <noreply@easypatch.invalid>
+Maintainer: DHI Technical Services LLC <paulmataruso@dhitechnical.com>
 Section: admin
 Priority: optional
 Installed-Size: @SIZE@

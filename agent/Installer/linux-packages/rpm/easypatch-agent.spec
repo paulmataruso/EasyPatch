@@ -14,6 +14,8 @@ Version:        %{ep_version}
 Release:        1
 Summary:        EasyPatch patch management agent
 License:        FSL-1.1-ALv2
+Vendor:         DHI Technical Services LLC
+Packager:       DHI Technical Services LLC <paulmataruso@dhitechnical.com>
 AutoReqProv:    no
 Requires:       glibc, libgcc, libstdc++, openssl-libs, ca-certificates, systemd
 
