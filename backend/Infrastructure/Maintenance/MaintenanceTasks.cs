@@ -365,7 +365,7 @@ public sealed class DeferralExpiryTask(EasyPatchDbContext db, ComplianceService 
         var ids = await db.EndpointUpdates.AsNoTracking()
             .Where(u => u.DeferredUntil != null && u.DeferredUntil <= now &&
                         (u.State == EndpointUpdateState.Missing || u.State == EndpointUpdateState.Failed))
-            .Select(u => u.EndpointId).Distinct().Take(2000).ToListAsync(ct);
+            .Select(u => u.EndpointId).Distinct().OrderBy(id => id).Take(2000).ToListAsync(ct);
         if (ids.Count == 0)
         {
             return;
