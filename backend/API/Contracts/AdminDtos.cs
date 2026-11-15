@@ -339,7 +339,23 @@ public sealed record EndpointDetailDto(
     bool HasOwnPolicy,
     AgentUpdateInfoDto? AgentUpdate = null,
     LinuxDetailsDto? Linux = null,
-    ApplicationUpdatesStatusDto? Applications = null);
+    ApplicationUpdatesStatusDto? Applications = null,
+    RestartDetailsDto? Restart = null);
+
+/// <summary>What a pending restart is for. Null when no restart is pending.</summary>
+/// <param name="Updates">Updates waiting for the restart.</param>
+/// <param name="ServicingPackages">Pending Windows servicing packages that name no KB.</param>
+/// <param name="FileOperations">Files Windows replaces or deletes during the restart (the first 25).</param>
+/// <param name="FileOperationCount">All pending file operations.</param>
+/// <param name="DetailsSupported">The agent reports what Windows has queued (Windows agent 1.5.3 and later). Without it only
+/// installed updates that wait for the restart are known.</param>
+public sealed record RestartDetailsDto(IReadOnlyList<RestartUpdateDto> Updates, IReadOnlyList<string> ServicingPackages,
+    IReadOnlyList<EasyPatch.Contracts.Agent.PendingFileOperation> FileOperations, int FileOperationCount, bool DetailsSupported);
+
+/// <param name="UpdateGuid">Null for a KB known only from a servicing package.</param>
+/// <param name="Source"><c>Installed</c>: installed, takes effect after the restart; <c>WindowsUpdate</c>: Windows Update lists it as
+/// waiting for the restart; <c>Servicing</c>: a pending Windows servicing package names its KB.</param>
+public sealed record RestartUpdateDto(Guid? UpdateGuid, string Title, IReadOnlyList<string> KbNumbers, string Source, DateTimeOffset? InstalledAt);
 
 /// <summary>Application (winget) update checks of a Windows endpoint. <c>Enabled</c>: the effective policy turns them on with
 /// approved applications; <c>Supported</c>: the agent has the <c>app-updates</c> capability (1.4.0 and later).</summary>

@@ -206,7 +206,7 @@ public sealed class CheckInService(
             endpoint.LastBootAt = boot;
         }
 
-        if (ScanIngestionService.ApplyRebootState(db, endpoint, request.RebootPending, request.RebootReasons, now))
+        if (ScanIngestionService.ApplyRebootState(db, endpoint, request.RebootPending, request.RebootReasons, now, request.RebootDetails))
         {
             ComplianceService.ReevaluateStatus(endpoint, policy, now);
         }

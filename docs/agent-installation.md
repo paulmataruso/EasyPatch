@@ -9,7 +9,9 @@ Update Agent API that Windows itself uses. The agent:
 
 * **restarts the computer only when an administrator asks for it**, once or through a restart
   schedule set in policy, and warns signed-in users first. Installing updates never restarts
-  the computer. It reports when a restart is pending and why;
+  the computer. It reports when a restart is pending and why: which updates are waiting for
+  it, and from agent 1.5.3 also the Windows servicing packages and the files Windows has queued
+  for the restart (shown on the endpoint page);
 * **changes Windows Update policy only when an administrator configures it** in EasyPatch
   policy, never the WSUS server settings, and puts the original values back when the setting is
   removed or the agent is uninstalled. Otherwise WSUS, Group Policy, Windows Update for Business

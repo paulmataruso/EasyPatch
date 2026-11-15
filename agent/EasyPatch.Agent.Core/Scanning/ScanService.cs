@@ -234,6 +234,7 @@ public sealed class InventoryService
             AgentInstalledAt = report.AgentInstalledAt ?? installedAt,
             RebootPending = reboot.Pending,
             RebootReasons = reboot.Reasons,
+            RebootDetails = reboot.Pending ? reboot.Details : null,
             KeyProtection = report.KeyProtection ?? _platform.SecretProtector.Kind,
             UpdateSource = report.UpdateSource ?? _scans.DetectSource(microsoftUpdateRegistered: false),
         };

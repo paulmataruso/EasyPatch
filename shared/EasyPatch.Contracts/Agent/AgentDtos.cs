@@ -117,6 +117,9 @@ public sealed record CheckInRequest
     public bool RebootPending { get; init; }
     public IReadOnlyList<string> RebootReasons { get; init; } = [];
 
+    /// <summary>What is queued for the restart (Windows agent 1.5.3 and later; only while <see cref="RebootPending"/>).</summary>
+    public RebootDetails? RebootDetails { get; init; }
+
     /// <summary>Jobs the agent currently holds in its durable state. Server re-delivers any in-flight job not listed.</summary>
     public IReadOnlyList<Guid> ActiveJobIds { get; init; } = [];
 
@@ -525,6 +528,9 @@ public sealed record InventoryReport
     public DateTimeOffset? AgentInstalledAt { get; init; }
     public bool RebootPending { get; init; }
     public IReadOnlyList<string> RebootReasons { get; init; } = [];
+
+    /// <summary>What is queued for the restart (Windows agent 1.5.3 and later; only while <see cref="RebootPending"/>).</summary>
+    public RebootDetails? RebootDetails { get; init; }
     public UpdateSourceInfo? UpdateSource { get; init; }
 
     /// <summary><see cref="AgentPlatforms"/> value; absent from Windows agents before 1.3.0.</summary>

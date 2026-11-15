@@ -75,6 +75,10 @@ public sealed class Endpoint
     public string? LastScanError { get; set; }
     public bool RebootPending { get; set; }
     public List<string> RebootReasons { get; set; } = [];
+
+    /// <summary>JSON <see cref="EasyPatch.Contracts.Agent.RebootDetails"/>: the updates, servicing packages and files the pending
+    /// restart is for (Windows agent 1.5.3 and later); null when no restart is pending or the agent does not report them.</summary>
+    public string? RebootDetails { get; set; }
     public DateTimeOffset? RebootPendingSince { get; set; }
     public string? UpdateSourceType { get; set; }
     public string? UpdateSourceServer { get; set; }

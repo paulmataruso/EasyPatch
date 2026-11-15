@@ -252,6 +252,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.LastScanError).HasMaxLength(2000);
             e.Property(x => x.Notes).HasMaxLength(4000);
             e.Property(x => x.WindowsUpdatePolicyStatus).HasColumnType("jsonb");
+            e.Property(x => x.RebootDetails).HasColumnType("jsonb");
             e.Property(x => x.AgentCapabilities).HasDefaultValueSql("'{}'::text[]");
             e.Property(x => x.AgentReleaseKeyIds).HasDefaultValueSql("'{}'::text[]");
             e.Property(x => x.Platform).HasMaxLength(16).HasDefaultValue(EasyPatch.Contracts.Agent.AgentPlatforms.Windows);

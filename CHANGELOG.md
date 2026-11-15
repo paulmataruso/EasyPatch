@@ -3,6 +3,17 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and both agents share one version number.
 
+## [1.5.3] - 2026-11-15
+
+### Added
+
+- **What a pending restart is for**, on the endpoint page: the updates waiting for the restart
+  (installed and waiting, listed by Windows Update, or named by a pending Windows servicing
+  package, with links to the updates), other pending servicing packages, and the files Windows
+  will replace or delete during the restart (the first 25, with the user name in profile paths
+  replaced by `*`), which shows which program asked for it. Windows agents 1.5.3 and later report
+  the details; for older agents only installed updates waiting for the restart are listed.
+
 ## [1.5.1] - 2026-11-15
 
 ### Added

@@ -686,7 +686,7 @@ public sealed class JobService(
         if (report.RebootRequired)
         {
             ScanIngestionService.ApplyRebootState(db, endpoint,
-                true, endpoint.RebootReasons.Union(["Updates installed by EasyPatch require a restart"]).ToList(), now);
+                true, endpoint.RebootReasons.Union(["Updates installed by EasyPatch require a restart"]).ToList(), now, keepDetails: true);
         }
 
         if (updatesChanged || report.RebootRequired)

@@ -15,7 +15,7 @@ The server checks the rules in this order and the first match wins:
 | 2 | `ScanStale` | The last successful scan is older than the policy's *scan considered stale after* (default 48 hours) |
 | 3 | `FailedUpdates` | At least one **required** update is in state `Failed` |
 | 4 | `MissingUpdates` | At least one **required** update is `Missing`, `Failed` or `PendingVerification` |
-| 5 | `RebootRequired` | Windows reports a pending restart, or an update is installed and waiting for a restart (`PendingReboot`) |
+| 5 | `RebootRequired` | Windows reports a pending restart, or an update is installed and waiting for a restart (`PendingReboot`). The endpoint page lists the updates waiting for it and, for Windows agents 1.5.3 and later, the servicing packages and files Windows has queued |
 | 6 | `Compliant` | None of the above |
 
 The order is deliberate:

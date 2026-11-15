@@ -185,6 +185,31 @@ public sealed class CommunicationTests
         Assert.Contains(job.JobId, last.ActiveJobIds);
         Assert.Equal(h.BootTime.Boot, last.LastBootAt);
         Assert.Equal(1, h.Server.Jobs[job.JobId].Deliveries); // held, so not re-delivered
+        Assert.Null(last.RebootDetails);
+    }
+
+    [Fact]
+    public async Task Check_in_reports_what_the_restart_is_for_only_while_one_is_pending()
+    {
+        using var h = new AgentHarness();
+        await h.EnrollWithTokenAsync();
+        var update = Guid.NewGuid();
+        var details = new RebootDetails
+        {
+            WindowsUpdateIds = [update],
+            FileOperations = [new PendingFileOperation { Action = PendingFileOperation.Replace, Path = @"C:\Program Files\Contoso\contoso.dll" }],
+            FileOperationCount = 1,
+        };
+        h.RebootDetector.Status = new Core.Abstractions.RebootStatus(true, ["Windows Update (RebootRequired)"], details);
+
+        await h.Runtime.CheckInOnceAsync(Ct);
+        var pending = h.Server.CheckIns[^1];
+        Assert.Equal([update], pending.RebootDetails!.WindowsUpdateIds);
+        Assert.Equal(@"C:\Program Files\Contoso\contoso.dll", Assert.Single(pending.RebootDetails.FileOperations).Path);
+
+        h.RebootDetector.Status = Core.Abstractions.RebootStatus.None;
+        await h.Runtime.CheckInOnceAsync(Ct);
+        Assert.Null(h.Server.CheckIns[^1].RebootDetails);
     }
 
     [Fact]

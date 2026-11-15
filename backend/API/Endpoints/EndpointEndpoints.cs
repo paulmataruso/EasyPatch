@@ -501,7 +501,64 @@ public static class EndpointEndpoints
             await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Endpoint && p.EndpointId == id, ct),
             await AgentUpdateInfoAsync(e, packages, policies, ct),
             e.Platform == AgentPlatforms.Linux ? new LinuxDetailsDto(e.OsId, e.OsVersion, e.KernelVersion, e.PackageManager, e.KeyProtection) : null,
-            e.Platform == AgentPlatforms.Linux ? null : await ApplicationStatusAsync(e, policies, ct));
+            e.Platform == AgentPlatforms.Linux ? null : await ApplicationStatusAsync(e, policies, ct),
+            await RestartDetailsAsync(e, db, ct));
+    }
+
+    /// <summary>Agents that report what Windows has queued for a restart (<see cref="RebootDetails"/>).</summary>
+    private static readonly Version RestartDetailsVersion = new(1, 5, 3);
+
+    private static async Task<RestartDetailsDto?> RestartDetailsAsync(Core.Entities.Endpoint e, EasyPatchDbContext db, CancellationToken ct)
+    {
+        if (!e.RebootPending && e.PendingRebootUpdateCount == 0)
+        {
+            return null;
+        }
+
+        var updates = await db.EndpointUpdates.AsNoTracking()
+            .Where(u => u.EndpointId == e.Id && u.State == EndpointUpdateState.PendingReboot)
+            .OrderBy(u => u.Update!.Title)
+            .Select(u => new RestartUpdateDto(u.UpdateGuid, u.Update!.Title, u.Update.KbNumbers, "Installed", u.InstalledAt ?? u.StateChangedAt))
+            .ToListAsync(ct);
+        var details = ScanIngestionService.ReadRebootDetails(e.RebootDetails);
+        var supported = e.Platform != AgentPlatforms.Linux && Mapping.ParseVersion(e.AgentVersion) is { } version && version >= RestartDetailsVersion;
+        if (details is null)
+        {
+            return new RestartDetailsDto(updates, [], [], 0, supported);
+        }
+
+        // Updates Windows Update lists as waiting for the restart, named from the catalog where it knows them.
+        var listed = updates.Select(u => u.UpdateGuid).OfType<Guid>().ToHashSet();
+        var ids = details.WindowsUpdateIds.Where(id => !listed.Contains(id)).ToList();
+        if (ids.Count > 0)
+        {
+            var known = (await db.Updates.AsNoTracking().Where(u => ids.Contains(u.UpdateGuid))
+                    .Select(u => new { u.UpdateGuid, u.RevisionNumber, u.Title, u.KbNumbers }).ToListAsync(ct))
+                .GroupBy(u => u.UpdateGuid).ToDictionary(g => g.Key, g => g.MaxBy(u => u.RevisionNumber)!);
+            updates.AddRange(ids.Select(id => known.TryGetValue(id, out var u)
+                ? new RestartUpdateDto(id, u.Title, u.KbNumbers, "WindowsUpdate", null)
+                : new RestartUpdateDto(id, $"Windows Update {id}", [], "WindowsUpdate", null)));
+        }
+
+        // KBs named by pending servicing packages, named from this endpoint's updates where possible.
+        var covered = updates.SelectMany(u => u.KbNumbers).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var kbs = details.ServicingKbNumbers().Where(kb => !covered.Contains(kb)).ToList();
+        if (kbs.Count > 0)
+        {
+            var mine = await db.EndpointUpdates.AsNoTracking().Where(u => u.EndpointId == e.Id)
+                .Select(u => new { u.UpdateGuid, u.Update!.Title, u.Update.KbNumbers }).ToListAsync(ct);
+            foreach (var kb in kbs)
+            {
+                var match = mine.FirstOrDefault(u => u.KbNumbers.Contains(kb, StringComparer.OrdinalIgnoreCase));
+                updates.Add(match is null
+                    ? new RestartUpdateDto(null, kb, [kb], "Servicing", null)
+                    : new RestartUpdateDto(match.UpdateGuid, match.Title, match.KbNumbers, "Servicing", null));
+            }
+        }
+
+        var otherPackages = details.ServicingPackages.Where(p => !RebootDetails.NamesKb(p)).ToList();
+        return new RestartDetailsDto(updates.DistinctBy(u => (u.UpdateGuid, u.Title)).ToList(), otherPackages, details.FileOperations,
+            details.FileOperationCount, supported);
     }
 
     private static async Task<ApplicationUpdatesStatusDto> ApplicationStatusAsync(Core.Entities.Endpoint e, PolicyService policies, CancellationToken ct)

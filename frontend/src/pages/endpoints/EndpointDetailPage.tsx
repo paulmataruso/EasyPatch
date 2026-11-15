@@ -99,13 +99,10 @@ export function EndpointDetailPage() {
             Its credentials are revoked. The agent can no longer report or receive jobs. Reinstall the agent and enroll again to manage it.
           </Alert>
         )}
-        {e.summary.rebootPending && (
+        {(e.summary.rebootPending || e.pendingRebootUpdateCount > 0) && (
           <Alert tone="info" title={`Restart pending${e.rebootPendingSince ? ` since ${formatDateTime(e.rebootPendingSince)}` : ''}`}>
-            <p>
-              {e.pendingRebootUpdateCount > 0 && `${e.pendingRebootUpdateCount} installed update${e.pendingRebootUpdateCount === 1 ? '' : 's'} take effect after a restart. `}
-              {e.rebootReasons.length > 0 && <>Reported by {linux ? 'the operating system' : 'Windows'}: {e.rebootReasons.join(', ')}. </>}
-            </p>
-            <p className="mt-1">
+            <RestartDetails endpoint={e} linux={linux} />
+            <p className="mt-2">
               <Power className="mr-1 inline size-3.5" aria-hidden />
               EasyPatch restarts an endpoint only when you ask it to, or on a restart schedule set in policy. The agent reports the new state after the restart.
             </p>
@@ -446,5 +443,99 @@ function EditEndpointDialog({ endpoint, open, onClose }: { endpoint: EndpointDet
         </div>
       </form>
     </Dialog>
+  );
+}
+
+const RESTART_SOURCES: Record<string, string> = {
+  Installed: 'installed, takes effect after the restart',
+  WindowsUpdate: 'Windows Update lists it as waiting for the restart',
+  Servicing: 'a pending Windows servicing package',
+};
+
+/** What the pending restart is for: the updates waiting for it and anything else Windows has queued. */
+function RestartDetails({ endpoint: e, linux }: { endpoint: EndpointDetailDto; linux: boolean }) {
+  const r = e.restart;
+  const updates = r?.updates ?? [];
+  const packages = r?.servicingPackages ?? [];
+  const files = r?.fileOperations ?? [];
+  const fileCount = r?.fileOperationCount ?? files.length;
+  const reasons = e.rebootReasons.length > 0 && (
+    <p className="text-xs">
+      Reported by {linux ? 'the operating system' : 'Windows'}: {e.rebootReasons.join(', ')}.
+    </p>
+  );
+
+  return (
+    <div className="flex flex-col gap-2">
+      {updates.length > 0 ? (
+        <div>
+          <p className="font-medium">
+            {updates.length === 1 ? 'This update is' : `These ${updates.length} updates are`} waiting for the restart:
+          </p>
+          <ul className="mt-1 flex list-disc flex-col gap-0.5 pl-5">
+            {updates.map((u) => {
+              const kbs = u.kbNumbers.filter((kb) => !u.title.toUpperCase().includes(kb.toUpperCase()));
+              return (
+                <li key={`${u.updateGuid ?? ''}-${u.title}`}>
+                  {u.updateGuid ? (
+                    <Link to={`/updates/${u.updateGuid}`} className="text-accent hover:underline">
+                      {u.title}
+                    </Link>
+                  ) : (
+                    u.title
+                  )}
+                  {kbs.length > 0 && <span> ({kbs.join(', ')})</span>}
+                  <span className="text-xs text-muted">
+                    {' '}
+                    · {RESTART_SOURCES[u.source] ?? u.source}
+                    {u.installedAt && `, ${formatDateTime(u.installedAt)}`}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : (
+        <p>
+          {r?.detailsSupported || linux
+            ? 'No update is waiting for this restart.'
+            : 'No installed update is known to be waiting for this restart.'}
+        </p>
+      )}
+      {packages.length > 0 && (
+        <div>
+          <p className="font-medium">Windows servicing packages waiting for the restart:</p>
+          <ul className="mt-1 flex list-disc flex-col gap-0.5 pl-5 font-mono text-xs break-all">
+            {packages.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {files.length > 0 && (
+        <details open={updates.length === 0}>
+          <summary className="cursor-pointer font-medium">
+            {fileCount === 1 ? 'One file' : `${fileCount} files`} that Windows will change during the restart
+          </summary>
+          <p className="mt-1 text-xs">
+            Usually left by an installer that had to replace a file that was in use, or that cleans up after itself. The folder shows which program it
+            was.
+          </p>
+          <ul className="mt-1 flex flex-col gap-0.5 font-mono text-xs break-all">
+            {files.map((f) => (
+              <li key={`${f.action}-${f.path}`}>
+                <span className="text-muted">{f.action === 'Delete' ? 'Delete ' : 'Replace '}</span>
+                {f.path}
+              </li>
+            ))}
+          </ul>
+          {fileCount > files.length && <p className="mt-1 text-xs text-muted">and {fileCount - files.length} more.</p>}
+        </details>
+      )}
+      {reasons}
+      {!linux && r && !r.detailsSupported && e.summary.rebootPending && (
+        <p className="text-xs text-muted">Agent 1.5.3 and later also report which updates and files Windows has queued for the restart.</p>
+      )}
+    </div>
   );
 }

@@ -193,7 +193,8 @@ public interface IInventoryCollector
     Task<InventoryReport> CollectAsync(InventoryContext context, CancellationToken cancellationToken);
 }
 
-public sealed record RebootStatus(bool Pending, IReadOnlyList<string> Reasons)
+/// <param name="Details">What Windows has queued for the restart, when the detector can tell (registry detector).</param>
+public sealed record RebootStatus(bool Pending, IReadOnlyList<string> Reasons, RebootDetails? Details = null)
 {
     public static RebootStatus None { get; } = new(false, []);
 }

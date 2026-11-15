@@ -178,6 +178,7 @@ public sealed class AgentRuntime : IUserRequestHandler, IDisposable
             LastBootAt = _platform.BootTime.GetLastBootTime(),
             RebootPending = reboot.Pending,
             RebootReasons = reboot.Reasons,
+            RebootDetails = reboot.Pending ? reboot.Details : null,
             ActiveJobIds = held,
             CurrentActivity = _jobs.CurrentActivity,
             Capabilities = _agentUpdate.CanUpdate ? [.. _platform.Capabilities, AgentCapabilities.SelfUpdate] : _platform.Capabilities,

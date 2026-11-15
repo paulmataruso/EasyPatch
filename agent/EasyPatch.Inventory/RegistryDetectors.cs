@@ -1,5 +1,6 @@
 using System.Globalization;
 using EasyPatch.Agent.Core.Abstractions;
+using EasyPatch.Agent.Core.Scanning;
 using EasyPatch.Contracts;
 using EasyPatch.Contracts.Agent;
 using Microsoft.Win32;
@@ -26,6 +27,13 @@ internal static class Reg
         return key?.GetValue(name);
     }
 
+    /// <summary>The value names and subkey names of a key (empty when it does not exist).</summary>
+    public static IReadOnlyList<string> GetNames(string path)
+    {
+        using var key = OpenLocalMachine(path);
+        return key is null ? [] : [.. key.GetValueNames(), .. key.GetSubKeyNames()];
+    }
+
     public static string? GetString(string path, string name) =>
         GetValue(path, name) is { } value ? Convert.ToString(value, CultureInfo.InvariantCulture) : null;
 
@@ -50,26 +58,36 @@ public sealed class RegistryRebootDetector : IRebootDetector
     public Task<RebootStatus> DetectAsync(CancellationToken cancellationToken)
     {
         var reasons = new List<string>();
+        IReadOnlyList<Guid> updateIds = [];
+        var packages = new List<string>();
+        IReadOnlyList<PendingFileOperation> fileOperations = [];
 
-        if (Reg.KeyExists(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"))
+        const string WindowsUpdateKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired";
+        if (Reg.KeyExists(WindowsUpdateKey))
         {
             reasons.Add("Windows Update (RebootRequired)");
+            updateIds = WindowsRebootSignals.UpdateIds(Reg.GetNames(WindowsUpdateKey));
         }
 
-        if (Reg.KeyExists(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"))
+        const string ServicingRebootKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending";
+        if (Reg.KeyExists(ServicingRebootKey))
         {
             reasons.Add("Component Based Servicing (RebootPending)");
+            packages.AddRange(WindowsRebootSignals.Packages(Reg.GetNames(ServicingRebootKey)));
         }
 
-        if (Reg.KeyExists(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending"))
+        const string ServicingPackagesKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending";
+        if (Reg.KeyExists(ServicingPackagesKey))
         {
             reasons.Add("Component Based Servicing (PackagesPending)");
+            packages.AddRange(WindowsRebootSignals.Packages(Reg.GetNames(ServicingPackagesKey)));
         }
 
         if (Reg.GetValue(@"SYSTEM\CurrentControlSet\Control\Session Manager", "PendingFileRenameOperations") is string[] { Length: > 0 } renames &&
             renames.Any(r => !string.IsNullOrWhiteSpace(r)))
         {
             reasons.Add("Pending file rename operations");
+            fileOperations = WindowsRebootSignals.FileOperations(renames);
         }
 
         if (Reg.GetInt(@"SOFTWARE\Microsoft\Updates", "UpdateExeVolatile") is { } volatileFlag && volatileFlag != 0)
@@ -85,7 +103,19 @@ public sealed class RegistryRebootDetector : IRebootDetector
             reasons.Add("Pending computer rename");
         }
 
-        return Task.FromResult(reasons.Count == 0 ? RebootStatus.None : new RebootStatus(true, reasons));
+        if (reasons.Count == 0)
+        {
+            return Task.FromResult(RebootStatus.None);
+        }
+
+        var details = new RebootDetails
+        {
+            WindowsUpdateIds = updateIds,
+            ServicingPackages = packages,
+            FileOperations = fileOperations,
+            FileOperationCount = fileOperations.Count,
+        }.Sanitized();
+        return Task.FromResult(new RebootStatus(true, reasons, details.IsEmpty ? null : details));
     }
 }
 

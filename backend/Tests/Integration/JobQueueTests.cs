@@ -311,4 +311,94 @@ public sealed class JobQueueTests(PostgresFixture postgres) : IntegrationTest(po
 
         Assert.True(await MaintenanceExecutor.RunExclusiveAsync<RetentionTask>(Factory.Services, CancellationToken.None));
     }
+    [Fact]
+    public async Task The_endpoint_shows_which_updates_and_files_a_pending_restart_is_for()
+    {
+        var agent = await EnrollAgentAsync(root, org.Id, site.Id, "PC-RESTART");
+        var installed = SecurityUpdate("KB5000001") with { RebootRequired = true };
+        var listed = SecurityUpdate("KB5000002");
+        var servicing = SecurityUpdate("KB5000003");
+        await ReportScanAsync(agent, [installed, listed, servicing]);
+
+        var unknown = Guid.NewGuid();
+        var request = new CheckInRequest
+        {
+            AgentVersion = "1.5.3",
+            RebootPending = true,
+            RebootReasons = ["Windows Update (RebootRequired)", "Component Based Servicing (PackagesPending)", "Pending file rename operations"],
+            RebootDetails = new RebootDetails
+            {
+                WindowsUpdateIds = [listed.UpdateGuid, unknown, installed.UpdateGuid],
+                ServicingPackages =
+                [
+                    "Package_for_KB5000003~31bf3856ad364e35~amd64~~26100.1.1.0",
+                    "Package_for_RollupFix~31bf3856ad364e35~amd64~~26100.2.1.0",
+                    "Package_for_KB5000001~31bf3856ad364e35~amd64~~26100.3.1.0",
+                    "Package_for_KB5999999~31bf3856ad364e35~amd64~~26100.4.1.0",
+                ],
+                FileOperations = [new PendingFileOperation { Action = PendingFileOperation.Replace, Path = @"C:\Program Files\Contoso\contoso.dll" }],
+                FileOperationCount = 30,
+            },
+        };
+        await agent.CheckInAsync(request);
+        await agent.CheckInAsync(request);
+
+        var detail = await root.GetAsync<EndpointDetailDto>($"/api/v1/endpoints/{agent.EndpointId}");
+        var restart = detail.Restart!;
+        Assert.True(restart.DetailsSupported);
+        Assert.Equal(
+        [
+            (installed.UpdateGuid, "Installed", "KB5000001"),
+            (listed.UpdateGuid, "WindowsUpdate", "KB5000002"),
+            (unknown, "WindowsUpdate", ""),
+            (servicing.UpdateGuid, "Servicing", "KB5000003"),
+            ((Guid?)null, "Servicing", "KB5999999"),
+        ], restart.Updates.Select(u => (u.UpdateGuid, u.Source, (u.KbNumbers.Count > 0 ? u.KbNumbers[0] : ""))).ToList());
+        Assert.Equal(servicing.Title, restart.Updates[3].Title);
+        Assert.Equal("KB5999999", restart.Updates[4].Title);
+        Assert.Equal(["Package_for_RollupFix~31bf3856ad364e35~amd64~~26100.2.1.0"], restart.ServicingPackages);
+        Assert.Equal(@"C:\Program Files\Contoso\contoso.dll", Assert.Single(restart.FileOperations).Path);
+        Assert.Equal(30, restart.FileOperationCount);
+
+        // The same report again records no new event.
+        await using (var scope = Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EasyPatch.Infrastructure.Data.EasyPatchDbContext>();
+            Assert.Equal(1, await db.EndpointEvents.CountAsync(x => x.EndpointId == agent.EndpointId && x.Type == "RebootRequired",
+                TestContext.Current.CancellationToken));
+        }
+
+        // Details stored before a cleaning rule existed are cleaned at the next report.
+        await using (var scope = Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EasyPatch.Infrastructure.Data.EasyPatchDbContext>();
+            var endpoint = await db.Endpoints.SingleAsync(x => x.Id == agent.EndpointId, TestContext.Current.CancellationToken);
+            endpoint.RebootDetails = """{"isEmpty":false,"fileOperations":[{"path":"*1\\??\\C:\\Users\\erin\\AppData\\Local\\Temp\\x.tmp","action":"Delete"}],"fileOperationCount":1}""";
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var raw = request with
+        {
+            RebootDetails = new RebootDetails
+            {
+                FileOperations = [new PendingFileOperation { Action = "Delete", Path = @"*1\??\C:\Users\erin\AppData\Local\Temp\x.tmp" }],
+            },
+        };
+        await agent.CheckInAsync(raw);
+        await using (var scope = Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EasyPatch.Infrastructure.Data.EasyPatchDbContext>();
+            var stored = await db.Endpoints.Where(x => x.Id == agent.EndpointId).Select(x => x.RebootDetails).SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Contains(@"C:\\Users\\*\\AppData", stored, StringComparison.Ordinal);
+            Assert.DoesNotContain("erin", stored, StringComparison.Ordinal);
+            Assert.DoesNotContain("isEmpty", stored, StringComparison.Ordinal);
+        }
+
+        // An agent that does not report details: only the installed update is known.
+        await agent.CheckInAsync(request with { AgentVersion = "1.5.0", RebootDetails = null });
+        restart = (await root.GetAsync<EndpointDetailDto>($"/api/v1/endpoints/{agent.EndpointId}")).Restart!;
+        Assert.False(restart.DetailsSupported);
+        Assert.Equal([installed.UpdateGuid], restart.Updates.Select(u => u.UpdateGuid));
+        Assert.Empty(restart.FileOperations);
+    }
 }

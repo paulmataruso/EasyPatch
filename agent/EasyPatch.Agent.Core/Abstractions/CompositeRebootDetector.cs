@@ -1,3 +1,4 @@
+using EasyPatch.Contracts.Agent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -19,6 +20,7 @@ public sealed class CompositeRebootDetector : IRebootDetector
     public async Task<RebootStatus> DetectAsync(CancellationToken cancellationToken)
     {
         var reasons = new List<string>();
+        var details = new List<RebootDetails>();
         foreach (var detector in _detectors)
         {
             try
@@ -27,6 +29,10 @@ public sealed class CompositeRebootDetector : IRebootDetector
                 if (status.Pending)
                 {
                     reasons.AddRange(status.Reasons);
+                    if (status.Details is { } d)
+                    {
+                        details.Add(d);
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -36,6 +42,18 @@ public sealed class CompositeRebootDetector : IRebootDetector
         }
 
         var distinct = reasons.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        return distinct.Count == 0 ? RebootStatus.None : new RebootStatus(true, distinct);
+        if (distinct.Count == 0)
+        {
+            return RebootStatus.None;
+        }
+
+        var merged = new RebootDetails
+        {
+            WindowsUpdateIds = details.SelectMany(d => d.WindowsUpdateIds).ToList(),
+            ServicingPackages = details.SelectMany(d => d.ServicingPackages).ToList(),
+            FileOperations = details.SelectMany(d => d.FileOperations).ToList(),
+            FileOperationCount = details.Sum(d => d.FileOperationCount),
+        }.Sanitized();
+        return new RebootStatus(true, distinct, merged.IsEmpty ? null : merged);
     }
 }

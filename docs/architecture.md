@@ -414,9 +414,16 @@ server never signs anything; see [security.md](security.md#agent-release-signing
   5. Run a post-install scan and send the scan results.
   6. Finish as `Completed` or `Failed`, with `reboot_required` if needed.
 * **Reboot.** The agent reports pending-reboot state from WUA `SystemInfo.RebootRequired`,
-  the CBS `RebootPending` key, the WU `RebootRequired` key and `PendingFileRenameOperations`,
-  and lists the reasons. Install jobs never restart the computer. The agent restarts it only
-  for a `Restart` job (see [Restart jobs](#restart-jobs)).
+  the CBS `RebootPending` and `PackagesPending` keys, the WU `RebootRequired` key and
+  `PendingFileRenameOperations`, and lists the reasons. From 1.5.3 it also reports what is behind
+  them while a restart is pending (`RebootDetails`): the update IDs under the WU key, the
+  servicing package names under the CBS keys, and the files queued in
+  `PendingFileRenameOperations` (deleted or replaced; at most 25 listed, user names in profile
+  paths replaced by `*`). The server names the updates from its catalog and the endpoint's
+  updates (CBS package names give KB numbers) and shows them on the endpoint page with the
+  updates that are installed and waiting for the restart (`PendingReboot`). Install jobs never
+  restart the computer. The agent restarts it only for a `Restart` job (see
+  [Restart jobs](#restart-jobs)).
 * **Self-update.** Agents 1.2.0 and newer report the package architecture and the IDs of the
   release keys built into them, and can run `AgentUpdate` jobs (above). Linux agents also
   report their package format and install the package with apt or dnf in a transient systemd

@@ -657,6 +657,34 @@ export interface CredentialDto {
   lastUsedAt: Instant | null;
 }
 
+/** A file Windows changes during the next restart. */
+export interface PendingFileOperation {
+  /** "Delete" or "Replace". */
+  action: string;
+  path: string;
+}
+
+export interface RestartUpdateDto {
+  /** Null for a KB known only from a pending servicing package. */
+  updateGuid: string | null;
+  title: string;
+  kbNumbers: string[];
+  /** Installed (takes effect after the restart), WindowsUpdate (listed by Windows Update) or Servicing (a pending servicing package). */
+  source: string;
+  installedAt: string | null;
+}
+
+export interface RestartDetailsDto {
+  updates: RestartUpdateDto[];
+  /** Pending Windows servicing packages that name no KB. */
+  servicingPackages: string[];
+  /** The first 25 file operations. */
+  fileOperations: PendingFileOperation[];
+  fileOperationCount: number;
+  /** The agent reports what Windows has queued (Windows agent 1.5.3 and later). */
+  detailsSupported: boolean;
+}
+
 export interface EndpointDetailDto {
   summary: EndpointSummaryDto;
   dnsDomain: string | null;
@@ -713,6 +741,8 @@ export interface EndpointDetailDto {
   linux: LinuxDetailsDto | null;
   /** winget application updates (null for Linux endpoints). */
   applications?: ApplicationUpdatesStatusDto | null;
+  /** What a pending restart is for; null when no restart is pending. */
+  restart?: RestartDetailsDto | null;
 }
 
 export interface ApplicationUpdatesStatusDto {

@@ -58,7 +58,7 @@ services:
     <<: *logging
 
   migrate:
-    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.5.1}
+    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.5.3}
     build:
       context: .
       dockerfile: deployment/server/Dockerfile
@@ -76,7 +76,7 @@ services:
     <<: [*hardening, *logging]
 
   api:
-    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.5.1}
+    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.5.3}
     restart: unless-stopped
     environment:
       <<: *server-env
@@ -102,7 +102,7 @@ services:
     <<: [*hardening, *logging]
 
   worker:
-    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.5.1}
+    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.5.3}
     restart: unless-stopped
     entrypoint: ["dotnet", "/app/worker/EasyPatch.Worker.dll"]
     working_dir: /app/worker
@@ -130,7 +130,7 @@ services:
     <<: [*hardening, *logging]
 
   caddy:
-    image: ghcr.io/paulmataruso/easypatch-proxy:${EASYPATCH_VERSION:-1.5.1}
+    image: ghcr.io/paulmataruso/easypatch-proxy:${EASYPATCH_VERSION:-1.5.3}
     build:
       context: .
       dockerfile: deployment/caddy/Dockerfile

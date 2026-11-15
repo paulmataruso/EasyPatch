@@ -1,5 +1,7 @@
+using System.Text.Json;
 using EasyPatch.Contracts;
 using EasyPatch.Contracts.Agent;
+using EasyPatch.Contracts.Json;
 using EasyPatch.Contracts.Updates;
 using EasyPatch.Core.Domain;
 using EasyPatch.Core.Entities;
@@ -295,7 +297,7 @@ public sealed class ScanIngestionService(
         endpoint.AgentInstalledAt = report.AgentInstalledAt ?? endpoint.AgentInstalledAt;
         endpoint.LastInventoryAt = now;
         ApplySource(endpoint, report.UpdateSource);
-        ApplyRebootState(db, endpoint, report.RebootPending, report.RebootReasons, now);
+        ApplyRebootState(db, endpoint, report.RebootPending, report.RebootReasons, now, report.RebootDetails);
 
         var lifecycle = await db.OsLifecycleEntries.AsNoTracking().ToListAsync(ct);
         ComplianceService.ApplyLifecycle(endpoint, lifecycle, now);
@@ -318,13 +320,17 @@ public sealed class ScanIngestionService(
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>Updates reboot flags, emitting an event on change. Returns true if anything changed.</summary>
-    public static bool ApplyRebootState(EasyPatchDbContext db, Endpoint endpoint, bool rebootPending, IReadOnlyList<string> reasons, DateTimeOffset now)
+    /// <summary>Updates reboot flags, emitting an event on change. Returns true if anything changed. <paramref name="details"/>
+    /// replaces the stored restart details (null clears them) unless <paramref name="keepDetails"/> is set.</summary>
+    public static bool ApplyRebootState(EasyPatchDbContext db, Endpoint endpoint, bool rebootPending, IReadOnlyList<string> reasons, DateTimeOffset now,
+        RebootDetails? details = null, bool keepDetails = false)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentNullException.ThrowIfNull(reasons);
         var cleanReasons = reasons.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => Truncate(r, 200)!).Distinct().Take(20).ToList();
-        var changed = endpoint.RebootPending != rebootPending || !endpoint.RebootReasons.SequenceEqual(cleanReasons);
+        var detailsJson = keepDetails ? SerializeDetails(true, ReadRebootDetails(endpoint.RebootDetails)) : SerializeDetails(rebootPending, details);
+        var changed = endpoint.RebootPending != rebootPending || !endpoint.RebootReasons.SequenceEqual(cleanReasons) ||
+                      !string.Equals(NormalizeDetails(endpoint.RebootDetails), detailsJson, StringComparison.Ordinal);
         if (!changed)
         {
             return false;
@@ -343,7 +349,50 @@ public sealed class ScanIngestionService(
 
         endpoint.RebootPending = rebootPending;
         endpoint.RebootReasons = cleanReasons;
+        endpoint.RebootDetails = detailsJson;
         return true;
+    }
+
+    /// <summary>The stored restart details, read back (null when absent or unreadable).</summary>
+    public static RebootDetails? ReadRebootDetails(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<RebootDetails>(json, ContractJson.Options)?.Sanitized();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? SerializeDetails(bool rebootPending, RebootDetails? details) =>
+        rebootPending && details?.Sanitized() is { IsEmpty: false } clean ? JsonSerializer.Serialize(clean, ContractJson.Options) : null;
+
+    // jsonb does not keep the text as written: compare what is stored, read back as it is (not cleaned, so details stored
+    // before a cleaning rule existed are rewritten).
+    private static string? NormalizeDetails(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<RebootDetails>(json, ContractJson.Options) is { } stored
+                ? JsonSerializer.Serialize(stored, ContractJson.Options)
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     internal async Task<Endpoint> LockEndpointAsync(Guid endpointId, CancellationToken ct)

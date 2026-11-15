@@ -785,6 +785,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("processor_name");
 
+                    b.Property<string>("RebootDetails")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("reboot_details");
+
                     b.Property<bool>("RebootPending")
                         .HasColumnType("boolean")
                         .HasColumnName("reboot_pending");

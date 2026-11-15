@@ -194,6 +194,12 @@ shape and to an explicit administrator decision.
   recorded in the audit log with their parameters; schedule changes are recorded as policy
   changes. A restart job that is not picked up within its expiry period (at most 24 hours) is
   abandoned rather than run late.
+* **What a pending restart is for.** Reading it is read-only (registry). While a restart is
+  pending, Windows agents 1.5.3 and later send the update IDs, servicing package names and file
+  paths Windows has queued for it. File paths can name programs a user installed; the agent
+  replaces the user name in profile paths with `*` (`C:\Users\*\…`), sends at most 25 paths of at
+  most 260 characters, and the server caps and cleans the list again before storing it. The
+  details are cleared when the restart is done.
 * **User messages.** The only messages are the presets listed by `GET /api/v1/user-messages`.
   There is no free text, so a compromised account or server cannot show users arbitrary
   content (for example a phishing message that appears to come from IT). The only variable
