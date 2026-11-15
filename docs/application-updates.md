@@ -22,8 +22,10 @@ in the maintenance window, or selected updates.
   are not affected.
 * **App Installer (winget) 1.6 or newer**. It comes with Windows 11 and with Windows 10 1809 and
   later through the Microsoft Store. **Windows 10 LTSC and Windows Server 2019 and 2022 do not
-  include it**, so the check fails there with `winget_not_found` unless App Installer was
-  installed separately.
+  include it.** Agents 1.7.0 and later install it for all users when it is missing or too old
+  (see [agent-installation.md](agent-installation.md#winget)); older agents fail the check with
+  `winget_not_found` unless App Installer was installed separately. winget needs Windows 10 1809
+  or Windows Server 2019 or later, so Windows Server 2016 cannot use application updates.
 * The computer must be able to reach the winget community repository and the vendors' download
   sites. Windows Update settings and WSUS have no effect on application updates.
 
@@ -64,7 +66,7 @@ winget list --id <ID> --exact --source winget --accept-source-agreements --disab
 * If winget cannot tell the installed version (it shows `Unknown` or a range such as `< 6.2`),
   the application is skipped.
 * The result of the check is shown on the endpoint's **Overview** tab: winget version, last check
-  and the last error. A failed check raises an *ApplicationScanFailed* event, and the application
+  and the last error, and why the agent could not install winget if it could not. A failed check raises an *ApplicationScanFailed* event, and the application
   updates already known keep their state until a check succeeds.
 
 **Installing.** An application update is installed with:

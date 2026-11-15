@@ -270,6 +270,18 @@ public sealed class CheckInService(
             endpoint.AgentReleaseKeyIds = keyIds;
         }
 
+        if (request.Winget is { } winget)
+        {
+            // Agents 1.7.0 and later check (and install) winget themselves; older agents only report it from application checks.
+            var version = ScanIngestionService.Truncate(winget.Version?.Trim(), 32);
+            var error = ScanIngestionService.Truncate(winget.SetupError?.Trim(), 1000);
+            if (endpoint.WingetVersion != version || endpoint.WingetSetupError != error)
+            {
+                endpoint.WingetVersion = version;
+                endpoint.WingetSetupError = error;
+            }
+        }
+
         if (request.Sessions is { } sessions)
         {
             var signedIn = Math.Clamp(sessions.SignedInUsers, 0, 10_000);

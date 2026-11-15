@@ -27,8 +27,8 @@ RUN dotnet publish backend/API/EasyPatch.Api.csproj -c Release --no-restore -o /
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.15-alpine3.24 AS runtime
 # tzdata: IANA time zones for maintenance windows. No other packages are added.
 RUN apk add --no-cache tzdata \
- && mkdir -p /app/keys /app/agent-packages \
- && chown app:app /app/keys
+ && mkdir -p /app/keys /app/agent-packages /app/winget \
+ && chown app:app /app/keys /app/winget
 COPY --from=build /out/api /app/api
 COPY --from=build /out/worker /app/worker
 
@@ -36,7 +36,8 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_EnableDiagnostics=0 \
     EasyPatch__DataProtectionKeysPath=/app/keys \
-    EasyPatch__AgentPackagesPath=/app/agent-packages
+    EasyPatch__AgentPackagesPath=/app/agent-packages \
+    EasyPatch__WingetCachePath=/app/winget
 WORKDIR /app/api
 USER app
 EXPOSE 8080

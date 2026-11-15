@@ -510,7 +510,7 @@ public static class EndpointEndpoints
             await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Endpoint && p.EndpointId == id, ct),
             await AgentUpdateInfoAsync(e, packages, policies, ct),
             e.Platform == AgentPlatforms.Linux ? new LinuxDetailsDto(e.OsId, e.OsVersion, e.KernelVersion, e.PackageManager, e.KeyProtection) : null,
-            e.Platform == AgentPlatforms.Linux ? null : await ApplicationStatusAsync(e, policies, ct),
+            e.Platform == AgentPlatforms.Linux ? null : await ApplicationStatusAsync(e, policies, db, ct),
             await RestartDetailsAsync(e, db, ct));
     }
 
@@ -570,11 +570,16 @@ public static class EndpointEndpoints
             details.FileOperationCount, supported);
     }
 
-    private static async Task<ApplicationUpdatesStatusDto> ApplicationStatusAsync(Core.Entities.Endpoint e, PolicyService policies, CancellationToken ct)
+    private static async Task<ApplicationUpdatesStatusDto> ApplicationStatusAsync(Core.Entities.Endpoint e, PolicyService policies, EasyPatchDbContext db,
+        CancellationToken ct)
     {
         var apps = (await policies.ResolveAsync(e, ct)).ApplicationUpdates;
+        // When the agent could not install winget, the server's own copy may be what is missing.
+        var serverCopyError = e.WingetSetupError is null
+            ? null
+            : await db.MirrorStates.AsNoTracking().Where(m => m.Name == Mirrors.Winget).Select(m => m.LastError).FirstOrDefaultAsync(ct);
         return new ApplicationUpdatesStatusDto(apps.IsActive, e.AgentCapabilities.Contains(AgentCapabilities.ApplicationUpdates), apps.ApprovedApps.Count,
-            e.WingetVersion, e.ApplicationScanAt, e.ApplicationScanError);
+            e.WingetVersion, e.ApplicationScanAt, e.ApplicationScanError, e.WingetSetupError, serverCopyError);
     }
 
     private static async Task<AgentUpdateInfoDto> AgentUpdateInfoAsync(EasyPatch.Core.Entities.Endpoint e, AgentPackageService packages, PolicyService policies, CancellationToken ct)

@@ -131,7 +131,9 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
       </Card>
 
       {linux ? <PackageManagerCard endpoint={e} lastScanItems={lastScanItems} /> : <WindowsUpdateCard endpoint={e} lastScanItems={lastScanItems} />}
-      {e.applications && (e.applications.enabled || e.applications.lastCheckAt) && <ApplicationUpdatesCard status={e.applications} />}
+      {e.applications && (e.applications.enabled || e.applications.lastCheckAt || e.applications.wingetSetupError) && (
+        <ApplicationUpdatesCard status={e.applications} />
+      )}
 
       <Card title="Hardware">
         <KeyValueList
@@ -261,6 +263,13 @@ function ApplicationUpdatesCard({ status: a }: { status: NonNullable<EndpointDet
         {a.enabled && a.lastError && (
           <Alert tone="danger" title="Last application check failed">
             {a.lastError}
+          </Alert>
+        )}
+        {a.wingetSetupError && (
+          <Alert tone="warn" title="The agent could not install winget">
+            {a.wingetSetupError}
+            {a.serverCopyError && <span className="mt-1 block">The server could not download its own copy: {a.serverCopyError}</span>}
+            <span className="mt-1 block text-muted">It tries again later on its own.</span>
           </Alert>
         )}
       </div>

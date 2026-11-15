@@ -58,7 +58,7 @@ services:
     <<: *logging
 
   migrate:
-    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.6.1}
+    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.7.0}
     build:
       context: .
       dockerfile: deployment/server/Dockerfile
@@ -76,7 +76,7 @@ services:
     <<: [*hardening, *logging]
 
   api:
-    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.6.1}
+    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.7.0}
     restart: unless-stopped
     environment:
       <<: *server-env
@@ -87,6 +87,8 @@ services:
     volumes:
       - dpkeys:/app/keys
       - ./data/agent-packages:/app/agent-packages:ro
+      # The server's copy of winget for agents that cannot reach GitHub (downloaded by the worker).
+      - winget:/app/winget:ro
     networks:
       - edge
       - data
@@ -102,7 +104,7 @@ services:
     <<: [*hardening, *logging]
 
   worker:
-    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.6.1}
+    image: ghcr.io/paulmataruso/easypatch-server:${EASYPATCH_VERSION:-1.7.0}
     restart: unless-stopped
     entrypoint: ["dotnet", "/app/worker/EasyPatch.Worker.dll"]
     working_dir: /app/worker
@@ -115,9 +117,10 @@ services:
       # Read-only: the worker decrypts notification secrets with the keys the API creates.
       - dpkeys:/app/keys:ro
       - ./data/agent-packages:/app/agent-packages:ro
+      - winget:/app/winget
     networks:
       - data
-      - egress # outbound only (SMTP, webhooks); nothing is published
+      - egress # outbound only (SMTP, webhooks, the winget release from GitHub); nothing is published
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -130,7 +133,7 @@ services:
     <<: [*hardening, *logging]
 
   caddy:
-    image: ghcr.io/paulmataruso/easypatch-proxy:${EASYPATCH_VERSION:-1.6.1}
+    image: ghcr.io/paulmataruso/easypatch-proxy:${EASYPATCH_VERSION:-1.7.0}
     build:
       context: .
       dockerfile: deployment/caddy/Dockerfile
@@ -172,6 +175,7 @@ networks:
 volumes:
   pgdata:
   dpkeys:
+  winget:
   caddy_data:
   caddy_config:
 

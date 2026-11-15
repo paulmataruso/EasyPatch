@@ -42,6 +42,7 @@ internal static class AgentComposition
         ArgumentNullException.ThrowIfNull(loggerFactory);
         var windowsUpdate = new WuaWindowsUpdateService(loggerFactory.CreateLogger<WuaWindowsUpdateService>());
         var updateSource = new RegistryUpdateSourceDetector();
+        var winget = new WingetProcessRunner(loggerFactory.CreateLogger<WingetProcessRunner>());
         var rebootDetector = new CompositeRebootDetector(
             [new RegistryRebootDetector(), new WuaRebootDetector(windowsUpdate)],
             loggerFactory.CreateLogger<CompositeRebootDetector>());
@@ -60,9 +61,9 @@ internal static class AgentComposition
             PolicyRegistry = new WindowsPolicyRegistry(),
             AgentInstaller = new WindowsAgentInstaller(),
             AgentUninstaller = new WindowsAgentUninstaller(),
-            ApplicationUpdates = new WingetApplicationUpdateService(
-                new WingetProcessRunner(loggerFactory.CreateLogger<WingetProcessRunner>()),
-                loggerFactory.CreateLogger<WingetApplicationUpdateService>()),
+            ApplicationUpdates = new WingetApplicationUpdateService(winget, loggerFactory.CreateLogger<WingetApplicationUpdateService>()),
+            WingetRunner = winget,
+            WingetProvisioner = new WindowsWingetProvisioner(LogDirectory, loggerFactory.CreateLogger<WindowsWingetProvisioner>()),
         };
     }
 

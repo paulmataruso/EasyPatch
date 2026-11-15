@@ -769,6 +769,10 @@ export interface ApplicationUpdatesStatusDto {
   wingetVersion: string | null;
   lastCheckAt: Instant | null;
   lastError: string | null;
+  /** Why the agent could not install winget (agent 1.7.0 and newer). */
+  wingetSetupError: string | null;
+  /** Why the server could not download its own copy of winget (shown with a setup error). */
+  serverCopyError: string | null;
 }
 
 /** Whether the agent can update itself and to which version (see the "Agent updates" policy). */

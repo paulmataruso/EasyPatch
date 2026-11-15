@@ -3,6 +3,31 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and both agents share one version number.
 
+## [1.7.0] - 2026-11-15
+
+### Added
+
+- **Download and install progress per update**: while a job runs, the job page and the
+  endpoint's update list show how far each Windows update has downloaded and installed (in
+  percent, as Windows Update reports it), and the tray's status window shows it in the current
+  activity. Agents report the percentage at most every 10 seconds. If Windows Update does not
+  support progress reporting for an update, it is installed as before, without a percentage.
+  Needs agent 1.7.0 or later.
+- **The Windows agent installs winget**: when a computer has no App Installer (winget) 1.6 or
+  newer for all users, the agent installs winget 1.29.380 a few minutes after it starts, so
+  application updates work without preparation (Windows Server 2019 and 2022 and Windows 10 LTSC
+  do not include it). It downloads the release from GitHub, or from the EasyPatch server when
+  GitHub cannot be reached; the server fetches its own copy from GitHub the first time an agent
+  asks (`GET /downloads/winget/{file}`). Every file must match the size and SHA-256 built into
+  the agent, and App Installer is installed for all users with DISM. Failures are shown on the
+  endpoint's Overview tab and retried later. Needs Windows 10 1809 or Windows Server 2019 or
+  later. Event IDs 1018 (installed) and 1019 (failed).
+
+### Changed
+
+- The Compose file adds the `winget` volume (the server's copy of winget, written by the
+  `worker`). Use the new `docker-compose.yml`.
+
 ## [1.6.1] - 2026-11-15
 
 ### Fixed

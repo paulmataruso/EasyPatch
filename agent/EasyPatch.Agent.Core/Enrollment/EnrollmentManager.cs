@@ -44,6 +44,8 @@ public static class AgentEventIds
     public static readonly EventId AgentUpdateFailed = new(1015, "AgentUpdateFailed");
     public static readonly EventId AgentUninstallStarted = new(1016, "AgentUninstallStarted");
     public static readonly EventId AgentUninstallFailed = new(1017, "AgentUninstallFailed");
+    public static readonly EventId WingetInstalled = new(1018, "WingetInstalled");
+    public static readonly EventId WingetSetupFailed = new(1019, "WingetSetupFailed");
 }
 
 /// <summary>

@@ -45,6 +45,9 @@ public sealed class AgentRuntime : IUserRequestHandler, IDisposable
     private readonly ReleaseKeyRing _releaseKeys;
     private readonly AgentUpdateHandler _agentUpdate;
     private readonly WindowsUpdatePolicyManager? _policy;
+    private readonly WingetSetupService? _winget;
+    private readonly HttpClient? _wingetHttp;
+    private readonly bool _ownsWingetHttp;
     private readonly SemaphoreSlim _flushSignal = new(0, int.MaxValue);
     private readonly Lock _userRequestLock = new();
     private string? _announcedVersion;
@@ -114,6 +117,20 @@ public sealed class AgentRuntime : IUserRequestHandler, IDisposable
         if (platform.PolicyRegistry is not null)
         {
             _policy = new WindowsUpdatePolicyManager(platform.PolicyRegistry, State, _time, loggerFactory.CreateLogger<WindowsUpdatePolicyManager>());
+        }
+
+        if (platform.WingetProvisioner is { } provisioner && platform.WingetRunner is { } wingetRunner)
+        {
+            // GitHub first (system proxy and certificate trust, redirects to its download host), then this server's copy.
+            _ownsWingetHttp = options.WingetHttpClient is null;
+            _wingetHttp = options.WingetHttpClient ?? CreateWingetHttpClient(options.AgentVersion);
+            IWingetFileSource[] sources =
+            [
+                new HttpWingetFileSource(_wingetHttp, WingetDistribution.ReleaseUrl, "GitHub", WingetDownloadTimeout),
+                new ServerWingetFileSource(GetActiveClient, WingetDownloadTimeout),
+            ];
+            _winget = new WingetSetupService(wingetRunner, provisioner, sources, State, Path.Combine(options.DataDirectory, "winget"),
+                () => _jobs.HasRunnableOrActiveJob, _time, loggerFactory.CreateLogger<WingetSetupService>(), options.WingetRelease);
         }
 
         State.Update(s => s.FirstStartedAt ??= _time.GetUtcNow());
@@ -189,6 +206,7 @@ public sealed class AgentRuntime : IUserRequestHandler, IDisposable
             AgentPackageFormat = _platform.AgentInstaller?.PackageFormat,
             Sessions = _platform.UserInteraction is null ? null : SafeSessions(),
             WindowsUpdatePolicy = policyReport,
+            Winget = _winget?.Report,
         };
 
         CheckInResponse response;
@@ -384,6 +402,11 @@ public sealed class AgentRuntime : IUserRequestHandler, IDisposable
         _inventory.SendInventoryAsync(cancellationToken);
 
     /// <summary>Delivers queued reports. Returns true when the outbox is empty afterwards.</summary>
+    /// <summary>Checks winget and installs it when it is missing (what the background check does). False when it is not
+    /// ready, or when this platform does not install winget.</summary>
+    public Task<bool> EnsureWingetAsync(CancellationToken cancellationToken = default) =>
+        _winget?.EnsureAsync(cancellationToken) ?? Task.FromResult(false);
+
     public async Task<bool> FlushOutboxAsync(CancellationToken cancellationToken = default)
     {
         var client = GetActiveClient();
@@ -534,11 +557,12 @@ public sealed class AgentRuntime : IUserRequestHandler, IDisposable
         using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var communication = CommunicationLoopAsync(session);
         var work = WorkLoopAsync(session.Token);
+        var winget = _winget?.RunAsync(session.Token) ?? Task.CompletedTask;
         await Task.WhenAny(communication, work);
         await session.CancelAsync();
         try
         {
-            await Task.WhenAll(communication, work);
+            await Task.WhenAll(communication, work, winget);
         }
         catch (OperationCanceledException)
         {
@@ -953,8 +977,33 @@ public sealed class AgentRuntime : IUserRequestHandler, IDisposable
         }
     }
 
+    /// <summary>One file of the winget release (the bundle is about 217 MB) must arrive within this time.</summary>
+    private static readonly TimeSpan WingetDownloadTimeout = TimeSpan.FromHours(2);
+
+    private static HttpClient CreateWingetHttpClient(string agentVersion)
+    {
+        var http = new HttpClient(new SocketsHttpHandler
+        {
+            AllowAutoRedirect = true, // github.com redirects to its download host; HTTPS only (checked by the source)
+            MaxAutomaticRedirections = 5,
+            UseCookies = false,
+            ConnectTimeout = TimeSpan.FromSeconds(30),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+        })
+        {
+            Timeout = Timeout.InfiniteTimeSpan, // each file has its own timeout
+        };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd($"EasyPatch-Agent/{agentVersion}");
+        return http;
+    }
+
     public void Dispose()
     {
+        if (_ownsWingetHttp)
+        {
+            _wingetHttp?.Dispose();
+        }
+
         _keys.Dispose();
         _releaseKeys.Dispose();
         _outbox.Dispose();

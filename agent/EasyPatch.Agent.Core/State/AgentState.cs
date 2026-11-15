@@ -99,6 +99,9 @@ public sealed class AgentState
     /// <summary>Windows Update policy values EasyPatch manages, with the original values to restore.</summary>
     public WindowsUpdatePolicyEnforcement WindowsUpdatePolicy { get; set; } = new();
 
+    /// <summary>The machine-wide winget as last checked, and the agent's attempts to install it (Windows).</summary>
+    public WingetSetupState Winget { get; set; } = new();
+
     public JobRecord? FindJob(Guid jobId) => Jobs.Find(j => j.Job.JobId == jobId);
 }
 
@@ -142,6 +145,24 @@ public sealed class JobRecord
 
     /// <summary>Set when the removal of the agent was started for an uninstall job.</summary>
     public UninstallProgress? Uninstall { get; set; }
+}
+
+public sealed class WingetSetupState
+{
+    /// <summary>Version of the machine-wide winget found at the last check; null when there was none.</summary>
+    public string? Version { get; set; }
+
+    public bool InstalledByAgent { get; set; }
+
+    /// <summary>Why the last installation attempt failed; null when winget is ready.</summary>
+    public string? Error { get; set; }
+
+    public DateTimeOffset? CheckedAt { get; set; }
+
+    public DateTimeOffset? LastAttemptAt { get; set; }
+
+    /// <summary>Failed installation attempts in a row (spaces the retries out).</summary>
+    public int Failures { get; set; }
 }
 
 public sealed class UninstallProgress

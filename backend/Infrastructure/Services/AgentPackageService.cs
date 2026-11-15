@@ -21,6 +21,10 @@ public sealed class EasyPatchOptions
     /// optionally with its release signature (<c>.sig</c>).</summary>
     public string AgentPackagesPath { get; set; } = "/app/agent-packages";
 
+    /// <summary>The worker's copy of the pinned winget release (writable by the worker, read-only for the API). Files an
+    /// administrator places in <c>&lt;AgentPackagesPath&gt;/winget</c> are served too.</summary>
+    public string WingetCachePath { get; set; } = "/app/winget";
+
     /// <summary>At most this many automatic agent updates run at the same time (spreads the downloads).</summary>
     public int AutomaticAgentUpdateConcurrency { get; set; } = 25;
 }

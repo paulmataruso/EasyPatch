@@ -477,6 +477,29 @@ LocalSystem.
   installer can restart the computer by itself despite silent mode. Approve only well-known
   applications.
 
+### Installing winget
+
+Agents 1.7.0 and later install winget (App Installer) for all users when a computer has none,
+whether or not application updates are on (see
+[agent-installation.md](agent-installation.md#winget)).
+
+* **Pinned files.** The version, file names, sizes and SHA-256 values of the three release files
+  are built into the agent (`WingetDistribution`). The agent checks every file itself, whether
+  it came from GitHub or from the EasyPatch server, and installs nothing from a file that does
+  not match. A compromised server or GitHub account cannot make the agent install a different
+  package; changing the release needs a new, signed agent version.
+* **No script, no shell.** The agent installs the package with Windows' DISM
+  (`/Add-ProvisionedAppxPackage`), passing the file paths as an argument vector. Windows checks
+  Microsoft's signatures on the packages. Only dependency packages with plain file names
+  (`<arch>/<name>.appx` or `.msix`) are taken from the archive.
+* **The anonymous download route.** `GET /downloads/winget/{file}` needs no authentication,
+  like the agent MSI downloads. It serves only the three pinned file names, and only after the
+  server has checked their size and SHA-256. The only thing a request can trigger is a
+  one-time download of those files from GitHub by the worker (the API has no egress), recorded
+  at most every 10 minutes and retried with backoff.
+* **No restart.** DISM runs with `/NoRestart`, so installing App Installer never restarts the
+  computer.
+
 ## Threat model (STRIDE summary)
 
 | # | Threat | Mitigation |
@@ -496,7 +519,7 @@ LocalSystem.
 | I5 | A monthly report reaches the wrong people or is read in transit | Recipients are entered per organization (no default), changes are audited, Operator role required; email only over STARTTLS or TLS (server certificate validated unless a super administrator turns that off); tenant-scoped API. See [Monthly reports](#monthly-reports). |
 | D1 | Check-in floods | Per-credential and per-IP rate limits, request size limits, jitter |
 | D2 | Enrollment queue spam | A deployment code is required, pending requests are capped and expire, per-IP rate limit |
-| E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability. Windows updates come from the sources Windows is configured for, and Linux packages from the repositories the computer is configured for. Application updates (off by default) can only upgrade an installed application to the version the winget community repository offers; a compromised server could approve more applications, but not choose versions, sources or installers. See [Application updates](#application-updates-winget). Agent updates install only packages whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). |
+| E1 | Server compromise used to execute code on endpoints | The agent has no generic execution capability. Windows updates come from the sources Windows is configured for, and Linux packages from the repositories the computer is configured for. Application updates (off by default) can only upgrade an installed application to the version the winget community repository offers; a compromised server could approve more applications, but not choose versions, sources or installers. See [Application updates](#application-updates-winget). Agent updates install only packages whose release signature verifies against a public key built into the agent; the server relays packages and signatures but cannot supply keys, sign packages or downgrade an agent. See [Agent release signing](#agent-release-signing). The agent installs winget only from files matching SHA-256 values built into it; the server can relay them but not change them. See [Installing winget](#installing-winget). |
 | E2 | A local non-admin user reads agent secrets | Windows: ProgramData ACL (SYSTEM and Administrators), DPAPI, registry ACL on bootstrap values. Linux: root-only `/etc/easypatch` and `/var/lib/easypatch`, `systemd-creds` where available, no token on the command line |
 | E3 | Cross-site request forgery or XSS in the admin UI | SameSite=Strict, CSRF header check, a strict CSP from Caddy, and React escaping |
 | E4 | A local user abuses the tray pipe to make the service do something | The pipe accepts only *restart now* or an offered postponement for the current restart request, and the parameterless status-window requests (check in, check for updates, read the recent log), from interactive sessions; the session comes from Windows. Check-ins and update checks are rate-limited for the whole computer and never install or restart anything. See [Tray and local pipe](#tray-and-local-pipe). |

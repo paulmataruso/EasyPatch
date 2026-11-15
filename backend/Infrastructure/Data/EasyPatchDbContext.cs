@@ -45,6 +45,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
     public DbSet<MsrcBuildFix> MsrcBuildFixes => Set<MsrcBuildFix>();
     public DbSet<DebianFix> DebianFixes => Set<DebianFix>();
     public DbSet<VulnerabilityFeedState> VulnerabilityFeeds => Set<VulnerabilityFeedState>();
+    public DbSet<MirrorState> MirrorStates => Set<MirrorState>();
     public DbSet<ReportSchedule> ReportSchedules => Set<ReportSchedule>();
     public DbSet<GeneratedReport> GeneratedReports => Set<GeneratedReport>();
     public DbSet<NotificationSettingsRow> NotificationSettings => Set<NotificationSettingsRow>();
@@ -277,6 +278,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.OsId).HasMaxLength(64);
             e.Property(x => x.PackageManager).HasMaxLength(16);
             e.Property(x => x.WingetVersion).HasMaxLength(32);
+            e.Property(x => x.WingetSetupError).HasMaxLength(1000);
             e.Property(x => x.ApplicationScanError).HasMaxLength(1000);
             e.Property(x => x.KeyProtection).HasMaxLength(32);
             e.Property(x => x.AgentPackageFormat).HasMaxLength(8);
@@ -537,6 +539,14 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.CveId).HasMaxLength(32);
             e.Property(x => x.FixedVersion).HasMaxLength(200);
         });
+        b.Entity<MirrorState>(e =>
+        {
+            e.ToTable("mirror_states");
+            e.HasKey(x => x.Name);
+            e.Property(x => x.Name).HasMaxLength(32);
+            e.Property(x => x.LastError).HasMaxLength(2000);
+        });
+
         b.Entity<VulnerabilityFeedState>(e =>
         {
             e.ToTable("vulnerability_feeds");

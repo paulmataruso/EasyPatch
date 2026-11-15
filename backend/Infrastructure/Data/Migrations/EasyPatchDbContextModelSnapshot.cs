@@ -884,6 +884,11 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("windows_update_service_state");
 
+                    b.Property<string>("WingetSetupError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("winget_setup_error");
+
                     b.Property<string>("WingetVersion")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
@@ -1682,6 +1687,39 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("job_updates", (string)null);
+                });
+
+            modelBuilder.Entity("EasyPatch.Core.Entities.MirrorState", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("Failures")
+                        .HasColumnType("integer")
+                        .HasColumnName("failures");
+
+                    b.Property<DateTimeOffset?>("LastAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_attempt_at");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset?>("LastSuccessAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_success_at");
+
+                    b.Property<DateTimeOffset?>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
+
+                    b.HasKey("Name");
+
+                    b.ToTable("mirror_states", (string)null);
                 });
 
             modelBuilder.Entity("EasyPatch.Core.Entities.MsrcBuildFix", b =>

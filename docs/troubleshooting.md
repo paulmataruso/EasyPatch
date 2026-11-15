@@ -131,8 +131,13 @@ appear as *ApplicationScanFailed* events. See [application-updates.md](applicati
 | Symptom | Cause and fix |
 |---|---|
 | *Agent too old* | Application updates need agent 1.4.0 or newer |
-| `winget (App Installer) is not installed for all users` (`winget_not_found`) | Install App Installer from the Microsoft Store or the [winget releases](https://github.com/microsoft/winget-cli/releases) for all users. Windows Server 2019 and 2022 and Windows 10 LTSC do not include it |
-| `winget_too_old` | Update App Installer to 1.6 or newer |
+| `winget (App Installer) is not installed for all users` (`winget_not_found`) | Agents 1.7.0 and later install it themselves a few minutes after the service starts; see the next rows if that fails. Older agents: update the agent, or install App Installer from the [winget releases](https://github.com/microsoft/winget-cli/releases) for all users. Windows Server 2019 and 2022 and Windows 10 LTSC do not include it |
+| `winget_too_old` | Agents 1.7.0 and later replace it with winget 1.29.380. Older agents: update App Installer to 1.6 or newer |
+| *The agent could not install winget*: `Could not download … GitHub: … the EasyPatch server: … 503 …` | The computer cannot reach GitHub and the server is still downloading its copy; the agent tries again in 15 minutes. If the server's copy also fails (its error is shown below the agent's), the `worker` cannot reach GitHub: allow `github.com` and `release-assets.githubusercontent.com`, or copy the files to `data/agent-packages/winget/` (see [installation.md](installation.md#winget-for-agents)) |
+| *The agent could not install winget*: `… does not match the pinned release` or `… bytes instead of …` | A proxy or filter changed the download. Nothing was installed. Allow the GitHub hosts unmodified, or let the agent use the server's copy |
+| *The agent could not install winget*: `DISM could not install App Installer (exit code …)` | See the DISM log `C:\ProgramData\EasyPatch\logs\winget-setup.log` and `C:\Windows\Logs\DISM\dism.log`. They name the package that failed and why |
+| *The agent could not install winget*: `winget needs Windows 10 version 1809 or Windows Server 2019 or later` | Windows Server 2016 and older Windows 10 cannot run winget; application updates are unavailable there |
+| *The agent could not install winget*: `Not enough free disk space` | Free 1.5 GB on the system drive; the agent tries again later |
 | An approved application never shows updates | It is installed only for one user (for example in `AppData`), which the agent cannot see, or winget cannot match it to a package or tell its version. Run `winget list --id <ID> --exact --source winget` in an elevated prompt to see what winget reports |
 | `not_verified` | winget exited successfully but the new version was not listed afterwards. Check whether the application was running, then install again |
 | `winget_0x8A150101` | The application was running. Close it, or retry in the maintenance window |

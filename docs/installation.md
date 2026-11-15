@@ -12,7 +12,7 @@ installation, first sign-in, agent packages, upgrades, backup and restore.
 | Host | 64-bit Linux with Docker Engine and the Docker Compose plugin. The development override (`docker-compose.dev.yml`) uses the `!override` tag, which needs Compose 2.24.4 or later |
 | DNS | A public DNS name (A or AAAA record) pointing at the host, for example `patch.example.com` |
 | Inbound | TCP 443 from administrators and from every managed endpoint. TCP 80 from the internet, for ACME certificate validation and the HTTP to HTTPS redirect |
-| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. Pulling the images needs `ghcr.io` and Docker Hub (PostgreSQL). Building them yourself needs `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` instead of `ghcr.io` |
+| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. winget, from the `worker` only and only after a Windows agent could not download it from GitHub itself: `github.com` and `release-assets.githubusercontent.com` (see [winget for agents](#winget-for-agents)). Pulling the images needs `ghcr.io` and Docker Hub (PostgreSQL). Building them yourself needs `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` instead of `ghcr.io` |
 
 Nothing else is published. PostgreSQL is attached only to an internal Docker network and has no
 host port.
@@ -25,7 +25,7 @@ ARM64). You need the repository for `docker-compose.yml`, the Caddy configuratio
 scripts. Check out the release tag you want to run:
 
 ```bash
-git clone --branch v1.6.1 https://github.com/paulmataruso/EasyPatch.git easypatch
+git clone --branch v1.7.0 https://github.com/paulmataruso/EasyPatch.git easypatch
 cd easypatch
 ```
 
@@ -51,7 +51,7 @@ Edit `.env`:
 |---|---|---|
 | `EASYPATCH_DOMAIN` | yes | The public DNS name. Browsers and agents connect to `https://<EASYPATCH_DOMAIN>` |
 | `ACME_EMAIL` | yes | Contact address given to the certificate authority |
-| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.6.1`). Images you build yourself get this tag too |
+| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.7.0`). Images you build yourself get this tag too |
 | `EASYPATCH_PUBLIC_URL` | no | Overrides the URL used in install commands, reset links and scripts. Defaults to `https://<EASYPATCH_DOMAIN>` |
 | `EASYPATCH_EDGE_SUBNET` | no | Subnet of the network between Caddy and the API (default `172.30.0.0/24`). Change it only if it collides with an existing network. The API trusts `X-Forwarded-For` only from this subnet |
 
@@ -113,12 +113,12 @@ Download the agent packages of the same release from
 each with its `.sig` release signature, to `data/agent-packages/`:
 
 ```bash
-mkdir -p /tmp/easypatch-v1.6.1
-gh release download v1.6.1 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.6.1 \
+mkdir -p /tmp/easypatch-v1.7.0
+gh release download v1.7.0 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.7.0 \
   --pattern 'EasyPatchAgent-*' --pattern SHA256SUMS
 # or download the same files from the release page in a browser
-(cd /tmp/easypatch-v1.6.1 && sha256sum --check --ignore-missing SHA256SUMS)
-cp /tmp/easypatch-v1.6.1/EasyPatchAgent-1.6.1-* data/agent-packages/
+(cd /tmp/easypatch-v1.7.0 && sha256sum --check --ignore-missing SHA256SUMS)
+cp /tmp/easypatch-v1.7.0/EasyPatchAgent-1.7.0-* data/agent-packages/
 chmod 644 data/agent-packages/*
 ```
 
@@ -152,6 +152,26 @@ SmartScreen may warn when an MSI is opened by hand. To build the packages yourse
 * The release private key belongs on the machine that builds the agent. Never copy it to the
   server: the server needs only the packages and their `.sig` files.
 
+### winget for agents
+
+Windows agents 1.7.0 and later install winget when a computer has none (see
+[agent-installation.md](agent-installation.md#winget)). They download it from GitHub, and from
+the server (`/downloads/winget/…`) when GitHub cannot be reached. Nothing needs to be set up:
+the first time an agent asks the server, the `worker` downloads the pinned release (about
+315 MB) from GitHub into the `winget` volume, and agents try again 15 minutes later. If that
+download fails, the endpoint page shows the server's error next to the agent's.
+
+If the server cannot reach GitHub either, download the three files of the
+[winget v1.29.380 release](https://github.com/microsoft/winget-cli/releases/tag/v1.29.380)
+elsewhere and copy them to `data/agent-packages/winget/` (world-readable, like the packages):
+
+* `Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle`
+* `DesktopAppInstaller_Dependencies.zip`
+* `e53e159d00e04f729cc2180cffd1c02e_License1.xml`
+
+The server serves a file only when its size and SHA-256 match the values built into EasyPatch,
+and agents check them again.
+
 Agent installation and enrollment are described in [agent-installation.md](agent-installation.md)
 (Windows) and [linux-agent.md](linux-agent.md) (Linux).
 
@@ -183,7 +203,8 @@ release with vulnerability data adds an eighth, *Known-exploited vulnerability u
 worker then downloads vulnerability data (see the outbound row in [Requirements](#requirements)).
 It needs no configuration change. The release with monthly reports adds two tables; reports are
 off until you set up a schedule (**Reports → Monthly reports**), and emailing them needs SMTP with
-STARTTLS or TLS.
+STARTTLS or TLS. Release 1.7.0 adds the `winget` volume (written by the `worker`, read-only in the
+`api`); see [winget for agents](#winget-for-agents).
 
 ## Backup and restore
 
@@ -297,7 +318,7 @@ docker compose build        # tags the images with EASYPATCH_VERSION from .env
 docker compose up -d
 ```
 
-Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.6.1-local`) so that
+Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.7.0-local`) so that
 `docker compose pull` never replaces your images with the release images.
 
 ## Building and testing from source

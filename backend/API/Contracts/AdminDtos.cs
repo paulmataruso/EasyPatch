@@ -367,8 +367,10 @@ public sealed record RestartUpdateDto(Guid? UpdateGuid, string Title, IReadOnlyL
 
 /// <summary>Application (winget) update checks of a Windows endpoint. <c>Enabled</c>: the effective policy turns them on with
 /// approved applications; <c>Supported</c>: the agent has the <c>app-updates</c> capability (1.4.0 and later).</summary>
+/// <param name="WingetSetupError">Why the agent could not install winget (agent 1.7.0 and later).</param>
+/// <param name="ServerCopyError">Why the server could not download its own copy of winget, shown with a setup error.</param>
 public sealed record ApplicationUpdatesStatusDto(bool Enabled, bool Supported, int ApprovedApps, string? WingetVersion, DateTimeOffset? LastCheckAt,
-    string? LastError);
+    string? LastError, string? WingetSetupError = null, string? ServerCopyError = null);
 
 /// <summary>Linux-only endpoint details (null for Windows endpoints).</summary>
 /// <param name="KeyProtection">How the agent's private key is protected: systemd-creds-host or file-permissions.</param>

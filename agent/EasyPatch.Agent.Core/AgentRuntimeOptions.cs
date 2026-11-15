@@ -56,4 +56,10 @@ public sealed record AgentRuntimeOptions
 
     /// <summary>Downloaded agent packages and their installer logs.</summary>
     public string UpdateDirectory => Path.Combine(DataDirectory, "updates");
+
+    /// <summary>Client for downloading winget from GitHub (tests); by default the agent creates its own.</summary>
+    public HttpClient? WingetHttpClient { get; init; }
+
+    /// <summary>The winget release to install (tests); by default the pinned <see cref="Contracts.Agent.WingetDistribution"/>.</summary>
+    public Applications.WingetRelease? WingetRelease { get; init; }
 }

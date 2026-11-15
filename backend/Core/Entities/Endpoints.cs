@@ -45,8 +45,12 @@ public sealed class Endpoint
     /// <summary>Linux: apt or dnf.</summary>
     public string? PackageManager { get; set; }
 
-    /// <summary>Windows: winget version seen by the last application update check (agent 1.4.0 and later).</summary>
+    /// <summary>Windows: version of the machine-wide winget, from the last application update check (agent 1.4.0 and
+    /// later) or the agent's own winget check at check-in (1.7.0 and later).</summary>
     public string? WingetVersion { get; set; }
+
+    /// <summary>Windows: why the agent could not install winget (agent 1.7.0 and later); null when winget is ready.</summary>
+    public string? WingetSetupError { get; set; }
 
     /// <summary>When the agent last checked applications for updates.</summary>
     public DateTimeOffset? ApplicationScanAt { get; set; }

@@ -81,12 +81,14 @@ public sealed class PostgresFixture : IAsyncLifetime
     }
 }
 
-public sealed class EasyPatchApiFactory(string connectionString, TimeProvider clock, IReadOnlyDictionary<string, string?>? settings = null)
+public sealed class EasyPatchApiFactory(string connectionString, TimeProvider clock, IReadOnlyDictionary<string, string?>? settings = null,
+    Action<IServiceCollection>? configureServices = null)
     : WebApplicationFactory<Program>
 {
     public string ConnectionString { get; } = connectionString;
     public string KeysPath { get; } = Directory.CreateTempSubdirectory("easypatch-keys-").FullName;
     public string PackagesPath { get; } = Directory.CreateTempSubdirectory("easypatch-packages-").FullName;
+    public string WingetCachePath { get; } = Directory.CreateTempSubdirectory("easypatch-winget-").FullName;
     public const string PublicUrl = "https://easypatch.test";
 
     /// <summary>Records email and webhook sends instead of performing them.</summary>
@@ -98,6 +100,7 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
         builder.UseSetting("ConnectionStrings:EasyPatch", ConnectionString);
         builder.UseSetting("EasyPatch:DataProtectionKeysPath", KeysPath);
         builder.UseSetting("EasyPatch:AgentPackagesPath", PackagesPath);
+        builder.UseSetting("EasyPatch:WingetCachePath", WingetCachePath);
         builder.UseSetting("EasyPatch:PublicUrl", PublicUrl);
         builder.UseSetting("Logging:Format", "text");
         builder.UseSetting("Logging:LogLevel:Default", "Warning");
@@ -127,7 +130,9 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
             services.AddScoped<NotificationDeliveryTask>();
             services.AddScoped<VulnerabilityFeedTask>();
             services.AddScoped<MonthlyReportTask>();
+            services.AddScoped<WingetMirrorTask>();
             services.AddSingleton<INotificationTransport>(Transport);
+            configureServices?.Invoke(services);
         });
     }
 
@@ -136,6 +141,7 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
         base.Dispose(disposing);
         TryDelete(KeysPath);
         TryDelete(PackagesPath);
+        TryDelete(WingetCachePath);
     }
 
     private static void TryDelete(string path)
@@ -348,10 +354,15 @@ public abstract class IntegrationTest(PostgresFixture postgres) : IAsyncLifetime
     /// <summary>Extra configuration for the API host (override per test class).</summary>
     protected virtual IReadOnlyDictionary<string, string?>? Settings => null;
 
+    /// <summary>Replaces services of the API host (override per test class).</summary>
+    protected virtual void ConfigureServices(IServiceCollection services)
+    {
+    }
+
     public virtual async ValueTask InitializeAsync()
     {
         var connectionString = await postgres.CreateDatabaseAsync();
-        Factory = new EasyPatchApiFactory(connectionString, Clock, Settings);
+        Factory = new EasyPatchApiFactory(connectionString, Clock, Settings, ConfigureServices);
         _ = Factory.Server; // start the host
     }
 

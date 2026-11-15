@@ -144,6 +144,9 @@ public sealed record CheckInRequest
     /// <summary>Package format agent updates must use (<see cref="AgentRelease.FormatMsi"/>, <c>deb</c> or <c>rpm</c>).
     /// Absent from agents before 1.3.0, which are all Windows (MSI).</summary>
     public string? AgentPackageFormat { get; init; }
+
+    /// <summary>The machine-wide winget (Windows agent 1.7.0 and later, once it has checked).</summary>
+    public WingetStatusReport? Winget { get; init; }
 }
 
 public sealed record CheckInResponse

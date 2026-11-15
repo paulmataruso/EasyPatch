@@ -57,6 +57,10 @@ public sealed class FakeAgentServer : HttpMessageHandler
     /// <summary>Agent packages served at <c>GET downloads/agent/{fileName}</c> (anonymous, like the real server).</summary>
     public Dictionary<string, byte[]> Packages { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>The server's copy of the winget release at <c>GET downloads/winget/{fileName}</c>; a missing file gets
+    /// 503 (the real server is then fetching its copy).</summary>
+    public Dictionary<string, byte[]> WingetFiles { get; } = new(StringComparer.Ordinal);
+
     // ------------------------------------------------------------------ observed traffic
 
     public List<string> Requests { get; } = [];
@@ -152,6 +156,18 @@ public sealed class FakeAgentServer : HttpMessageHandler
             if (Override?.Invoke(route, body) is { } overridden)
             {
                 return overridden;
+            }
+
+            if (request.Method == HttpMethod.Get && route.StartsWith(WingetDistribution.ServerRoute, StringComparison.Ordinal))
+            {
+                if (WingetFiles.TryGetValue(Uri.UnescapeDataString(route[WingetDistribution.ServerRoute.Length..]), out var file))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(file) };
+                }
+
+                var preparing = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                preparing.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMinutes(15));
+                return preparing;
             }
 
             if (request.Method == HttpMethod.Get && route.StartsWith("downloads/agent/", StringComparison.Ordinal))

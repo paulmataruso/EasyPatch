@@ -45,6 +45,8 @@ public static class DependencyInjection
         services.AddSingleton<NonceStore>();
         services.AddSingleton<PresenceTracker>();
         services.AddSingleton<AgentPackageService>();
+        services.AddSingleton(WingetMirrorFiles.Pinned);
+        services.AddSingleton<WingetMirrorService>();
 
         services.AddScoped<NotificationSecrets>();
         services.AddScoped<AlertEngine>();
@@ -60,6 +62,21 @@ public static class DependencyInjection
             })
             .ConfigurePrimaryHttpMessageHandler(WebhookHttp.CreateHandler)
             .RemoveAllLoggers(); // request logging would write webhook URLs (which contain secrets) to the log
+
+        // The winget release on GitHub (worker only): github.com redirects to its download host; HTTPS only (checked).
+        services.AddHttpClient(WingetMirrorService.HttpClientName, c =>
+            {
+                c.Timeout = TimeSpan.FromHours(2);
+                c.DefaultRequestHeaders.UserAgent.ParseAdd($"EasyPatch/{version}");
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = true,
+                MaxAutomaticRedirections = 5,
+                UseCookies = false,
+                ConnectTimeout = TimeSpan.FromSeconds(20),
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            });
 
         // Public vulnerability feeds (worker only). No redirects: the feed hosts are fixed HTTPS URLs.
         services.AddScoped<VulnerabilityFeedService>();
@@ -114,6 +131,7 @@ public static class DependencyInjection
         services.AddScoped<NotificationDeliveryTask>();
         services.AddScoped<VulnerabilityFeedTask>();
         services.AddScoped<MonthlyReportTask>();
+        services.AddScoped<WingetMirrorTask>();
         services.AddSingleton<MaintenanceHeartbeat>();
         services.AddHostedService<MaintenanceLoop<JobMaintenanceTask>>();
         services.AddHostedService<MaintenanceLoop<PresenceMonitorTask>>();
@@ -127,6 +145,7 @@ public static class DependencyInjection
         services.AddHostedService<MaintenanceLoop<NotificationDeliveryTask>>();
         services.AddHostedService<MaintenanceLoop<VulnerabilityFeedTask>>();
         services.AddHostedService<MaintenanceLoop<MonthlyReportTask>>();
+        services.AddHostedService<MaintenanceLoop<WingetMirrorTask>>();
         return services;
     }
 }

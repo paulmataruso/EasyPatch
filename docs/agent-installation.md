@@ -28,7 +28,7 @@ Update Agent API that Windows itself uses. The agent:
 |---|---|
 | Operating system | Windows 10, Windows 11, Windows Server 2016 or later, 64-bit (x64 or ARM64) |
 | Privileges | Installation and the `enroll`/`unenroll` commands need an administrator; the service runs as LocalSystem |
-| Network | Outbound HTTPS (TCP 443 by default) from the endpoint to the EasyPatch server. No inbound ports |
+| Network | Outbound HTTPS (TCP 443 by default) from the endpoint to the EasyPatch server. No inbound ports. To install winget (agent 1.7.0 and later, see [winget](#winget)), also `github.com` and `release-assets.githubusercontent.com`; without them the agent downloads winget from the EasyPatch server instead |
 | TLS | The server certificate must be trusted by the Windows certificate store of the computer, or chain to the CA recorded at installation with `SERVERCACERT` (see [Servers with a private certificate authority](#servers-with-a-private-certificate-authority)). Certificate validation cannot be disabled |
 | .NET | Not required: the agent is self-contained |
 
@@ -262,6 +262,9 @@ the `caddy_data` volume). If it is ever replaced, reinstall the agents with the 
   settings, the agent applies it after the next check-in and reports whether it was applied,
   or whether another policy source (for example domain Group Policy) changed the values. See
   [architecture.md](architecture.md#windows-update-policy-enforcement).
+* **winget** (1.7.0 and later): the agent makes sure App Installer (winget) is installed for
+  all users, so [application updates](application-updates.md) work without preparation. See
+  [winget](#winget).
 * **Agent updates** (1.2.0 and later): the agent installs a newer EasyPatch agent when an
   administrator chooses *Update agent*, or by itself when the *Agent updates* policy is
   *Automatic*. It checks the package's release signature against the key built into it before
@@ -273,6 +276,39 @@ the `caddy_data` volume). If it is ever replaced, reinstall the agents with the 
   minutes) and honor `Retry-After`.
 * **Clock**: requests are signed with a timestamp. The agent measures the server's clock and
   corrects its own offset automatically, so a wrong local clock does not break it.
+
+### winget
+
+Windows Server 2019 and 2022 and Windows 10 LTSC do not include winget, and on other editions it
+may be missing or too old. From version 1.7.0 the agent installs it itself when needed:
+
+1. 3 to 6 minutes after the service starts, and then daily, the agent looks for App Installer
+   (winget) 1.6 or newer installed for all users. If it finds one, it does nothing else; it
+   never updates a working winget.
+2. Otherwise it downloads winget **1.29.380** (three files, about 315 MB) from the winget
+   GitHub release. A file that cannot be downloaded from GitHub, or that does not match, is
+   downloaded from the EasyPatch server instead (`/downloads/winget/…`). The first time an
+   agent asks, the server fetches its own copy from GitHub, which can take a few minutes; the
+   agent tries again 15 minutes later.
+3. Every file must have the size and SHA-256 built into the agent. Nothing is installed from a
+   file that does not match, whichever source it came from.
+4. Only the dependency packages for the computer's architecture (x64 or ARM64) are taken from
+   the dependency archive.
+5. While the agent has a job to run, it waits for the job to finish (at most 2 hours).
+6. It installs App Installer and its dependencies for all users with Windows' own DISM
+   (`dism.exe /Online /Add-ProvisionedAppxPackage … /NoRestart`). Windows checks Microsoft's
+   package signatures. The computer is never restarted. The DISM log is `C:\ProgramData\EasyPatch\logs\winget-setup.log`.
+7. The downloaded files are deleted. The endpoint's **Overview** tab shows the winget version,
+   or why it could not be installed.
+
+Failed attempts are retried after 30 minutes, 2 hours, 6 hours, then daily. Requirements and
+limits:
+
+* Windows 10 1809 or Windows Server 2019 (build 17763) or later, x64 or ARM64. On Windows Server
+  2016 the agent reports that winget is not supported and downloads nothing.
+* 1.5 GB free disk space on the volume of `C:\ProgramData\EasyPatch`.
+* The installation cannot be turned off. It does not change which applications are updated:
+  that still needs the application updates policy and an approved list.
 
 ## Logs and events
 
@@ -300,6 +336,8 @@ agent's informational events, including:
 | 1015 | Agent update failed or refused (warning, with the reason) |
 | 1016 | Removing the agent for an uninstall job (warning) |
 | 1017 | Uninstall job failed (warning, with the reason) |
+| 1018 | winget installed for all users |
+| 1019 | winget could not be installed (warning, with the reason) |
 
 ## Tray icon
 

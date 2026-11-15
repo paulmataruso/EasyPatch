@@ -322,6 +322,29 @@ public static class DownloadEndpoints
                 : Results.File(path, contentType, Path.GetFileName(path), enableRangeProcessing: true);
         });
 
+        // The pinned winget release, for Windows agents that cannot reach GitHub (they verify the SHA-256 themselves too).
+        // A file the server does not have yet is requested from the worker, which downloads the release from GitHub.
+        g.MapGet("/winget/{fileName}", async (string fileName, WingetMirrorService mirror, EasyPatchDbContext db, TimeProvider clock,
+            HttpContext http, CancellationToken ct) =>
+        {
+            if (mirror.Find(fileName) is not { } file)
+            {
+                return Results.NotFound();
+            }
+
+            if (mirror.GetPath(file) is { } path)
+            {
+                var contentType = file.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ? "application/xml" : "application/octet-stream";
+                return Results.File(path, contentType, file.Name, enableRangeProcessing: true);
+            }
+
+            await WingetMirrorService.RequestAsync(db, clock.GetUtcNow(), ct);
+            http.Response.Headers.RetryAfter = "900";
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "winget is not available yet",
+                detail: "The server is downloading winget from GitHub. Try again later.",
+                extensions: new Dictionary<string, object?> { ["code"] = "winget_not_ready" });
+        });
+
         g.MapGet("/install/{code}.sh", async (string code, EasyPatchDbContext db, AgentPackageService packages, IOptions<EasyPatchOptions> options,
             TimeProvider clock, HttpContext http, CancellationToken ct) =>
         {

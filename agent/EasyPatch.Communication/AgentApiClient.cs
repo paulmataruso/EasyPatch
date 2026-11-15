@@ -201,12 +201,29 @@ public sealed class AgentApiClient
     /// <exception cref="AgentTransientException">Network failure, timeout or server error; worth retrying.</exception>
     /// <exception cref="AgentRejectedException">The server does not have the package.</exception>
     /// <exception cref="InvalidDataException">The server sent more than <paramref name="maxBytes"/>.</exception>
-    public async Task DownloadAgentPackageAsync(string fileName, Stream destination, long maxBytes, TimeSpan timeout,
+    public Task DownloadAgentPackageAsync(string fileName, Stream destination, long maxBytes, TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(fileName);
+        return DownloadAsync("downloads/agent/", fileName, destination, maxBytes, "its release signature says", timeout, cancellationToken);
+    }
+
+    /// <summary>Downloads a file of the pinned winget release from this server's copy (see <c>WingetDistribution</c>).</summary>
+    /// <remarks>Not signed, like agent packages: the caller trusts the bytes only after checking the pinned SHA-256.</remarks>
+    /// <exception cref="AgentTransientException">Network failure, timeout or server error (503 while the server is still
+    /// fetching its copy); worth retrying.</exception>
+    public Task DownloadWingetFileAsync(string fileName, Stream destination, long maxBytes, TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+        return DownloadAsync(WingetDistribution.ServerRoute, fileName, destination, maxBytes, "the pinned release says", timeout, cancellationToken);
+    }
+
+    private async Task DownloadAsync(string prefix, string fileName, Stream destination, long maxBytes, string limitSource, TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(destination);
-        var route = "downloads/agent/" + Uri.EscapeDataString(fileName);
+        var route = prefix + Uri.EscapeDataString(fileName);
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(timeout);
         try
@@ -225,7 +242,7 @@ public sealed class AgentApiClient
 
             if (response.Content.Headers.ContentLength > maxBytes)
             {
-                throw new InvalidDataException($"{fileName} is larger than its release signature says.");
+                throw new InvalidDataException($"{fileName} is larger than {limitSource}.");
             }
 
             await using var source = await response.Content.ReadAsStreamAsync(timeoutSource.Token);
@@ -237,7 +254,7 @@ public sealed class AgentApiClient
                 total += read;
                 if (total > maxBytes)
                 {
-                    throw new InvalidDataException($"{fileName} is larger than its release signature says.");
+                    throw new InvalidDataException($"{fileName} is larger than {limitSource}.");
                 }
 
                 await destination.WriteAsync(buffer.AsMemory(0, read), timeoutSource.Token);

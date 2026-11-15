@@ -1,3 +1,4 @@
+using EasyPatch.Agent.Core.Applications;
 using EasyPatch.Contracts.Agent;
 using EasyPatch.Contracts.Updates;
 
@@ -321,6 +322,12 @@ public sealed record AgentPlatform(
 
     /// <summary>Third-party application updates (winget on Windows). Used only while the server's policy enables them.</summary>
     public IApplicationUpdateService? ApplicationUpdates { get; init; }
+
+    /// <summary>Installs winget for all users when the computer has none (Windows); needs <see cref="WingetRunner"/>.</summary>
+    public IWingetProvisioner? WingetProvisioner { get; init; }
+
+    /// <summary>Finds and runs the machine-wide winget.</summary>
+    public IWingetRunner? WingetRunner { get; init; }
 
     public IUserInteraction Users => UserInteraction ?? (SessionCounter is { } counter ? new SessionsOnlyInteraction(counter) : NoUserInteraction.Instance);
 

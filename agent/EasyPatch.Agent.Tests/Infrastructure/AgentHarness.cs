@@ -21,7 +21,9 @@ public sealed class AgentHarness : IDisposable
     private readonly HttpClient _http;
 
     /// <param name="installedFromPackage">False for an agent that cannot remove itself (no <see cref="IAgentUninstaller"/>).</param>
-    public AgentHarness(Func<AgentRuntimeOptions, AgentRuntimeOptions>? configure = null, bool installedFromPackage = true)
+    /// <param name="configurePlatform">Adds or replaces platform services.</param>
+    public AgentHarness(Func<AgentRuntimeOptions, AgentRuntimeOptions>? configure = null, bool installedFromPackage = true,
+        Func<AgentPlatform, AgentPlatform>? configurePlatform = null)
     {
         DataDirectory = Path.Combine(Path.GetTempPath(), "easypatch-agent-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(DataDirectory);
@@ -43,6 +45,7 @@ public sealed class AgentHarness : IDisposable
             AgentInstaller = Installer,
             AgentUninstaller = installedFromPackage ? Uninstaller : null,
         };
+        Platform = configurePlatform?.Invoke(Platform) ?? Platform;
         Runtime = CreateRuntime();
     }
 

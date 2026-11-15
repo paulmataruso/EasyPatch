@@ -541,8 +541,8 @@ update policies are present, because those can take precedence over the registry
 
 * **Networks.** `edge` connects Caddy and the API. `data` is internal (no egress) and connects
   the API, worker, migrate and PostgreSQL. PostgreSQL publishes no ports. `egress` gives the
-  worker outbound connections for notifications (SMTP and webhooks) and vulnerability data;
-  nothing is published on it.
+  worker outbound connections for notifications (SMTP and webhooks), vulnerability data and
+  the winget release; nothing is published on it.
   The diagram above omits it.
 * **Volumes.**
   * `pgdata`: the database.
@@ -551,6 +551,8 @@ update policies are present, because those can take precedence over the registry
     (SMTP password, webhook URLs, webhook signing keys). The API creates and rotates the keys;
     the worker mounts the volume read-only to decrypt notification secrets.
   * `./data/agent-packages`, mounted read-only: agent MSIs offered for download.
+  * `winget`: the server's copy of the pinned winget release (see
+    [Installing winget](#installing-winget)). The worker writes it; the API mounts it read-only.
 * **Secrets.** The database password is a Compose secret file (`secrets/db_password`, created
   by `scripts/init-secrets.sh`). No secrets live in images or in source control.
 * **Hardening.**
@@ -662,3 +664,44 @@ Server: `ScanIngestionService` drops malformed application updates, records `win
 check failed, keeps the existing Application rows instead of ageing them out
 (`UpdateReconciler`'s `keepWhenUnreported`). When the report has no application section
 (application updates off), unreported Application rows become NotApplicable like any other row.
+
+### Installing winget
+
+Agents 1.7.0 and later make sure a machine-wide winget exists (`WingetSetupService`, started with
+the check-in session). The release is pinned in `EasyPatch.Contracts.Agent.WingetDistribution`:
+version, file names, sizes and SHA-256 values of the App Installer bundle, the dependency
+archive and the license file. The service:
+
+1. runs 3 to 6 minutes after start, then every 24 hours, and after a failure after 30 minutes,
+   2 hours, 6 hours, then daily (15 minutes when the server answered 503 because it is still
+   fetching its copy). The state (`AgentState.Winget`) survives restarts;
+2. does nothing more when `IWingetRunner` finds winget 1.6 or newer
+   (`WingetApplicationUpdateService.MinimumVersion`), or when the platform reports that winget
+   is unsupported (build below 17763, or not x64/ARM64);
+3. checks for 1.5 GB of free space, then downloads each file to
+   `C:\ProgramData\EasyPatch\winget`, trying `IWingetFileSource`s in order: GitHub
+   (`HttpWingetFileSource`, HTTPS only, at most five redirects) and the EasyPatch server
+   (`ServerWingetFileSource`, `GET /downloads/winget/{file}` through `AgentApiClient`). A file is
+   accepted only with the pinned size and SHA-256;
+4. extracts only `<arch>/<name>.appx|.msix` entries of the dependency archive;
+5. waits while the agent has a job to run (at most 2 hours), then calls
+   `IWingetProvisioner`. On Windows, `WindowsWingetProvisioner` runs
+   `%SystemRoot%\System32\dism.exe /Online /Add-ProvisionedAppxPackage` with the bundle, each
+   dependency and the license as an argument vector, with `/NoRestart` (exit codes 0 and 3010
+   are success; 30-minute timeout);
+6. checks the winget version again, deletes the work directory, logs event 1018 or 1019, and
+   reports `WingetStatusReport` (version, whether the agent installed it, the error, when it
+   checked) in every check-in.
+
+Server: check-in stores the version in `endpoints.winget_version` and the error in
+`winget_setup_error`; the endpoint DTO's `applications` section carries both, plus the
+server's own download error while the agent reports one. `GET /downloads/winget/{file}` is
+anonymous. It serves only the three pinned names, and only after `WingetMirrorService` has
+verified the file's size and SHA-256 (cached by length and modification time). It looks first in
+`data/agent-packages/winget/` (copies an administrator placed there), then in the `winget`
+volume. When it has no verified copy, it records the request in `mirror_states` (at most every
+10 minutes) and answers 503 with `Retry-After: 900`. The worker task `winget-mirror` (every
+5 minutes, advisory lock) then downloads the missing files from GitHub to `.part` files,
+verifies them and moves them into place. Failed downloads are retried after 15 minutes, 1 hour,
+6 hours, then daily, with the error in `mirror_states.last_error`. The API has no egress, so only
+the worker downloads.
