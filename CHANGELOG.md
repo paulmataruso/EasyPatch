@@ -3,6 +3,34 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and both agents share one version number.
 
+## [1.5.0] - 2026-11-15
+
+Update the server before the Windows agents: a 1.5.0 agent reports update checks started from
+the status window with the scan trigger `User`, which older servers reject.
+
+### Added
+
+- **Status window in the Windows tray.** Clicking the EasyPatch icon (or *Open EasyPatch
+  status* in its menu) opens a window with a colored summary (up to date, updates available,
+  restart required, busy, can't reach the server, waiting for approval, not enrolled), the
+  details behind it (server connection and last check-in, the server's host name, last update
+  check and the number of applicable updates, last installation, restart needed, current
+  activity, computer name, agent version) and the newest 200 agent log entries (first lines
+  only, redacted, with *Copy* for support tickets).
+- **Check in now** and **Check for updates** in the status window. An update check is a scan
+  only; it never installs anything and is reported with the scan trigger `User`. Both are
+  limited for the whole computer: a check-in every 30 seconds, an update check every 5 minutes
+  and not while Windows Update is busy.
+- The icon's tooltip shows the agent version and the current status, and its menu shows the
+  agent version.
+
+### Changed
+
+- The tray pipe carries larger frames from the service to the tray (up to 256 KB, for the
+  log); frames from a tray are still limited to 16 KB.
+- The `.deb` package's maintainer and the `.rpm` package's packager are now
+  DHI Technical Services LLC (paulmataruso@dhitechnical.com).
+
 ## [1.4.0] - 2026-11-14
 
 First public release. It contains everything below plus these additions.
