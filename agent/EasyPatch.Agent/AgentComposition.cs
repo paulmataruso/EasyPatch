@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using EasyPatch.Agent.Core;
 using EasyPatch.Agent.Core.Abstractions;
 using EasyPatch.Agent.Core.Applications;
+using EasyPatch.Agent.Core.Removal;
 using EasyPatch.Agent.Core.Runtime;
 using EasyPatch.Agent.Platform;
 using EasyPatch.Contracts.Agent;
@@ -63,7 +64,11 @@ internal static class AgentComposition
             AgentUninstaller = new WindowsAgentUninstaller(),
             ApplicationUpdates = new WingetApplicationUpdateService(winget, loggerFactory.CreateLogger<WingetApplicationUpdateService>()),
             WingetRunner = winget,
-            WingetProvisioner = new WindowsWingetProvisioner(LogDirectory, loggerFactory.CreateLogger<WindowsWingetProvisioner>()),
+            WingetProvisioner = new WindowsWingetProvisioner(
+                new WindowsDismRunner(Path.Combine(LogDirectory, "winget-setup.log"), loggerFactory.CreateLogger<WindowsDismRunner>())),
+            UpdateRemover = new WindowsUpdateRemover(windowsUpdate,
+                new WindowsDismRunner(Path.Combine(LogDirectory, "update-removal.log"), loggerFactory.CreateLogger<WindowsDismRunner>()),
+                loggerFactory.CreateLogger<WindowsUpdateRemover>()),
         };
     }
 

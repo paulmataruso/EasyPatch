@@ -329,6 +329,9 @@ public sealed record AgentPlatform(
     /// <summary>Finds and runs the machine-wide winget.</summary>
     public IWingetRunner? WingetRunner { get; init; }
 
+    /// <summary>Removes installed updates for administrators' uninstall-update jobs (Windows).</summary>
+    public Removal.IUpdateRemover? UpdateRemover { get; init; }
+
     public IUserInteraction Users => UserInteraction ?? (SessionCounter is { } counter ? new SessionsOnlyInteraction(counter) : NoUserInteraction.Instance);
 
     public IReadOnlyList<string> Capabilities
@@ -360,6 +363,11 @@ public sealed record AgentPlatform(
             if (AgentUninstaller?.IsAvailable == true)
             {
                 list.Add(AgentCapabilities.Uninstall);
+            }
+
+            if (UpdateRemover is not null)
+            {
+                list.Add(AgentCapabilities.UninstallUpdates);
             }
 
             return list;

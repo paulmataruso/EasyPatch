@@ -102,6 +102,9 @@ All screenshots show fictional demo data.
   site. Installing on a single endpoint first shows exactly which updates will be installed.
   Policy decides which categories are included: by default, everything except drivers and
   feature updates.
+* **Roll back a bad update** (Windows agent 1.8.0 and later): remove an installed update from one
+  endpoint, or from every endpoint in an organization or site, and exclude it so EasyPatch does not
+  install it again. The agent uses Windows Update's own uninstall or DISM, and never restarts.
 * **Optional scheduled installs** inside a per-policy maintenance window (off by default),
   limited per site and globally. Updates still inside their rollout delay are skipped.
 * **Restarts** of one endpoint or many selected endpoints, now or at a chosen time, or on a

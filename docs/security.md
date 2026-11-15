@@ -220,6 +220,14 @@ shape and to an explicit administrator decision.
   program, and the server cannot pass it a command or arguments. The package's own uninstall
   step unenrolls the agent; the server marks the job completed only when that authenticated
   unenrollment arrives, not when the job is sent.
+* **Removing an update.** An `UninstallUpdate` job is created only by an Operator, for an
+  update the endpoint reports as installed, and is recorded in the audit log
+  (`endpoint.update_removal`). Its payload is the update ID, title, KB number (digits only) and
+  category; the agent refuses anything else. The agent can only call Windows Update's own uninstall
+  for that update, or run `dism.exe` from `System32` with a fixed argument list: `/Get-Packages`,
+  `/Get-PackageInfo` and `/Remove-Package` for a package it found in DISM's own listing (letters,
+  digits and `_ ~ . -` only), always with `/NoRestart`. No shell is involved and the server cannot
+  pass a command, path or package name. The computer is never restarted.
 
 ### Tray and local pipe
 

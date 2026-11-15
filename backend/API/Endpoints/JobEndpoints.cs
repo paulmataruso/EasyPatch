@@ -291,6 +291,39 @@ public static class FleetUpdateEndpoints
 
             return TypedResults.Ok(new BulkResultDto(results.Count(r => r.Success), results.Count(r => !r.Success), results));
         }).RequireAuthorization(Policies.Operator);
+
+        // Rolling back an update across endpoints: one uninstall-update job per endpoint that reports it installed.
+        g.MapPost("/{updateGuid:guid}/uninstall", async (Guid updateGuid, FleetUninstallRequest request, EasyPatchDbContext db, ITenantContext tenant,
+            UpdateRemovalService removals, CancellationToken ct) =>
+        {
+            new Validator().Optional("reason", request.Reason, 500).ThrowIfInvalid();
+            var query = Scope(db, tenant, request.OrganizationId, request.SiteId)
+                .Where(x => x.UpdateGuid == updateGuid && (x.State == EndpointUpdateState.Installed || x.State == EndpointUpdateState.PendingReboot));
+            if (request.EndpointIds is { Count: > 0 } ids)
+            {
+                query = query.Where(x => ids.Contains(x.EndpointId));
+            }
+
+            var targets = await query.Join(db.Endpoints, x => x.EndpointId, e => e.Id, (x, e) => new { e.Id, e.Hostname }).Distinct().OrderBy(t => t.Hostname).Take(1000).ToListAsync(ct);
+            var reason = Validator.Clean(request.Reason);
+            var results = new List<BulkItemResult>();
+            foreach (var target in targets)
+            {
+                try
+                {
+                    var job = await removals.RemoveAsync(target.Id, updateGuid, request.Block, reason, ct);
+                    results.Add(new BulkItemResult(target.Id, target.Hostname, true, job.Id, null, null));
+                }
+                catch (AppException ex)
+                {
+                    db.ChangeTracker.Clear();
+                    results.Add(new BulkItemResult(target.Id, target.Hostname, false,
+                        ex.Extensions.TryGetValue("existingJobId", out var existing) ? existing as Guid? : null, ex.Code, ex.Message));
+                }
+            }
+
+            return TypedResults.Ok(new BulkResultDto(results.Count(r => r.Success), results.Count(r => !r.Success), results));
+        }).RequireAuthorization(Policies.Operator);
     }
 
     private static IQueryable<EndpointUpdate> Scope(EasyPatchDbContext db, ITenantContext tenant, Guid? organizationId, Guid? siteId)

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { Download, ExternalLink } from 'lucide-react';
+import { Download, ExternalLink, Undo2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApi, useApiMutation, useList } from '../../api/hooks';
 import { ENDPOINT_UPDATE_STATES, type BulkResultDto, type FleetUpdateDetailDto, type FleetUpdateEndpointDto, type VulnerabilityDto } from '../../api/types';
@@ -8,6 +8,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { Dialog } from '../../components/Dialog';
 import { EnumSelect, OrganizationSelect, SiteSelect } from '../../components/Filters';
 import { Advisories } from '../../components/PackageInfo';
+import { FleetRemoveUpdateDialog } from '../../components/RemoveUpdateDialog';
 import { CategoryBadge, KnownExploitedBadge, OnlineBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
 import { Alert, Badge, Button, Card, EmptyState, ErrorState, InlineError, KeyValueList, PageHeader, Pagination, Spinner, StatTile, TableWrap, Toolbar } from '../../components/ui';
 import { formatBytes, formatDate, formatRelative, humanize } from '../../lib/format';
@@ -19,6 +20,8 @@ export function UpdateDetailPage() {
   const url = useUrlState();
   const { canOperate } = useAuth();
   const [installOpen, setInstallOpen] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [resultTitle, setResultTitle] = useState('Installation requested');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<BulkResultDto | null>(null);
   const organizationId = url.get('organizationId');
@@ -63,11 +66,19 @@ export function UpdateDetailPage() {
           </span>
         }
         actions={
-          canOperate &&
-          s.missingCount + s.failedCount > 0 && (
-            <Button variant="primary" icon={<Download className="size-4" aria-hidden />} onClick={() => setInstallOpen(true)}>
-              {selected.size > 0 ? `Install on ${selected.size} selected` : 'Install on affected endpoints'}
-            </Button>
+          canOperate && (
+            <>
+              {!pkg && s.category !== 'Application' && s.installedCount + s.pendingRebootCount > 0 && (
+                <Button icon={<Undo2 className="size-4" aria-hidden />} onClick={() => setRemoveOpen(true)}>
+                  Remove from endpoints
+                </Button>
+              )}
+              {s.missingCount + s.failedCount > 0 && (
+                <Button variant="primary" icon={<Download className="size-4" aria-hidden />} onClick={() => setInstallOpen(true)}>
+                  {selected.size > 0 ? `Install on ${selected.size} selected` : 'Install on affected endpoints'}
+                </Button>
+              )}
+            </>
           )
         }
       />
@@ -219,10 +230,24 @@ export function UpdateDetailPage() {
         onDone={(r) => {
           setInstallOpen(false);
           setSelected(new Set());
+          setResultTitle('Installation requested');
           setResult(r);
         }}
       />
-      <BulkResultDialog result={result ? { title: 'Installation requested', data: result } : null} onClose={() => setResult(null)} />
+      <FleetRemoveUpdateDialog
+        open={removeOpen}
+        onClose={() => setRemoveOpen(false)}
+        guid={guid}
+        title={s.title}
+        defaultOrganizationId={organizationId}
+        defaultSiteId={siteId}
+        onDone={(r) => {
+          setRemoveOpen(false);
+          setResultTitle('Removal requested');
+          setResult(r);
+        }}
+      />
+      <BulkResultDialog result={result ? { title: resultTitle, data: result } : null} onClose={() => setResult(null)} />
     </>
   );
 }

@@ -90,6 +90,7 @@ export function humanize(value: string | null | undefined): string {
     NotifyUser: 'Message to users',
     AgentUpdate: 'Agent update',
     UninstallAgent: 'Agent uninstall',
+    UninstallUpdate: 'Update removal',
     PromptWithDeadline: 'Ask users, with a deadline',
     PromptNoDeadline: 'Ask users, no deadline',
     OnlyIfPending: 'Only if a restart is pending',
@@ -171,6 +172,8 @@ export function describeSkipReason(reason: string | null | undefined): string {
       return 'Application not approved by policy';
     case 'Reoffered':
       return 'Offered again after a successful installation (select it to install it anyway)';
+    case 'NotInstalled':
+      return 'Not installed';
     case null:
     case undefined:
     case '':

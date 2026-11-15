@@ -196,6 +196,29 @@ public sealed record AgentJob
 
     /// <summary>Present for <see cref="JobType.AgentUpdate"/>.</summary>
     public AgentUpdatePayload? AgentUpdate { get; init; }
+
+    /// <summary>Present for <see cref="JobType.UninstallUpdate"/>.</summary>
+    public UninstallUpdatePayload? UninstallUpdate { get; init; }
+}
+
+/// <summary>The one installed update a <see cref="JobType.UninstallUpdate"/> job removes.</summary>
+public sealed partial record UninstallUpdatePayload
+{
+    public required Guid UpdateGuid { get; init; }
+    public required string Title { get; init; }
+
+    /// <summary>Digits only (no "KB" prefix); needed to find the update's servicing package when Windows Update cannot remove it.</summary>
+    public string? KbNumber { get; init; }
+
+    /// <summary>Reported back on the job item unchanged.</summary>
+    public UpdateCategory Category { get; init; }
+
+    public static bool IsValid(UninstallUpdatePayload? payload) =>
+        payload is not null && payload.UpdateGuid != Guid.Empty && !string.IsNullOrWhiteSpace(payload.Title) && payload.Title.Length <= 1000 &&
+        (payload.KbNumber is null || KbDigits().IsMatch(payload.KbNumber));
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\d{1,10}$")]
+    private static partial System.Text.RegularExpressions.Regex KbDigits();
 }
 
 public sealed record InstallUpdatesPayload
@@ -301,6 +324,9 @@ public static class SkipReasons
     /// <summary>Server only: Windows offered the update again after a successful installation; only installed when selected.</summary>
     public const string Reoffered = "Reoffered";
 
+    /// <summary>An uninstall job found the update not installed (already removed).</summary>
+    public const string NotInstalled = "NotInstalled";
+
     public static string Describe(string? reason) => reason switch
     {
         AlreadyInstalled => "Already installed",
@@ -315,6 +341,7 @@ public static class SkipReasons
         MaintenanceWindowClosed => "Maintenance window closed",
         ApplicationNotApproved => "Application not approved by policy",
         Reoffered => "Offered again after a successful installation (select it to install it anyway)",
+        NotInstalled => "Not installed",
         Cancelled => "Cancelled",
         null => "",
         _ => reason,

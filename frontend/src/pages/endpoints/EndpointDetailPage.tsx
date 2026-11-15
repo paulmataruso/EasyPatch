@@ -156,7 +156,7 @@ export function EndpointDetailPage() {
       />
       {tab === 'overview' && <OverviewTab endpoint={e} />}
       {tab === 'updates' && <UpdatesTab endpoint={e} onInstallSelected={(guids) => setInstall({ mode: 'Selected', guids })} onInstallAll={() => setInstall({ mode: 'AllEligible' })} />}
-      {tab === 'installed' && <InstalledTab endpointId={e.summary.id} linux={linux} />}
+      {tab === 'installed' && <InstalledTab endpoint={e} />}
       {tab === 'history' && <HistoryTab endpointId={e.summary.id} linux={linux} />}
       {tab === 'jobs' && <JobsTab endpointId={e.summary.id} />}
       {tab === 'activity' && <ActivityTab endpointId={e.summary.id} />}

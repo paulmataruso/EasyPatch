@@ -83,7 +83,7 @@ export const DEFAULT_INSTALL_CATEGORIES: readonly UpdateCategory[] = [
   'Other',
 ];
 
-export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh', 'Restart', 'NotifyUser', 'AgentUpdate', 'UninstallAgent'] as const;
+export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh', 'Restart', 'NotifyUser', 'AgentUpdate', 'UninstallAgent', 'UninstallUpdate'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const JOB_STATUSES = [
@@ -124,6 +124,7 @@ export const AGENT_CAPABILITIES = {
   selfUpdate: 'self-update',
   applicationUpdates: 'app-updates',
   uninstall: 'uninstall',
+  uninstallUpdates: 'uninstall-updates',
 } as const;
 
 export const WINDOWS_UPDATE_POLICY_GROUPS = ['AutomaticUpdates', 'FeatureUpdates', 'QualityUpdates', 'RestartBehavior'] as const;
@@ -817,6 +818,7 @@ export interface JobOverlayDto {
   itemStatus: JobItemStatus;
   downloadPercent: number | null;
   installPercent: number | null;
+  jobType: JobType;
 }
 
 export interface EndpointUpdateDto {

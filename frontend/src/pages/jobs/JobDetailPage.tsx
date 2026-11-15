@@ -49,6 +49,7 @@ export function JobDetailPage() {
   const canCancel = canOperate && (active || j.status === 'WaitingForReboot') && !j.cancelRequested;
   const canRetry = canOperate && (j.status === 'Failed' || j.status === 'Expired' || j.status === 'Cancelled' || (j.status === 'Completed' && j.failedCount > 0));
   const counts = countItems(d.items.map((i) => i.status));
+  const removal = j.type === 'UninstallUpdate';
 
   return (
     <>
@@ -88,7 +89,9 @@ export function JobDetailPage() {
         {retry.error && <Alert tone="danger">{retry.error.message}</Alert>}
         {j.cancelRequested && active && (
           <Alert tone="warn" title="Cancellation requested">
-            The agent stops before the next update. An update that is already installing cannot be interrupted safely and finishes first.
+            {removal
+              ? 'The removal is cancelled if it has not started. A removal that has started cannot be interrupted safely and finishes first.'
+              : 'The agent stops before the next update. An update that is already installing cannot be interrupted safely and finishes first.'}
           </Alert>
         )}
         {j.status === 'WaitingForReboot' && (
@@ -100,7 +103,7 @@ export function JobDetailPage() {
         )}
         {j.status === 'Completed' && j.rebootRequired && (
           <Alert tone="info" title="Restart required">
-            Some updates need a restart to finish. EasyPatch will not restart this endpoint.
+            {removal ? 'Windows needs a restart to finish removing the update.' : 'Some updates need a restart to finish.'} EasyPatch will not restart this endpoint.
           </Alert>
         )}
         {j.timedOut && (
@@ -155,7 +158,7 @@ export function JobDetailPage() {
         <>
           <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-5">
             <StatTile label="Updates" value={d.items.length} />
-            <StatTile label="Succeeded" value={counts.Succeeded} tone={counts.Succeeded ? 'ok' : undefined} />
+            <StatTile label={removal ? 'Removed' : 'Succeeded'} value={counts.Succeeded} tone={counts.Succeeded ? 'ok' : undefined} />
             <StatTile label="Failed" value={counts.Failed} tone={counts.Failed ? 'danger' : undefined} />
             <StatTile label="In progress" value={counts.Pending + counts.Downloading + counts.Downloaded + counts.Installing} tone="accent" />
             <StatTile label="Skipped / cancelled" value={counts.Skipped + counts.Cancelled} />
@@ -183,7 +186,7 @@ export function JobDetailPage() {
                         <CategoryBadge category={i.category} />
                       </td>
                       <td>
-                        <JobItemStatusBadge status={i.status} percent={jobItemPercent(i)} />
+                        <JobItemStatusBadge status={i.status} percent={jobItemPercent(i)} removal={removal} />
                         {jobItemPercent(i) !== null && (
                           <div className="mt-1.5 w-28">
                             <ProgressBar value={jobItemPercent(i)} label={`${humanize(i.status)} ${i.kbNumber ?? i.title}`} />

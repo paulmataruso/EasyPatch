@@ -68,11 +68,13 @@ const itemTone: Record<JobItemStatus, Tone> = {
   Cancelled: 'neutral',
 };
 
-export function JobItemStatusBadge({ status, percent }: { status: JobItemStatus; percent?: number | null }) {
+/** @param removal The item belongs to an update removal job: "Removing" and "Removed" instead of "Installing" and "Succeeded". */
+export function JobItemStatusBadge({ status, percent, removal = false }: { status: JobItemStatus; percent?: number | null; removal?: boolean }) {
   const busy = status === 'Downloading' || status === 'Installing';
+  const label = removal && status === 'Installing' ? 'Removing' : removal && status === 'Succeeded' ? 'Removed' : humanize(status);
   return (
     <Badge tone={itemTone[status]} icon={busy ? <Loader2 className="size-3 animate-spin" aria-hidden /> : undefined}>
-      {humanize(status)}
+      {label}
       {busy && percent !== null && percent !== undefined ? ` ${percent}%` : ''}
     </Badge>
   );

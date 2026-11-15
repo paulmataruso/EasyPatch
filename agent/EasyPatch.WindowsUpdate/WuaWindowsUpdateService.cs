@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using EasyPatch.Agent.Core.Abstractions;
+using EasyPatch.Agent.Core.Removal;
 using EasyPatch.Contracts.Agent;
 using EasyPatch.Contracts.Updates;
 using Microsoft.Extensions.Logging;
@@ -13,7 +14,7 @@ namespace EasyPatch.WindowsUpdate;
 /// Searches use the default server selection, so WSUS / Group Policy / Windows Update for Business configuration is
 /// honored exactly as Windows itself would. Nothing here reports success that WUA did not report.
 /// </summary>
-public sealed partial class WuaWindowsUpdateService : IUpdateService
+public sealed partial class WuaWindowsUpdateService : IUpdateService, IWindowsUpdateUninstaller
 {
     public const string ClientApplicationId = "EasyPatch Agent";
     private const string MicrosoftUpdateServiceId = "7971f918-a847-4430-9279-4a52d1efe18d";
@@ -146,6 +147,78 @@ public sealed partial class WuaWindowsUpdateService : IUpdateService
             }
         }, cancellationToken);
     }
+
+    /// <summary>Uninstalls one installed update with Windows Update's own uninstall, when Windows Update lists it as installed and
+    /// uninstallable. The search reads Windows Update's local records only (installed updates need no server).</summary>
+    public Task<WuaUninstallResult> UninstallAsync(Guid updateGuid, CancellationToken cancellationToken) =>
+        RunAsync("uninstall", () =>
+        {
+            var session = CreateSession();
+            var searcher = Com.Invoke(session, "CreateUpdateSearcher")!;
+            List<object> found;
+            try
+            {
+                Com.TrySet(searcher, "ClientApplicationID", ClientApplicationId);
+                Com.TrySet(searcher, "Online", false);
+                found = Search(searcher, "IsInstalled=1 and UpdateID='" + updateGuid.ToString("D", CultureInfo.InvariantCulture) + "'");
+            }
+            finally
+            {
+                Com.Release(searcher);
+            }
+
+            if (found.Count == 0)
+            {
+                Com.Release(session);
+                return new WuaUninstallResult(WuaUninstallStatus.NotInstalled);
+            }
+
+            foreach (var extra in found.Skip(1))
+            {
+                Com.Release(extra);
+            }
+
+            var update = found[0];
+            var collection = Com.Create("Microsoft.Update.UpdateColl");
+            object? installer = null;
+            try
+            {
+                if (!Com.GetBool(update, "IsUninstallable"))
+                {
+                    return new WuaUninstallResult(WuaUninstallStatus.NotUninstallable);
+                }
+
+                Com.Invoke(collection, "Add", update);
+                installer = Com.Invoke(session, "CreateUpdateInstaller")!;
+                Com.TrySet(installer, "ClientApplicationID", ClientApplicationId); // recorded in Windows Update history
+                Com.TrySet(installer, "AllowSourcePrompts", false);
+                Com.TrySet(installer, "ForceQuiet", true);
+                Com.Set(installer, "Updates", collection);
+                WaitUntilNotBusy(installer, cancellationToken);
+
+                var result = Com.Invoke(installer, "Uninstall")!;
+                var overall = ReadResult(result, out var overallHr);
+                var rebootRequired = Com.GetBool(result, "RebootRequired");
+                var perUpdate = Com.Invoke(result, "GetUpdateResult", 0)!;
+                var code = ReadResult(perUpdate, out var updateHr);
+                rebootRequired |= Com.GetBool(perUpdate, "RebootRequired");
+                Com.Release(perUpdate);
+                Com.Release(result);
+                return new WuaUninstallResult(WuaUninstallStatus.Attempted,
+                    new UpdateOperationResult(code != 0 ? code : overall, updateHr != 0 ? updateHr : overallHr, rebootRequired));
+            }
+            finally
+            {
+                if (installer is not null)
+                {
+                    Com.Release(installer);
+                }
+
+                Com.Release(collection);
+                Com.Release(update);
+                Com.Release(session);
+            }
+        }, cancellationToken);
 
     public Task<IReadOnlyList<HistoryEntryReport>> GetHistoryAsync(DateTimeOffset? since, int maxEntries, CancellationToken cancellationToken) =>
         RunAsync<IReadOnlyList<HistoryEntryReport>>("history", () =>

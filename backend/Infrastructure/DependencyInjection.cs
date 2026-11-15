@@ -38,6 +38,7 @@ public static class DependencyInjection
         services.AddScoped<ScanIngestionService>();
         services.AddScoped<InstallPreviewService>();
         services.AddScoped<JobService>();
+        services.AddScoped<UpdateRemovalService>();
         services.AddScoped<EnrollmentService>();
         services.AddScoped<CheckInService>();
 

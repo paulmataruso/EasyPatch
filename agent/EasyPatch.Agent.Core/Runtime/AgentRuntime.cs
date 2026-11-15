@@ -112,7 +112,8 @@ public sealed class AgentRuntime : IUserRequestHandler, IDisposable
             loggerFactory.CreateLogger<AgentUpdateHandler>());
         var uninstall = new UninstallAgentHandler(platform, State, reporter, FlushOutboxAsync, options, _time,
             loggerFactory.CreateLogger<UninstallAgentHandler>());
-        _jobs = new JobRunner(platform, State, reporter, _scans, _inventory, install, restart, _agentUpdate, uninstall, notifier, _gate, options, _time,
+        var removeUpdate = new UninstallUpdateHandler(platform, reporter, _scans, _time, loggerFactory.CreateLogger<UninstallUpdateHandler>());
+        _jobs = new JobRunner(platform, State, reporter, _scans, _inventory, install, restart, _agentUpdate, uninstall, removeUpdate, notifier, _gate, options, _time,
             loggerFactory.CreateLogger<JobRunner>());
         if (platform.PolicyRegistry is not null)
         {

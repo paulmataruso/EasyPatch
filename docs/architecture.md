@@ -275,7 +275,8 @@ an endpoint will receive. How the agent applies and restores them is described i
 ## 4. Job system
 
 Job types are `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart`,
-`NotifyUser` (a preset message to signed-in users), `AgentUpdate` and `UninstallAgent`.
+`NotifyUser` (a preset message to signed-in users), `AgentUpdate`, `UninstallAgent` and
+`UninstallUpdate` (removes one installed Windows update).
 
 ```
 Queued ──lease──► Delivered ──ack──► Acknowledged ──► Running ──► Completed
@@ -302,11 +303,12 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
   `WaitingForReboot`, scans and inventory jobs are still delivered (the agent runs them while
   it waits), but further install jobs stay queued until the restart has been handled.
 * **Agent capabilities.** Agents report what they support in every check-in (`restart`,
-  `notify-user`, `tray`, `windows-update-policy`, `self-update`). Restart, message and agent
-  update jobs can only be created for, and are only delivered to, agents that report the
-  matching capability. For older agents the API answers `409 agent_upgrade_required`.
-* **Priority.** When several jobs are queued for an endpoint, scans go first, then installs,
-  restarts and agent updates.
+  `notify-user`, `tray`, `windows-update-policy`, `self-update`, `app-updates`, `uninstall`,
+  `uninstall-updates`). Restart, message, agent update, agent uninstall and update removal jobs
+  can only be created for, and are only delivered to, agents that report the matching
+  capability. For older agents the API answers `409 agent_upgrade_required`.
+* **Priority.** When several jobs are queued for an endpoint, scans go first, then update
+  removals, installs, restarts and agent updates.
 * **Concurrency limits.** Install jobs are only delivered while the global limit and the
   per-site limit allow it. This check runs under a transaction-scoped advisory lock.
 * **Deduplication.** A partial unique index on (`endpoint_id`, `dedupe_key`) covering active
@@ -384,6 +386,48 @@ server never signs anything; see [security.md](security.md#agent-release-signing
   failed and rolled back), it waits while Windows Installer is still busy (at most 30 minutes
   after the start) and then fails the job with the error from the installer log. If `msiexec`
   exits while the old agent is still running, the job fails with its exit code.
+
+### Update removal jobs
+
+An `UninstallUpdate` job rolls back one installed Windows update on one endpoint. Windows agents
+1.8.0 and later report the `uninstall-updates` capability; Linux agents do not.
+
+* **Who creates them.** An Operator, from an endpoint (*Installed* tab, or an update waiting for a
+  restart on the *Updates* tab) or for every endpoint in an organization or site from the update's
+  page. The server accepts only updates the endpoint reports as `Installed` or `PendingReboot`,
+  and not application updates. By default it also adds an exclusion for the update on each
+  endpoint, so EasyPatch does not install it again.
+* **Payload.** The update ID, title, KB number (digits only) and category. Nothing else: there is
+  no command, path or package name in the job.
+* **On the agent.**
+  1. Windows Update looks the update up among installed updates (`IsInstalled=1 and UpdateID='…'`,
+     local records only). If Windows Update can uninstall it (`IsUninstallable`), the agent uses
+     Windows Update's own uninstall. If the lookup fails, the agent goes on with DISM.
+  2. Otherwise the agent lists the servicing packages with `dism /Online /Get-Packages` and picks
+     the package named for the KB (`Package_for_KB…`). For a cumulative update it picks the
+     installed `Package_for_RollupFix` package whose version matches the build in the update's
+     title (for example `26100.2314`); when the title has no build, it uses the cumulative update
+     package whose `/Get-PackageInfo` output names the KB. It removes it with
+     `dism /Online /Remove-Package /PackageName:<package> /Quiet /NoRestart`. This is how Microsoft
+     says to remove a cumulative update installed together with a servicing stack update.
+  3. The removal counts only when DISM no longer lists the package as installed afterwards (it
+     may be `Uninstall Pending` until the restart). DISM exit code `0x800F0825` (a permanent
+     package, such as a servicing stack update) is reported as not removable.
+  4. A scan follows, so the server sees what Windows now reports.
+* **Never restarts.** All DISM runs pass `/NoRestart` and close DISM's input. When Windows needs a
+  restart to finish, the job completes with `reboot_required = true` and the endpoint shows *An
+  update removed by EasyPatch requires a restart*. Restarting stays an administrator's decision.
+* **Outcomes.** `Completed` when the update was removed (or Windows had already queued its
+  removal), or when it turned out not to be installed (the item is skipped with `NotInstalled`).
+  `Failed` with `update_not_removable` when Windows does not allow the removal (for example most
+  definition updates, or updates without a KB number that Windows Update cannot uninstall), with
+  `update_still_installed` when DISM finished but the package is still installed, with the DISM
+  exit code when DISM refused, or with `dism_failed` when DISM could not be started, could not list
+  the packages, or did not finish in time (10 minutes to list, 2 hours to remove; DISM is then
+  left to finish on its own, never killed part-way).
+* **State on the server.** A removal does not change the update's state in EasyPatch. The scans
+  that follow do: until the endpoint restarts, Windows usually still lists the update as
+  installed. DISM writes its log to `C:\ProgramData\EasyPatch\logs\update-removal.log`.
 
 ## 5. Agent lifecycle
 

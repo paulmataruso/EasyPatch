@@ -387,8 +387,9 @@ public sealed class UserExperienceTests
         await h.Runtime.CheckInOnceAsync(Ct);
 
         var checkIn = h.Server.CheckIns[^1];
-        // Self-update also needs a release key built in (AgentUpdateTests); this harness has none, and no winget service.
-        Assert.Equal(AgentCapabilities.All.Where(c => c is not AgentCapabilities.SelfUpdate and not AgentCapabilities.ApplicationUpdates).Order(StringComparer.Ordinal),
+        // Self-update also needs a release key built in (AgentUpdateTests); this harness has none, no winget service and no update remover.
+        Assert.Equal(AgentCapabilities.All.Where(c => c is not AgentCapabilities.SelfUpdate and not AgentCapabilities.ApplicationUpdates
+                and not AgentCapabilities.UninstallUpdates).Order(StringComparer.Ordinal),
             checkIn.Capabilities.Order(StringComparer.Ordinal));
         Assert.Equal(3, checkIn.Sessions!.SignedInUsers);
         Assert.Equal(2, checkIn.Sessions.TrayConnected);

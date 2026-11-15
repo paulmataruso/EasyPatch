@@ -70,10 +70,19 @@ public sealed class JobService(
                     "agent_upgrade_required");
             }
 
-            if (endpoint.Platform == AgentPlatforms.Linux && request.Type == JobType.NotifyUser)
+            if (endpoint.Platform == AgentPlatforms.Linux && request.Type is JobType.NotifyUser or JobType.UninstallUpdate)
             {
-                throw AppException.Conflict($"{endpoint.Hostname} is a Linux endpoint. Messages to users are only available on Windows.",
+                throw AppException.Conflict(request.Type == JobType.NotifyUser
+                        ? $"{endpoint.Hostname} is a Linux endpoint. Messages to users are only available on Windows."
+                        : $"{endpoint.Hostname} is a Linux endpoint. Removing updates is only available on Windows.",
                     "not_supported_on_linux");
+            }
+
+            if (request.Type == JobType.UninstallUpdate)
+            {
+                throw AppException.Conflict(
+                    $"The EasyPatch agent on {endpoint.Hostname} (version {endpoint.AgentVersion ?? "unknown"}) cannot remove updates. Update it to 1.8.0 or later.",
+                    "agent_upgrade_required");
             }
 
             throw AppException.Conflict(
@@ -212,6 +221,53 @@ public sealed class JobService(
                 dedupeKey = "uninstall";
                 break;
 
+            case JobType.UninstallUpdate:
+            {
+                if (request.UpdateGuids is not [var updateGuid])
+                {
+                    throw AppException.BadRequest("Choose one update to remove.", "validation_failed");
+                }
+
+                var row = await db.EndpointUpdates.AsNoTracking().Include(u => u.Update)
+                    .FirstOrDefaultAsync(u => u.EndpointId == endpoint.Id && u.UpdateGuid == updateGuid, ct);
+                if (row?.Update is not { } catalog ||
+                    row.State is not (EndpointUpdateState.Installed or EndpointUpdateState.PendingReboot))
+                {
+                    throw AppException.Conflict($"{endpoint.Hostname} does not report this update as installed.", "update_not_installed");
+                }
+
+                if (catalog.Category == UpdateCategory.Application)
+                {
+                    throw AppException.Conflict("Application updates cannot be removed by EasyPatch. Uninstall or reinstall the application on the computer.",
+                        "not_supported_for_applications");
+                }
+
+                var payload = new UninstallUpdatePayload
+                {
+                    UpdateGuid = updateGuid,
+                    Title = catalog.Title.Length > 1000 ? catalog.Title[..1000] : catalog.Title,
+                    KbNumber = KbNumber.Normalize(catalog.PrimaryKb)?[2..],
+                    Category = catalog.Category,
+                };
+                payloadJson = JsonSerializer.Serialize(payload, ContractJson.Options);
+                dedupeKey = "uninstall-update:" + updateGuid.ToString("N");
+                plannedItems =
+                [
+                    new JobUpdate
+                    {
+                        Id = Guid.CreateVersion7(now),
+                        UpdateGuid = updateGuid,
+                        RevisionNumber = catalog.RevisionNumber,
+                        Title = catalog.Title,
+                        KbNumber = KbNumber.Normalize(catalog.PrimaryKb),
+                        Category = catalog.Category,
+                        Status = JobItemStatus.Pending,
+                        UpdatedAt = now,
+                    },
+                ];
+                break;
+            }
+
             default:
                 throw AppException.BadRequest("Unsupported job type.");
         }
@@ -250,11 +306,12 @@ public sealed class JobService(
                 JobTrigger.System => "System",
                 _ => actor.Username ?? "unknown",
             },
-            // An uninstall goes before anything still queued (it cancels the rest). Then scans and inventory, then installs, then
-            // restarts (patch, then restart), then agent updates. Messages are leased separately.
+            // An uninstall goes before anything still queued (it cancels the rest). Then scans and inventory, then update removals,
+            // then installs, then restarts (patch, then restart), then agent updates. Messages are leased separately.
             Priority = request.Type switch
             {
                 JobType.UninstallAgent => 20,
+                JobType.UninstallUpdate => 5,
                 JobType.InstallUpdates => 0,
                 JobType.Restart => -10,
                 JobType.AgentUpdate => -20,
@@ -353,6 +410,8 @@ public sealed class JobService(
             JobType.NotifyUser => new CreateJobRequest(original.EndpointId, original.Type, Notify: Payload<NotifyUserPayload>(original)),
             JobType.InstallUpdates when Payload<InstallUpdatesPayload>(original) is { } install =>
                 new CreateJobRequest(original.EndpointId, original.Type, install.Mode, install.SelectedUpdateGuids),
+            JobType.UninstallUpdate when Payload<UninstallUpdatePayload>(original) is { } removal =>
+                new CreateJobRequest(original.EndpointId, original.Type, UpdateGuids: [removal.UpdateGuid]),
             _ => new CreateJobRequest(original.EndpointId, original.Type),
         };
         var job = await CreateAsync(request, ct);
@@ -572,6 +631,7 @@ public sealed class JobService(
             Restart = job.Type == JobType.Restart ? Payload<RestartPayload>(job) : null,
             Notify = job.Type == JobType.NotifyUser ? Payload<NotifyUserPayload>(job) : null,
             AgentUpdate = job.Type == JobType.AgentUpdate ? Payload<AgentUpdatePayload>(job) : null,
+            UninstallUpdate = job.Type == JobType.UninstallUpdate ? Payload<UninstallUpdatePayload>(job) : null,
         };
     }
 
@@ -681,6 +741,8 @@ public sealed class JobService(
             {
                 JobStatus.Completed when summary is { Failed: > 0 } => $"{Describe(job.Type)} completed with errors: {summary.Succeeded} succeeded, {summary.Failed} failed.",
                 JobStatus.Completed when summary is not null && job.Type == JobType.InstallUpdates => $"{Describe(job.Type)} completed: {summary.Succeeded} installed, {summary.Skipped} skipped.",
+                JobStatus.Completed when job.Type == JobType.UninstallUpdate && !string.IsNullOrWhiteSpace(report.Message) =>
+                    $"{Describe(job.Type)} completed: {ScanIngestionService.Truncate(report.Message, 500)}",
                 JobStatus.Completed => $"{Describe(job.Type)} completed.",
                 JobStatus.Cancelled => $"{Describe(job.Type)} cancelled.",
                 JobStatus.Expired => $"{Describe(job.Type)} expired before it could start: {report.ErrorMessage ?? report.ErrorCode ?? "deadline passed"}",
@@ -700,8 +762,8 @@ public sealed class JobService(
 
         if (report.RebootRequired)
         {
-            ScanIngestionService.ApplyRebootState(db, endpoint,
-                true, endpoint.RebootReasons.Union(["Updates installed by EasyPatch require a restart"]).ToList(), now, keepDetails: true);
+            var reason = job.Type == JobType.UninstallUpdate ? "An update removed by EasyPatch requires a restart" : "Updates installed by EasyPatch require a restart";
+            ScanIngestionService.ApplyRebootState(db, endpoint, true, endpoint.RebootReasons.Union([reason]).ToList(), now, keepDetails: true);
         }
 
         if (updatesChanged || report.RebootRequired)
@@ -766,7 +828,8 @@ public sealed class JobService(
             }
         }
 
-        if (finalGuids.Count > 0)
+        // A removal changes nothing here: the scan the agent runs afterwards reports what Windows now has installed.
+        if (finalGuids.Count > 0 && job.Type != JobType.UninstallUpdate)
         {
             var guids = finalGuids.Select(f => f.Report.UpdateGuid).ToList();
             var rows = await db.EndpointUpdates.Where(u => u.EndpointId == endpoint.Id && guids.Contains(u.UpdateGuid))
@@ -837,6 +900,7 @@ public sealed class JobService(
         JobType.NotifyUser => "Message to users",
         JobType.AgentUpdate => "Agent update",
         JobType.UninstallAgent => "Agent uninstall",
+        JobType.UninstallUpdate => "Update removal",
         _ => type.ToString(),
     };
 }

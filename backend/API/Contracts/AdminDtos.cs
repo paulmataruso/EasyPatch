@@ -393,7 +393,8 @@ public sealed record UpdateEndpointRequest(Guid? SiteId, string? Notes, EsuOverr
 
 public sealed record RevokeEndpointRequest(string? Reason);
 
-public sealed record JobOverlayDto(Guid JobId, JobStatus JobStatus, JobItemStatus ItemStatus, int? DownloadPercent, int? InstallPercent);
+public sealed record JobOverlayDto(Guid JobId, JobStatus JobStatus, JobItemStatus ItemStatus, int? DownloadPercent, int? InstallPercent,
+    JobType JobType = JobType.InstallUpdates);
 
 public sealed record EndpointUpdateDto(
     Guid UpdateGuid,
@@ -438,6 +439,9 @@ public sealed record EndpointEventDto(long Id, Guid EndpointId, string? Hostname
 public sealed record InstallUpdatesRequest(InstallMode Mode, IReadOnlyList<Guid>? UpdateGuids, bool Force);
 
 public sealed record ExclusionRequest(Guid UpdateGuid, string? Reason);
+
+/// <param name="Block">Also exclude the update on the endpoint so EasyPatch does not install it again.</param>
+public sealed record UninstallUpdateRequest(bool Block = true, string? Reason = null);
 
 public sealed record BulkEndpointsRequest(IReadOnlyList<Guid> EndpointIds, bool Force);
 
@@ -519,6 +523,9 @@ public sealed record FleetUpdateEndpointDto(
     DateTimeOffset StateChangedAt);
 
 public sealed record FleetInstallRequest(Guid? OrganizationId, Guid? SiteId, IReadOnlyList<Guid>? EndpointIds);
+
+/// <param name="Block">Also exclude the update on each endpoint so EasyPatch does not install it again.</param>
+public sealed record FleetUninstallRequest(Guid? OrganizationId, Guid? SiteId, IReadOnlyList<Guid>? EndpointIds, bool Block = true, string? Reason = null);
 
 // ---------------------------------------------------------------------------------------------
 // Jobs

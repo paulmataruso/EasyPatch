@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { Ban, CheckCircle2, Download, ExternalLink, EyeOff, History, Pencil, ShieldCheck } from 'lucide-react';
+import { Ban, CheckCircle2, Download, ExternalLink, EyeOff, History, Pencil, ShieldCheck, Undo2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApi, useApiMutation, useList, usePolicy } from '../../api/hooks';
 import {
@@ -26,6 +26,7 @@ import { EnumSelect } from '../../components/Filters';
 import { JobTable } from '../../components/JobTable';
 import { PackageFacts } from '../../components/PackageInfo';
 import { PolicyEditor, resolveInherited } from '../../components/PolicyEditor';
+import { RemoveUpdateDialog, type RemovableUpdate } from '../../components/RemoveUpdateDialog';
 import { describeRestartSchedule, describeWindowsUpdateGroup, WU_GROUPS } from '../../components/PolicySections';
 import { SessionSummary } from '../../components/RestartDialogs';
 import { TagChip } from '../../components/Tags';
@@ -333,7 +334,9 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [excluding, setExcluding] = useState<EndpointUpdateDto | null>(null);
+  const [removing, setRemoving] = useState<RemovableUpdate | null>(null);
   const managed = endpoint.summary.status === 'Active';
+  const canRemove = managed && endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.uninstallUpdates);
 
   const rows = useMemo(() => {
     const items = state ? list.page.items : list.page.items.filter((u) => OUTSTANDING.includes(u.state));
@@ -475,6 +478,7 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
                           <JobItemStatusBadge
                             status={u.activeJob.itemStatus}
                             percent={jobItemPercent({ status: u.activeJob.itemStatus, ...u.activeJob })}
+                            removal={u.activeJob.jobType === 'UninstallUpdate'}
                           />
                         </Link>
                       )}
@@ -490,10 +494,17 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
                         <Button size="sm" variant="ghost" icon={<CheckCircle2 className="size-3.5" aria-hidden />} loading={include.isPending && include.variables === u.updateGuid} onClick={() => include.mutate(u.updateGuid)}>
                           Include
                         </Button>
+                      ) : u.state === 'Missing' || u.state === 'Failed' ? (
+                        <Button size="sm" variant="ghost" icon={<Ban className="size-3.5" aria-hidden />} onClick={() => setExcluding(u)}>
+                          Exclude
+                        </Button>
                       ) : (
-                        (u.state === 'Missing' || u.state === 'Failed') && (
-                          <Button size="sm" variant="ghost" icon={<Ban className="size-3.5" aria-hidden />} onClick={() => setExcluding(u)}>
-                            Exclude
+                        u.state === 'PendingReboot' &&
+                        canRemove &&
+                        !u.package &&
+                        !u.activeJob && (
+                          <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" aria-hidden />} onClick={() => setRemoving(u)}>
+                            Remove
                           </Button>
                         )
                       )}
@@ -506,6 +517,7 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
         </TableWrap>
       )}
       <ExcludeDialog endpointId={id} update={excluding} onClose={() => setExcluding(null)} />
+      <RemoveUpdateDialog endpointId={id} hostname={endpoint.summary.hostname} update={removing} onClose={() => setRemoving(null)} />
     </>
   );
 }
@@ -556,9 +568,16 @@ function ExcludeDialog({ endpointId, update, onClose }: { endpointId: string; up
 // Installed, history, jobs, activity, effective policy
 // ---------------------------------------------------------------------------------------------
 
-export function InstalledTab({ endpointId, linux = false }: { endpointId: string; linux?: boolean }) {
+export function InstalledTab({ endpoint }: { endpoint: EndpointDetailDto }) {
+  const endpointId = endpoint.summary.id;
+  const linux = isLinux(endpoint.summary.platform);
+  const { canOperate } = useAuth();
   const [search, setSearch] = useState('');
-  const list = useList<EndpointUpdateDto>(`/endpoints/${endpointId}/installed-updates`);
+  const [removing, setRemoving] = useState<RemovableUpdate | null>(null);
+  const list = useList<EndpointUpdateDto>(`/endpoints/${endpointId}/installed-updates`, undefined, { refetchInterval: 30_000 });
+  const managed = endpoint.summary.status === 'Active';
+  const canRemove = canOperate && managed && endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.uninstallUpdates);
+  const removeHint = canOperate && managed && !linux && !canRemove ? ' Removing an update needs EasyPatch agent 1.8.0 or later.' : '';
   const items = list.page.items.filter(
     (u) => !search || `${u.title} ${u.kbNumbers.join(' ')} ${u.package?.name ?? ''}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -571,7 +590,7 @@ export function InstalledTab({ endpointId, linux = false }: { endpointId: string
         <p className="pb-2 text-xs text-muted">
           {linux
             ? 'Package updates the agent reported as available and later found installed appear here. The full list of installed packages is not reported.'
-            : 'Only updates confirmed installed by a Windows Update scan appear here.'}
+            : `Only updates confirmed installed by a Windows Update scan appear here.${removeHint}`}
         </p>
       </Toolbar>
       {items.length === 0 ? (
@@ -585,12 +604,20 @@ export function InstalledTab({ endpointId, linux = false }: { endpointId: string
                 <th>{linux ? 'Package' : 'KB'}</th>
                 <th>Category</th>
                 <th>Installed</th>
+                {canRemove && <th className="text-right">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {items.map((u) => (
                 <tr key={u.updateGuid}>
-                  <td className="min-w-72">{u.title}</td>
+                  <td className="min-w-72">
+                    {u.title}
+                    {u.activeJob && (
+                      <Link to={`/jobs/${u.activeJob.jobId}`} className="mt-1 block w-fit hover:opacity-80" title="Part of an active job">
+                        <JobItemStatusBadge status={u.activeJob.itemStatus} removal={u.activeJob.jobType === 'UninstallUpdate'} />
+                      </Link>
+                    )}
+                  </td>
                   <td className="text-xs">
                     {u.package ? (
                       <span className="flex flex-col gap-0.5">
@@ -608,12 +635,22 @@ export function InstalledTab({ endpointId, linux = false }: { endpointId: string
                     <CategoryBadge category={u.category} />
                   </td>
                   <td className="whitespace-nowrap text-muted">{formatDateTime(u.installedAt ?? u.stateChangedAt)}</td>
+                  {canRemove && (
+                    <td className="text-right">
+                      {!u.package && !u.activeJob && (
+                        <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" aria-hidden />} onClick={() => setRemoving(u)}>
+                          Remove
+                        </Button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
         </TableWrap>
       )}
+      <RemoveUpdateDialog endpointId={endpointId} hostname={endpoint.summary.hostname} update={removing} onClose={() => setRemoving(null)} />
     </>
   );
 }

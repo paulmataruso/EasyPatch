@@ -338,6 +338,8 @@ agent's informational events, including:
 | 1017 | Uninstall job failed (warning, with the reason) |
 | 1018 | winget installed for all users |
 | 1019 | winget could not be installed (warning, with the reason) |
+| 1020 | An update was removed for an update removal job (warning, with how it was removed) |
+| 1021 | An update removal job failed (warning, with the reason) |
 
 ## Tray icon
 

@@ -36,6 +36,11 @@ public enum JobType
     /// <summary>Remove the EasyPatch agent from the endpoint (Windows Installer, apt or rpm removal of the agent package only).
     /// The agent unenrolls as part of the removal; the server completes the job when that unenrollment arrives.</summary>
     UninstallAgent,
+
+    /// <summary>Remove one installed Windows update (Windows agent 1.8.0 and later): Windows Update's own uninstall when the
+    /// update supports it, otherwise DISM's <c>/Remove-Package</c> for the update's servicing package. Never runs anything
+    /// else and never restarts the computer.</summary>
+    UninstallUpdate,
 }
 
 /// <summary>How a <see cref="JobType.Restart"/> job treats signed-in users. With nobody signed in, every mode restarts at once.</summary>

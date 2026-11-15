@@ -136,7 +136,9 @@ public static class EndpointEndpoints
             await EnsureEndpointAccessAsync(db, tenant, id, ct);
             var rows = await db.EndpointUpdates.AsNoTracking().Where(u => u.EndpointId == id && u.State == EndpointUpdateState.Installed)
                 .Select(u => new { Row = u, u.Update }).ToListAsync(ct);
-            return TypedResults.Ok(rows.OrderByDescending(r => r.Row.InstalledAt ?? r.Row.StateChangedAt).Select(r => ToUpdateDto(r.Row, r.Update!, null)).ToList());
+            var overlay = await LiveOverlayAsync(db, id, ct);
+            return TypedResults.Ok(rows.OrderByDescending(r => r.Row.InstalledAt ?? r.Row.StateChangedAt)
+                .Select(r => ToUpdateDto(r.Row, r.Update!, overlay.GetValueOrDefault(r.Row.UpdateGuid))).ToList());
         });
 
         g.MapGet("/{id:guid}/update-history", async (Guid id, string? search, int? page, int? pageSize, EasyPatchDbContext db, ITenantContext tenant,
@@ -265,6 +267,16 @@ public static class EndpointEndpoints
         {
             await EnsureEndpointAccessAsync(db, tenant, id, ct);
             var job = await jobs.CreateAsync(new CreateJobRequest(id, JobType.InventoryRefresh), ct);
+            return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await JobEndpoints.LoadSummaryAsync(db, job.Id, ct));
+        }).RequireAuthorization(Policies.Operator);
+
+        // Rolling back an update: the agent removes only that update (Windows Update or DISM) and never restarts the computer.
+        g.MapPost("/{id:guid}/updates/{updateGuid:guid}/uninstall", async (Guid id, Guid updateGuid, UninstallUpdateRequest request, EasyPatchDbContext db,
+            ITenantContext tenant, UpdateRemovalService removals, CancellationToken ct) =>
+        {
+            await EnsureEndpointAccessAsync(db, tenant, id, ct);
+            new Validator().Optional("reason", request.Reason, 500).ThrowIfInvalid();
+            var job = await removals.RemoveAsync(id, updateGuid, request.Block, Validator.Clean(request.Reason), ct);
             return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await JobEndpoints.LoadSummaryAsync(db, job.Id, ct));
         }).RequireAuthorization(Policies.Operator);
 
@@ -605,19 +617,37 @@ public static class EndpointEndpoints
         return endpoint;
     }
 
-    /// <summary>Per-update state of the endpoint's in-flight install job, for the live overlay in the updates table.</summary>
+    /// <summary>Per-update state of the endpoint's in-flight install job and update removals, for the live overlay in the update tables.</summary>
     private static async Task<Dictionary<Guid, JobOverlayDto>> LiveOverlayAsync(EasyPatchDbContext db, Guid endpointId, CancellationToken ct)
     {
-        var job = await db.Jobs.AsNoTracking()
-            .Where(j => j.EndpointId == endpointId && j.Type == JobType.InstallUpdates &&
+        var jobs = await db.Jobs.AsNoTracking()
+            .Where(j => j.EndpointId == endpointId && (j.Type == JobType.InstallUpdates || j.Type == JobType.UninstallUpdate) &&
                         (j.Status == JobStatus.Queued || j.Status == JobStatus.Delivered || j.Status == JobStatus.Acknowledged || j.Status == JobStatus.Running))
             .OrderByDescending(j => j.CreatedAt)
-            .Select(j => new { j.Id, j.Status, Items = j.Updates.Select(u => new { u.UpdateGuid, u.Status, u.DownloadPercent, u.InstallPercent }).ToList() })
-            .FirstOrDefaultAsync(ct);
-        return job is null
-            ? []
-            : job.Items.GroupBy(i => i.UpdateGuid).ToDictionary(g => g.Key,
-                g => new JobOverlayDto(job.Id, job.Status, g.First().Status, g.First().DownloadPercent, g.First().InstallPercent));
+            .Take(50)
+            .Select(j => new { j.Id, j.Type, j.Status, Items = j.Updates.Select(u => new { u.UpdateGuid, u.Status, u.DownloadPercent, u.InstallPercent }).ToList() })
+            .ToListAsync(ct);
+        var overlay = new Dictionary<Guid, JobOverlayDto>();
+        var installSeen = false;
+        foreach (var job in jobs)
+        {
+            if (job.Type == JobType.InstallUpdates)
+            {
+                if (installSeen)
+                {
+                    continue; // only the newest install job
+                }
+
+                installSeen = true;
+            }
+
+            foreach (var item in job.Items)
+            {
+                overlay.TryAdd(item.UpdateGuid, new JobOverlayDto(job.Id, job.Status, item.Status, item.DownloadPercent, item.InstallPercent, job.Type));
+            }
+        }
+
+        return overlay;
     }
 
     private static EndpointUpdateDto ToUpdateDto(EndpointUpdate row, Update update, JobOverlayDto? overlay) => new(
