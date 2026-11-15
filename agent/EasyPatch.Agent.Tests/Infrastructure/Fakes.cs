@@ -119,6 +119,13 @@ public sealed class FakeUpdate
     public bool RequiresReboot { get; init; }
     public int? DownloadHResult { get; set; }
     public int? InstallHResult { get; set; }
+
+    /// <summary>Percentages reported while the update downloads, as WUA's download job would.</summary>
+    public IReadOnlyList<int> DownloadProgress { get; set; } = [];
+
+    /// <summary>Percentages reported while the update installs.</summary>
+    public IReadOnlyList<int> InstallProgress { get; set; } = [];
+
     public Guid Guid => Metadata.UpdateGuid;
 }
 
@@ -146,6 +153,9 @@ public sealed class FakeWindowsUpdate : IUpdateService
 
     /// <summary>Invoked before each install; may throw, cancel or change state.</summary>
     public Func<FakeUpdate, CancellationToken, Task>? BeforeInstall { get; set; }
+
+    /// <summary>Invoked before each progress percentage is reported ("download" or "install"), e.g. to advance the clock.</summary>
+    public Action<string, int>? BeforeProgress { get; set; }
 
     public FakeUpdate Add(string title, Guid? classification = null, string? kb = null, bool browseOnly = false, bool isDriver = false,
         bool requiresReboot = false, bool installed = false)
@@ -210,10 +220,11 @@ public sealed class FakeWindowsUpdate : IUpdateService
     public Task<bool> IsRebootRequiredBeforeInstallationAsync(CancellationToken cancellationToken) =>
         Task.FromResult(RebootRequiredBeforeInstallation);
 
-    public Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, CancellationToken cancellationToken)
+    public Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, IProgress<int>? progress, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var target = ((Handle)update).Update;
+        Report("download", target.DownloadProgress, progress);
         lock (_lock)
         {
             Operations.Add($"download:{target.Guid}");
@@ -227,7 +238,7 @@ public sealed class FakeWindowsUpdate : IUpdateService
         }
     }
 
-    public async Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, CancellationToken cancellationToken)
+    public async Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, IProgress<int>? progress, CancellationToken cancellationToken)
     {
         var target = ((Handle)update).Update;
         if (BeforeInstall is not null)
@@ -236,6 +247,7 @@ public sealed class FakeWindowsUpdate : IUpdateService
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        Report("install", target.InstallProgress, progress);
         lock (_lock)
         {
             Operations.Add($"install:{target.Guid}");
@@ -256,6 +268,15 @@ public sealed class FakeWindowsUpdate : IUpdateService
 
             History.Add(Entry(target, OperationResultCode: 2, 0));
             return new UpdateOperationResult(UpdateOperationResult.Succeeded, 0, target.RequiresReboot);
+        }
+    }
+
+    private void Report(string operation, IReadOnlyList<int> percentages, IProgress<int>? progress)
+    {
+        foreach (var percent in percentages)
+        {
+            BeforeProgress?.Invoke(operation, percent);
+            progress?.Report(percent);
         }
     }
 

@@ -25,7 +25,7 @@ internal static class Mapping
 
     public static readonly Expression<Func<JobUpdate, JobItemDto>> JobItem = u => new JobItemDto(
         u.UpdateGuid, u.Title, u.KbNumber, u.Category, u.Status, u.SkipReason, u.ResultCode, u.ErrorCode, u.ErrorMessage, u.RebootRequired,
-        u.DownloadPercent, u.StartedAt, u.CompletedAt);
+        u.DownloadPercent, u.InstallPercent, u.StartedAt, u.CompletedAt);
 
     public static string HistoryResult(int resultCode) => resultCode switch
     {

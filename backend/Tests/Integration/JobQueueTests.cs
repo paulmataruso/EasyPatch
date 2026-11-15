@@ -192,6 +192,43 @@ public sealed class JobQueueTests(PostgresFixture postgres) : IntegrationTest(po
     }
 
     [Fact]
+    public async Task Download_and_install_percentages_of_each_update_are_shown_while_the_job_runs()
+    {
+        var agent = await EnrollAgentAsync(root, org.Id, site.Id, "PC-PROGRESS");
+        var downloading = SecurityUpdate("KB5046631");
+        var installing = SecurityUpdate("KB5046632");
+        await ReportScanAsync(agent, [downloading, installing]);
+        var install = await InstallAllAsync(agent.EndpointId);
+        Assert.Equal(install.Id, Assert.Single((await agent.CheckInAsync()).Jobs).JobId);
+        await AckAsync(agent, install.Id);
+
+        JobItemReport Item(ReportedUpdate update, JobItemStatus status, int? downloaded, int? installed) => new()
+        {
+            UpdateGuid = update.UpdateGuid,
+            Title = update.Title,
+            KbNumber = "KB" + update.KbNumbers[0],
+            Status = status,
+            DownloadPercent = downloaded,
+            InstallPercent = installed,
+        };
+        await ReportAsync(agent, install.Id, 1, JobStatus.Running, items:
+        [
+            Item(downloading, JobItemStatus.Downloading, 140, null), // out of range: stored as 100
+            Item(installing, JobItemStatus.Installing, 100, 45),
+        ]);
+
+        var items = (await JobAsync(install.Id)).Items.ToDictionary(i => i.UpdateGuid);
+        Assert.Equal((100, (int?)null), (items[downloading.UpdateGuid].DownloadPercent, items[downloading.UpdateGuid].InstallPercent));
+        Assert.Equal((100, 45), (items[installing.UpdateGuid].DownloadPercent, items[installing.UpdateGuid].InstallPercent));
+
+        var overlay = (await root.GetAsync<List<EndpointUpdateDto>>($"/api/v1/endpoints/{agent.EndpointId}/updates"))
+            .Single(u => u.UpdateGuid == installing.UpdateGuid).ActiveJob;
+        Assert.NotNull(overlay);
+        Assert.Equal(JobItemStatus.Installing, overlay.ItemStatus);
+        Assert.Equal(45, overlay.InstallPercent);
+    }
+
+    [Fact]
     public async Task Cancellation_is_immediate_when_queued_and_cooperative_when_running()
     {
         var agent = await EnrollAgentAsync(root, org.Id, site.Id, "PC-CANCEL");

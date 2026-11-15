@@ -1618,6 +1618,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("error_message");
 
+                    b.Property<int?>("InstallPercent")
+                        .HasColumnType("integer")
+                        .HasColumnName("install_percent");
+
                     b.Property<Guid>("JobId")
                         .HasColumnType("uuid")
                         .HasColumnName("job_id");

@@ -216,6 +216,7 @@ public sealed class JobUpdate
     public string? ErrorMessage { get; set; }
     public bool RebootRequired { get; set; }
     public int? DownloadPercent { get; set; }
+    public int? InstallPercent { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

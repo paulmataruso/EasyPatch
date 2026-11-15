@@ -811,6 +811,7 @@ export interface JobOverlayDto {
   jobStatus: JobStatus;
   itemStatus: JobItemStatus;
   downloadPercent: number | null;
+  installPercent: number | null;
 }
 
 export interface EndpointUpdateDto {
@@ -1081,6 +1082,7 @@ export interface JobItemDto {
   errorMessage: string | null;
   rebootRequired: boolean;
   downloadPercent: number | null;
+  installPercent: number | null;
   startedAt: Instant | null;
   completedAt: Instant | null;
 }

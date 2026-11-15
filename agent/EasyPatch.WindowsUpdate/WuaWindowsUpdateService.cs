@@ -72,7 +72,8 @@ public sealed partial class WuaWindowsUpdateService : IUpdateService
             }
         }, cancellationToken);
 
-    public Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, CancellationToken cancellationToken)
+    /// <summary>Downloads one update; <paramref name="progress"/> receives WUA's percentage while it runs.</summary>
+    public Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, IProgress<int>? progress, CancellationToken cancellationToken)
     {
         var handle = AsHandle(update);
         return RunAsync("download", () =>
@@ -84,7 +85,7 @@ public sealed partial class WuaWindowsUpdateService : IUpdateService
             {
                 Com.TrySet(downloader, "ClientApplicationID", ClientApplicationId);
                 Com.Set(downloader, "Updates", collection);
-                var result = Com.Invoke(downloader, "Download")!;
+                var result = WuaAsyncJob.Run(downloader, "Download", progress, abortOnCancel: true, _logger, cancellationToken);
                 var overall = ReadResult(result, out var overallHr);
                 var perUpdate = Com.Invoke(result, "GetUpdateResult", 0)!;
                 var code = ReadResult(perUpdate, out var updateHr);
@@ -100,7 +101,8 @@ public sealed partial class WuaWindowsUpdateService : IUpdateService
         }, cancellationToken);
     }
 
-    public Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, CancellationToken cancellationToken)
+    /// <summary>Installs one update; <paramref name="progress"/> receives WUA's percentage while it runs.</summary>
+    public Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, IProgress<int>? progress, CancellationToken cancellationToken)
     {
         var handle = AsHandle(update);
         return RunAsync("install", () =>
@@ -127,7 +129,7 @@ public sealed partial class WuaWindowsUpdateService : IUpdateService
                 Com.Set(installer, "Updates", collection);
                 WaitUntilNotBusy(installer, cancellationToken);
 
-                var result = Com.Invoke(installer, "Install")!;
+                var result = WuaAsyncJob.Run(installer, "Install", progress, abortOnCancel: false, _logger, cancellationToken);
                 var overall = ReadResult(result, out var overallHr);
                 var rebootRequired = Com.GetBool(result, "RebootRequired");
                 var perUpdate = Com.Invoke(result, "GetUpdateResult", 0)!;

@@ -60,6 +60,7 @@ import {
   formatVersionChange,
   humanize,
   isLinux,
+  jobItemPercent,
 } from '../../lib/format';
 import { describeApplicationUpdates } from '../../lib/applications';
 import { useUrlState } from '../../lib/urlState';
@@ -459,7 +460,10 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
                       {u.isExcluded ? <Badge icon={<EyeOff className="size-3" aria-hidden />}>Excluded</Badge> : <UpdateStateBadge state={u.state} />}
                       {u.activeJob && (
                         <Link to={`/jobs/${u.activeJob.jobId}`} className="hover:opacity-80" title="Part of an active job">
-                          <JobItemStatusBadge status={u.activeJob.itemStatus} percent={u.activeJob.downloadPercent} />
+                          <JobItemStatusBadge
+                            status={u.activeJob.itemStatus}
+                            percent={jobItemPercent({ status: u.activeJob.itemStatus, ...u.activeJob })}
+                          />
                         </Link>
                       )}
                     </div>

@@ -146,7 +146,9 @@ only changed by scans and final install results:
 
 The **job layer** (`job_updates.status`) records operational progress: `Pending`,
 `Downloading`, `Downloaded`, `Installing`, `Succeeded`, `Failed`, `Skipped` (with a reason)
-and `Cancelled`. The UI overlays live job progress onto the endpoint inventory. A crashed job
+and `Cancelled`, with the download and install percentages the agent reported
+(`download_percent`, `install_percent`). The UI overlays live job progress onto the endpoint
+inventory. A crashed job
 therefore can never leave the inventory stuck in "Downloading".
 
 `is_required` is true when policy says the update should be installed now: its category is
@@ -414,7 +416,17 @@ server never signs anything; see [security.md](security.md#agent-release-signing
   2. Filter by the job payload (mode, categories, optional updates, exclusions). Skip updates
      that need user input or have unaccepted EULAs (when EULA acceptance is disabled).
   3. Report the planned items.
-  4. For each update: download, report, install, report.
+  4. For each update: download, report, install, report. From 1.7.0 the Windows agent runs
+     each download and installation as an asynchronous WUA job (`BeginDownload` /
+     `BeginInstall`), reads its percentage every second, and reports it as the item's
+     `downloadPercent` / `installPercent` at most every 10 seconds (and in the tray's current
+     activity). The job percentage moves through each update's share of 5-95 %: the first
+     half while it downloads, the second while it installs. Windows Update reports 0 % until it
+     knows more, so 0 is not shown. The result is read with `EndDownload` / `EndInstall`,
+     exactly as from the synchronous calls. If WUA does not accept the asynchronous job, the
+     agent uses the synchronous `Download` / `Install` and reports no percentages. On service
+     stop, a running download is aborted; an installation is never interrupted. Linux agents
+     report how many packages are done instead (apt and dnf install them in one transaction).
   5. Run a post-install scan and send the scan results.
   6. Finish as `Completed` or `Failed`, with `reboot_required` if needed.
 * **Reboot.** The agent reports pending-reboot state from WUA `SystemInfo.RebootRequired`,

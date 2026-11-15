@@ -32,6 +32,9 @@ public sealed class InstallUpdatesHandler
         SkipReasons.EulaNotAccepted,
     };
 
+    /// <summary>Progress percentages within one update are sent to the server at most this often.</summary>
+    internal static readonly TimeSpan ProgressReportInterval = TimeSpan.FromSeconds(10);
+
     private readonly AgentPlatform _platform;
     private readonly AgentStateStore _state;
     private readonly JobReporter _reporter;
@@ -137,7 +140,11 @@ public sealed class InstallUpdatesHandler
                     break;
                 }
 
-                var basePercent = 5 + (int)(90.0 * index / plan.ToInstall.Count);
+                // Each update gets an equal share of 5-95%: the first half while it downloads, the second while it installs.
+                var count = plan.ToInstall.Count;
+                var position = $"{index + 1} of {count}";
+                int JobPercent(double phase, int itemPercent) => 5 + (int)(90.0 * (index + phase + itemPercent / 200.0) / count);
+                var basePercent = JobPercent(0, 0);
                 var startedAt = _time.GetUtcNow();
                 _notifier.InstallStarting(jobId);
 
@@ -145,10 +152,12 @@ public sealed class InstallUpdatesHandler
                 if (!candidate.Update.IsDownloaded)
                 {
                     Activity = $"Downloading {label}";
-                    Set(items, guid, i => i with { Status = JobItemStatus.Downloading, StartedAt = startedAt, ErrorCode = null, ErrorMessage = null });
-                    _reporter.Report(jobId, JobStatus.Running, "Downloading", basePercent, $"Downloading {label} ({index + 1} of {plan.ToInstall.Count}).", items);
+                    Set(items, guid, i => i with { Status = JobItemStatus.Downloading, StartedAt = startedAt, ErrorCode = null, ErrorMessage = null, DownloadPercent = null });
+                    _reporter.Report(jobId, JobStatus.Running, "Downloading", basePercent, $"Downloading {label} ({position}).", items);
 
-                    var download = await RunOperationAsync(() => wu.DownloadAsync(candidate.Handle, cancellationToken));
+                    var downloadProgress = ItemProgress(jobId, items, guid, installing: false, label, position,
+                        percent => JobPercent(0, percent), cancellationToken);
+                    var download = await RunOperationAsync(() => wu.DownloadAsync(candidate.Handle, downloadProgress, cancellationToken));
                     if (!download.IsSuccess)
                     {
                         Fail(items, guid, download, "Download failed");
@@ -161,15 +170,18 @@ public sealed class InstallUpdatesHandler
 
                 // ---- install
                 Activity = $"Installing {label}";
-                Set(items, guid, i => i with { Status = JobItemStatus.Installing });
-                _reporter.Report(jobId, JobStatus.Running, "Installing", basePercent, $"Installing {label} ({index + 1} of {plan.ToInstall.Count}).", items);
+                Set(items, guid, i => i with { Status = JobItemStatus.Installing, InstallPercent = null });
+                _reporter.Report(jobId, JobStatus.Running, "Installing", JobPercent(0.5, 0), $"Installing {label} ({position}).", items);
 
-                var install = await RunOperationAsync(() => wu.InstallAsync(candidate.Handle, payload.Filter.AcceptEulas, cancellationToken));
+                var installProgress = ItemProgress(jobId, items, guid, installing: true, label, position,
+                    percent => JobPercent(0.5, percent), cancellationToken);
+                var install = await RunOperationAsync(() => wu.InstallAsync(candidate.Handle, payload.Filter.AcceptEulas, installProgress, cancellationToken));
                 if (install.IsSuccess)
                 {
                     Set(items, guid, i => i with
                     {
                         Status = JobItemStatus.Succeeded,
+                        InstallPercent = 100,
                         ResultCode = install.ResultCode,
                         RebootRequired = install.RebootRequired,
                         ErrorCode = install.ResultCode == UpdateOperationResult.SucceededWithErrors ? WindowsUpdateErrors.Format(install.HResult) : null,
@@ -183,7 +195,7 @@ public sealed class InstallUpdatesHandler
                     Fail(items, guid, install, "Installation failed");
                 }
 
-                _reporter.Report(jobId, JobStatus.Running, "Installing", basePercent + (int)(90.0 / plan.ToInstall.Count),
+                _reporter.Report(jobId, JobStatus.Running, "Installing", JobPercent(1, 0),
                     install.IsSuccess ? $"Installed {label}." : $"Installation of {label} failed.", items);
 
                 if (!install.IsSuccess && index < plan.ToInstall.Count - 1 &&
@@ -348,6 +360,37 @@ public sealed class InstallUpdatesHandler
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Progress of one update: every percentage updates the item and the activity shown in the tray, and a report goes to
+    /// the server when the percentage changed and <see cref="ProgressReportInterval"/> has passed since the last one. 0% is
+    /// not shown (Windows Update reports it before it knows how far along an update is).
+    /// </summary>
+    private SynchronousProgress<int> ItemProgress(Guid jobId, List<JobItemReport> items, Guid guid, bool installing, string label, string position,
+        Func<int, int> jobPercent, CancellationToken cancellationToken)
+    {
+        var phase = installing ? "Installing" : "Downloading";
+        var lastReport = _time.GetUtcNow();
+        var lastPercent = 0;
+        return new SynchronousProgress<int>(value =>
+        {
+            var percent = Math.Clamp(value, 0, 100);
+            if (cancellationToken.IsCancellationRequested || percent == 0 || percent == lastPercent)
+            {
+                return; // the job is no longer waiting for this operation, or nothing changed
+            }
+
+            lastPercent = percent;
+            Activity = $"{phase} {label} ({percent}%)";
+            Set(items, guid, i => installing ? i with { InstallPercent = percent } : i with { DownloadPercent = percent });
+            var now = _time.GetUtcNow();
+            if (now - lastReport >= ProgressReportInterval)
+            {
+                lastReport = now;
+                _reporter.Report(jobId, JobStatus.Running, phase, jobPercent(percent), $"{phase} {label} ({position}): {percent}%.", items);
+            }
+        });
     }
 
     /// <summary>Invokes the callback on the reporting thread (unlike <see cref="Progress{T}"/>, which posts to the thread pool).</summary>

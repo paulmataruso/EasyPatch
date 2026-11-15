@@ -261,15 +261,16 @@ public sealed class CompositeUpdateService(
         system.IsRebootRequiredBeforeInstallationAsync(cancellationToken);
 
     /// <summary>winget downloads during the upgrade.</summary>
-    public Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, CancellationToken cancellationToken) =>
+    public Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, IProgress<int>? progress, CancellationToken cancellationToken) =>
         update is ApplicationUpdateHandle
             ? Task.FromResult(new UpdateOperationResult(UpdateOperationResult.Succeeded, 0, false))
-            : system.DownloadAsync(update, cancellationToken);
+            : system.DownloadAsync(update, progress, cancellationToken);
 
-    public Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, CancellationToken cancellationToken) =>
+    /// <summary>Application upgrades report no percentage (winget only draws a progress bar on its console).</summary>
+    public Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, IProgress<int>? progress, CancellationToken cancellationToken) =>
         update is ApplicationUpdateHandle app
             ? applications.InstallAsync(app, cancellationToken)
-            : system.InstallAsync(update, acceptEula, cancellationToken);
+            : system.InstallAsync(update, acceptEula, progress, cancellationToken);
 
     public Task<IReadOnlyList<HistoryEntryReport>> GetHistoryAsync(DateTimeOffset? since, int maxEntries, CancellationToken cancellationToken) =>
         system.GetHistoryAsync(since, maxEntries, cancellationToken);

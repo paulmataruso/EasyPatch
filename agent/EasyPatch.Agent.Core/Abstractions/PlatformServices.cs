@@ -126,10 +126,12 @@ public interface IUpdateService
     /// <summary>True when Windows refuses further installs until the computer restarts.</summary>
     Task<bool> IsRebootRequiredBeforeInstallationAsync(CancellationToken cancellationToken);
 
-    Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, CancellationToken cancellationToken);
+    /// <param name="progress">Receives the percentage downloaded (0-100) when the update source reports one.</param>
+    Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, IProgress<int>? progress, CancellationToken cancellationToken);
 
     /// <param name="acceptEula">Accept the update's license agreement if it has not been accepted yet.</param>
-    Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, CancellationToken cancellationToken);
+    /// <param name="progress">Receives the percentage installed (0-100) when the update source reports one.</param>
+    Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, IProgress<int>? progress, CancellationToken cancellationToken);
 
     /// <summary>Windows Update history newer than <paramref name="since"/> (newest first), at most <paramref name="maxEntries"/>.</summary>
     Task<IReadOnlyList<HistoryEntryReport>> GetHistoryAsync(DateTimeOffset? since, int maxEntries, CancellationToken cancellationToken);

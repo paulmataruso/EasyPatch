@@ -331,8 +331,9 @@ user's Windows app mode (*Settings → Personalization → Colors*), dark or lig
   failed update check, or none for three days, is also shown here.
 * **Details.** Server connection, last check-in, the server's host name (*Managed by*), the
   last update check and the number of applicable updates it found, the last installation
-  (time and number of updates), whether a restart is needed, the current activity, the
-  computer name and the agent version.
+  (time and number of updates), whether a restart is needed, the current activity (from 1.7.0
+  with the percentage, for example *Installing KB5044284 (45%)*), the computer name and the
+  agent version.
 * **Check in now.** Contacts the server at once, which also delivers waiting results and picks
   up waiting jobs.
 * **Check for updates.** Runs an update scan at once. The scan is reported to the server like

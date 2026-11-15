@@ -10,7 +10,7 @@ import { jobIdOf } from '../../components/InstallDialog';
 import { CategoryBadge, JobItemStatusBadge, JobStatusBadge } from '../../components/StatusBadges';
 import { useToast } from '../../components/Toast';
 import { Alert, Button, Card, cx, EmptyState, ErrorState, KeyValueList, PageHeader, ProgressBar, Spinner, StatTile, TableWrap } from '../../components/ui';
-import { describeSkipReason, formatDateTime, formatRelative, humanize } from '../../lib/format';
+import { describeSkipReason, formatDateTime, formatRelative, humanize, jobItemPercent } from '../../lib/format';
 import { EventList } from '../endpoints/EndpointTabs';
 
 const TERMINAL: JobStatus[] = ['Completed', 'Failed', 'Cancelled', 'Expired'];
@@ -183,7 +183,12 @@ export function JobDetailPage() {
                         <CategoryBadge category={i.category} />
                       </td>
                       <td>
-                        <JobItemStatusBadge status={i.status} percent={i.downloadPercent} />
+                        <JobItemStatusBadge status={i.status} percent={jobItemPercent(i)} />
+                        {jobItemPercent(i) !== null && (
+                          <div className="mt-1.5 w-28">
+                            <ProgressBar value={jobItemPercent(i)} label={`${humanize(i.status)} ${i.kbNumber ?? i.title}`} />
+                          </div>
+                        )}
                         {i.rebootRequired && <div className="mt-0.5 text-xs text-info">restart required</div>}
                       </td>
                       <td className="text-sm">

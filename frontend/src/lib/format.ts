@@ -131,6 +131,17 @@ export function formatDays(days: number[] | null | undefined): string {
 }
 
 /** Human description of a WUA skip reason (mirrors SkipReasons.Describe on the server). */
+/** How far along an update in a running job is: its download percentage while downloading, its install percentage
+ * while installing, and null otherwise or when the agent did not report one. */
+export function jobItemPercent(item: {
+  status: string;
+  downloadPercent?: number | null;
+  installPercent?: number | null;
+}): number | null {
+  const value = item.status === 'Downloading' ? item.downloadPercent : item.status === 'Installing' ? item.installPercent : null;
+  return value === null || value === undefined ? null : Math.max(0, Math.min(100, Math.round(value)));
+}
+
 export function describeSkipReason(reason: string | null | undefined): string {
   switch (reason) {
     case 'AlreadyInstalled':

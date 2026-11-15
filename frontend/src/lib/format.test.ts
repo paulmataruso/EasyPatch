@@ -15,6 +15,7 @@ import {
   humanize,
   isLinux,
   isValidTime,
+  jobItemPercent,
   normalizeKb,
   osDetails,
   truncate,
@@ -172,5 +173,22 @@ describe('platforms', () => {
     expect(formatVersionChange(null, null)).toBe('—');
     expect(formatPackageFormat('deb')).toBe('DEB');
     expect(formatPackageFormat(null)).toBe('—');
+  });
+});
+
+describe('jobItemPercent', () => {
+  it('shows the percentage of the phase the update is in', () => {
+    expect(jobItemPercent({ status: 'Downloading', downloadPercent: 42, installPercent: null })).toBe(42);
+    expect(jobItemPercent({ status: 'Installing', downloadPercent: 100, installPercent: 7 })).toBe(7);
+  });
+
+  it('shows nothing when the agent reported no percentage or the update is not in progress', () => {
+    expect(jobItemPercent({ status: 'Installing', downloadPercent: 100, installPercent: null })).toBeNull();
+    expect(jobItemPercent({ status: 'Succeeded', downloadPercent: 100, installPercent: 100 })).toBeNull();
+    expect(jobItemPercent({ status: 'Downloading' })).toBeNull();
+  });
+
+  it('keeps the value between 0 and 100', () => {
+    expect(jobItemPercent({ status: 'Downloading', downloadPercent: 140 })).toBe(100);
   });
 });

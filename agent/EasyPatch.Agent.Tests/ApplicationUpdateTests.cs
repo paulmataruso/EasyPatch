@@ -209,10 +209,10 @@ public sealed class ApplicationUpdateTests
         Assert.Equal(1, on.Applications.Checked);
 
         var app = on.Missing.Single(m => m.Update.Application is not null);
-        Assert.True((await composite.DownloadAsync(app.Handle, CancellationToken.None)).IsSuccess);
-        Assert.True((await composite.InstallAsync(app.Handle, acceptEula: true, CancellationToken.None)).IsSuccess);
+        Assert.True((await composite.DownloadAsync(app.Handle, null, CancellationToken.None)).IsSuccess);
+        Assert.True((await composite.InstallAsync(app.Handle, acceptEula: true, null, CancellationToken.None)).IsSuccess);
         var system = on.Missing.Single(m => m.Update.Application is null);
-        await composite.InstallAsync(system.Handle, acceptEula: true, CancellationToken.None);
+        await composite.InstallAsync(system.Handle, acceptEula: true, null, CancellationToken.None);
         Assert.Equal(1, windowsUpdate.InstallCount(system.Update.UpdateGuid));
     }
 

@@ -259,7 +259,13 @@ public sealed record JobItemReport
     public string? ErrorCode { get; init; }
     public string? ErrorMessage { get; init; }
     public bool RebootRequired { get; init; }
+
+    /// <summary>How much of the update has downloaded (0-100), when the update source reports it.</summary>
     public int? DownloadPercent { get; init; }
+
+    /// <summary>How much of the update has installed (0-100), when the update source reports it.</summary>
+    public int? InstallPercent { get; init; }
+
     public DateTimeOffset? StartedAt { get; init; }
     public DateTimeOffset? CompletedAt { get; init; }
 }

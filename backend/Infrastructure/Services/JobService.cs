@@ -755,7 +755,8 @@ public sealed class JobService(
             item.ErrorMessage = ScanIngestionService.Truncate(
                 report.ErrorMessage ?? (report.ErrorCode is not null ? WindowsUpdateErrors.DescribeCode(report.ErrorCode) : null), 2000);
             item.RebootRequired = report.RebootRequired;
-            item.DownloadPercent = report.DownloadPercent;
+            item.DownloadPercent = report.DownloadPercent is { } downloaded ? Math.Clamp(downloaded, 0, 100) : null;
+            item.InstallPercent = report.InstallPercent is { } installed ? Math.Clamp(installed, 0, 100) : null;
             item.StartedAt = report.StartedAt ?? item.StartedAt;
             item.CompletedAt = report.CompletedAt ?? (report.Status is JobItemStatus.Succeeded or JobItemStatus.Failed or JobItemStatus.Skipped ? now : item.CompletedAt);
             item.UpdatedAt = now;

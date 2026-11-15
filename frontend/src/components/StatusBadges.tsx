@@ -73,7 +73,7 @@ export function JobItemStatusBadge({ status, percent }: { status: JobItemStatus;
   return (
     <Badge tone={itemTone[status]} icon={busy ? <Loader2 className="size-3 animate-spin" aria-hidden /> : undefined}>
       {humanize(status)}
-      {status === 'Downloading' && percent !== null && percent !== undefined ? ` ${percent}%` : ''}
+      {busy && percent !== null && percent !== undefined ? ` ${percent}%` : ''}
     </Badge>
   );
 }

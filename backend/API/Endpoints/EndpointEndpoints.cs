@@ -606,11 +606,12 @@ public static class EndpointEndpoints
             .Where(j => j.EndpointId == endpointId && j.Type == JobType.InstallUpdates &&
                         (j.Status == JobStatus.Queued || j.Status == JobStatus.Delivered || j.Status == JobStatus.Acknowledged || j.Status == JobStatus.Running))
             .OrderByDescending(j => j.CreatedAt)
-            .Select(j => new { j.Id, j.Status, Items = j.Updates.Select(u => new { u.UpdateGuid, u.Status, u.DownloadPercent }).ToList() })
+            .Select(j => new { j.Id, j.Status, Items = j.Updates.Select(u => new { u.UpdateGuid, u.Status, u.DownloadPercent, u.InstallPercent }).ToList() })
             .FirstOrDefaultAsync(ct);
         return job is null
             ? []
-            : job.Items.GroupBy(i => i.UpdateGuid).ToDictionary(g => g.Key, g => new JobOverlayDto(job.Id, job.Status, g.First().Status, g.First().DownloadPercent));
+            : job.Items.GroupBy(i => i.UpdateGuid).ToDictionary(g => g.Key,
+                g => new JobOverlayDto(job.Id, job.Status, g.First().Status, g.First().DownloadPercent, g.First().InstallPercent));
     }
 
     private static EndpointUpdateDto ToUpdateDto(EndpointUpdate row, Update update, JobOverlayDto? overlay) => new(

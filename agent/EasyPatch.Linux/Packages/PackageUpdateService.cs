@@ -129,10 +129,11 @@ public sealed class PackageUpdateService : IUpdateService, IBatchUpdateService, 
     public Task<IReadOnlyList<HistoryEntryReport>> GetHistoryAsync(DateTimeOffset? since, int maxEntries, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<HistoryEntryReport>>([]);
 
-    public async Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, CancellationToken cancellationToken) =>
+    /// <summary>Jobs use the batch methods below; single updates report no percentage.</summary>
+    public async Task<UpdateOperationResult> DownloadAsync(IUpdateHandle update, IProgress<int>? progress, CancellationToken cancellationToken) =>
         (await DownloadAsync([update], cancellationToken))[0];
 
-    public async Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, CancellationToken cancellationToken) =>
+    public async Task<UpdateOperationResult> InstallAsync(IUpdateHandle update, bool acceptEula, IProgress<int>? progress, CancellationToken cancellationToken) =>
         (await InstallAsync([update], null, cancellationToken))[0];
 
     // ------------------------------------------------------------------ download

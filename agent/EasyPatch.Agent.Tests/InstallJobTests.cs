@@ -69,6 +69,47 @@ public sealed class InstallJobTests
     }
 
     [Fact]
+    public async Task Download_and_install_percentages_are_reported_at_most_every_ten_seconds()
+    {
+        using var h = new AgentHarness();
+        await h.EnrollWithTokenAsync();
+        var first = h.AddSecurityUpdate("KB5001011");
+        var second = h.AddSecurityUpdate("KB5001012");
+        first.DownloadProgress = [0, 20, 40, 60, 100];
+        first.InstallProgress = [0, 50, 100];
+        h.WindowsUpdate.BeforeProgress = (operation, percent) =>
+        {
+            // 20% and 40% arrive within ten seconds of each other: only 20% is sent; 60% comes 12 s later.
+            h.Time.Advance(percent == 40 ? TimeSpan.FromSeconds(4) : TimeSpan.FromSeconds(12));
+        };
+        var job = AgentHarness.InstallJob();
+
+        await h.DeliverAsync(job);
+        await h.RunJobsAndFlushAsync();
+
+        var reports = h.Server.StatusesFor(job.JobId);
+        var downloading = reports.Where(r => r.Phase == "Downloading" && r.Message!.Contains("KB5001011", StringComparison.Ordinal))
+            .Select(r => r.Items.Single(i => i.UpdateGuid == first.Guid).DownloadPercent).ToList();
+        Assert.Equal(new int?[] { null, 20, 60, 100 }, downloading);
+        var installing = reports.Where(r => r.Phase == "Installing" && r.Message!.Contains("KB5001011", StringComparison.Ordinal))
+            .Select(r => (r.Items.Single(i => i.UpdateGuid == first.Guid).InstallPercent, r.Percent)).ToList();
+        Assert.Equal([(null, 27), (50, 38), (100, 50), (100, 50)], installing); // started, 50%, 100%, installed
+
+        // The job percentage moves through the first update's half of 5-95% and never goes backwards.
+        var percents = reports.Where(r => r.Percent is not null).Select(r => r.Percent!.Value).ToList();
+        Assert.True(percents.Zip(percents.Skip(1)).All(p => p.Second >= p.First), string.Join(",", percents));
+        Assert.Contains(reports, r => r.Phase == "Downloading" && r.Message == "Downloading KB5001011 (1 of 2): 60%.");
+
+        // An update source without percentages leaves them empty until the update is done.
+        var final = reports[^1];
+        Assert.Equal(JobStatus.Completed, final.Status);
+        var secondItem = final.Items.Single(i => i.UpdateGuid == second.Guid);
+        Assert.Equal(100, secondItem.DownloadPercent);
+        Assert.Equal(100, secondItem.InstallPercent);
+        Assert.DoesNotContain(reports, r => r.Items.Any(i => i.UpdateGuid == second.Guid && i.Status == JobItemStatus.Installing && i.InstallPercent is not null));
+    }
+
+    [Fact]
     public async Task Partial_failure_reports_the_real_hresult_per_update()
     {
         using var h = new AgentHarness();

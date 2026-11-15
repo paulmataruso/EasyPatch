@@ -391,7 +391,7 @@ public sealed record UpdateEndpointRequest(Guid? SiteId, string? Notes, EsuOverr
 
 public sealed record RevokeEndpointRequest(string? Reason);
 
-public sealed record JobOverlayDto(Guid JobId, JobStatus JobStatus, JobItemStatus ItemStatus, int? DownloadPercent);
+public sealed record JobOverlayDto(Guid JobId, JobStatus JobStatus, JobItemStatus ItemStatus, int? DownloadPercent, int? InstallPercent);
 
 public sealed record EndpointUpdateDto(
     Guid UpdateGuid,
@@ -559,6 +559,7 @@ public sealed record JobItemDto(
     string? ErrorMessage,
     bool RebootRequired,
     int? DownloadPercent,
+    int? InstallPercent,
     DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt);
 
