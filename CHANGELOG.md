@@ -5,6 +5,10 @@ the web console and both agents share one version number.
 
 ## [1.7.0] - 2026-11-15
 
+The first published release since 1.4.0. It also contains the changes listed under 1.5.0, 1.5.1,
+1.5.3, 1.6.0 and 1.6.1 in
+[CHANGELOG.md](https://github.com/paulmataruso/EasyPatch/blob/v1.7.0/CHANGELOG.md).
+
 ### Added
 
 - **Download and install progress per update**: while a job runs, the job page and the
