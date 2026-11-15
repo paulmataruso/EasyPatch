@@ -225,6 +225,7 @@ alphabetically first name wins. A tag policy cannot set the per-site install lim
 | Accept EULAs | true |
 | Auto-install | **false** |
 | Maintenance window | none (days of week, start time, duration, in the site's or organization's time zone) |
+| Download before the window | 0 hours (off; 0-24, Windows agents 1.8.0 and later) |
 | Scan considered stale after | 48 h |
 | Max concurrent installs per site | 10 |
 | Rollout delay: security updates | 0 days |
@@ -275,8 +276,9 @@ an endpoint will receive. How the agent applies and restores them is described i
 ## 4. Job system
 
 Job types are `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart`,
-`NotifyUser` (a preset message to signed-in users), `AgentUpdate`, `UninstallAgent` and
-`UninstallUpdate` (removes one installed Windows update).
+`NotifyUser` (a preset message to signed-in users), `AgentUpdate`, `UninstallAgent`,
+`UninstallUpdate` (removes one installed Windows update) and `DownloadUpdates` (downloads updates
+ahead of a maintenance window without installing them).
 
 ```
 Queued ──lease──► Delivered ──ack──► Acknowledged ──► Running ──► Completed
@@ -304,11 +306,12 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
   it waits), but further install jobs stay queued until the restart has been handled.
 * **Agent capabilities.** Agents report what they support in every check-in (`restart`,
   `notify-user`, `tray`, `windows-update-policy`, `self-update`, `app-updates`, `uninstall`,
-  `uninstall-updates`). Restart, message, agent update, agent uninstall and update removal jobs
-  can only be created for, and are only delivered to, agents that report the matching
-  capability. For older agents the API answers `409 agent_upgrade_required`.
+  `uninstall-updates`, `download-updates`). Restart, message, agent update, agent uninstall,
+  update removal and download jobs can only be created for, and are only delivered to, agents
+  that report the matching capability. For older agents the API answers
+  `409 agent_upgrade_required`.
 * **Priority.** When several jobs are queued for an endpoint, scans go first, then update
-  removals, installs, restarts and agent updates.
+  removals, installs, downloads ahead of a window, restarts and agent updates.
 * **Concurrency limits.** Install jobs are only delivered while the global limit and the
   per-site limit allow it. This check runs under a transaction-scoped advisory lock.
 * **Deduplication.** A partial unique index on (`endpoint_id`, `dedupe_key`) covering active
@@ -428,6 +431,30 @@ An `UninstallUpdate` job rolls back one installed Windows update on one endpoint
 * **State on the server.** A removal does not change the update's state in EasyPatch. The scans
   that follow do: until the endpoint restarts, Windows usually still lists the update as
   installed. DISM writes its log to `C:\ProgramData\EasyPatch\logs\update-removal.log`.
+
+### Downloading before the maintenance window
+
+With automatic installation, a policy can download the updates before the maintenance window
+opens (**Download before the window**, 1-24 hours; off by default), so the installation inside the
+window does not spend its time downloading.
+
+* **When.** The worker task `pre-downloads` (every 10 minutes) looks at Windows endpoints whose
+  agent reports `download-updates` (1.8.0 and later) and that miss required updates. When the next
+  window opens within the configured hours (and at least 15 minutes from now), it queues one
+  `DownloadUpdates` job per endpoint and window. The job lists the same updates the window's
+  installation would install: all eligible updates, or the due updates when a rollout delay is
+  set. Updates on hold are left out. Nothing is queued while a window is open.
+* **Deadline.** The job expires when the window opens, and its `notAfter` is the window's start:
+  the agent does not start another download after that. Updates it did not get to are skipped with
+  `WindowStarted`, and the installation downloads them.
+* **On the agent.** A fresh scan and the same filter as the installation, then Windows Update's
+  download for each update that is not downloaded yet. Nothing is installed, users get no
+  notification, Windows' restart state is not checked and no scan follows. Windows Update keeps
+  the downloads, and the installation skips downloading them again.
+* **On the server.** Items end as `Downloaded` (or `Failed` when a download failed). A download
+  never changes an update's state, compliance or the rollout guard's counts. Download jobs do not
+  take install slots, but a site runs no more downloads at once than its per-site install limit.
+  They are not retried (`409 not_retryable`): the next window gets a new one.
 
 ### Update holds and the rollout guard
 

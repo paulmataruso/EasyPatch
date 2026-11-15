@@ -135,6 +135,7 @@ public static class DependencyInjection
         services.AddScoped<MonthlyReportTask>();
         services.AddScoped<WingetMirrorTask>();
         services.AddScoped<RolloutGuardTask>();
+        services.AddScoped<PreDownloadTask>();
         services.AddSingleton<MaintenanceHeartbeat>();
         services.AddHostedService<MaintenanceLoop<JobMaintenanceTask>>();
         services.AddHostedService<MaintenanceLoop<PresenceMonitorTask>>();
@@ -150,6 +151,7 @@ public static class DependencyInjection
         services.AddHostedService<MaintenanceLoop<MonthlyReportTask>>();
         services.AddHostedService<MaintenanceLoop<WingetMirrorTask>>();
         services.AddHostedService<MaintenanceLoop<RolloutGuardTask>>();
+        services.AddHostedService<MaintenanceLoop<PreDownloadTask>>();
         return services;
     }
 }

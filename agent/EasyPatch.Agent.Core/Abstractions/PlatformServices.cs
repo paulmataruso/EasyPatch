@@ -334,6 +334,10 @@ public sealed record AgentPlatform(
 
     public IUserInteraction Users => UserInteraction ?? (SessionCounter is { } counter ? new SessionsOnlyInteraction(counter) : NoUserInteraction.Instance);
 
+    /// <summary>The update service downloads updates one by one without installing them (Windows Update keeps the downloads for
+    /// the installation); apt and dnf work in transactions and do not.</summary>
+    public bool SupportsDownloadOnly => Updates is not IBatchUpdateService;
+
     public IReadOnlyList<string> Capabilities
     {
         get
@@ -368,6 +372,11 @@ public sealed record AgentPlatform(
             if (UpdateRemover is not null)
             {
                 list.Add(AgentCapabilities.UninstallUpdates);
+            }
+
+            if (SupportsDownloadOnly)
+            {
+                list.Add(AgentCapabilities.DownloadUpdates);
             }
 
             return list;

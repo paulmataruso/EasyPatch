@@ -201,7 +201,7 @@ public static class EndpointEndpoints
                 endpoint.Site?.TimeZone ?? endpoint.Organization!.TimeZone, p.ScanStaleAfterHours, p.MaxConcurrentInstallsPerSite, p.Sources,
                 p.TrayIconEnabled, p.InstallNotificationsEnabled, OrganizationEndpoints.ToDto(p.RestartSchedule), p.WindowsUpdate, registry,
                 p.AgentAutoUpdateEnabled, p.InstallDelayDays, p.SecurityInstallDelayDays, p.SourceTags, p.KnownExploitedSkipsDelay,
-                p.ApplicationUpdates));
+                p.ApplicationUpdates, p.PreDownloadHours));
         });
 
         // Per-endpoint policy overrides (the most specific layer).

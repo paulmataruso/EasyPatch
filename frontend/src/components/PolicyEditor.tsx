@@ -49,6 +49,7 @@ const EMPTY: PolicyRequest = {
   securityInstallDelayDays: null,
   knownExploitedSkipsDelay: null,
   applicationUpdates: null,
+  preDownloadHours: null,
 };
 
 export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
@@ -77,6 +78,7 @@ export function toRequest(policy: PolicyDto | null | undefined): PolicyRequest {
     securityInstallDelayDays: policy.securityInstallDelayDays ?? null,
     knownExploitedSkipsDelay: policy.knownExploitedSkipsDelay ?? null,
     applicationUpdates: policy.applicationUpdates ?? null,
+    preDownloadHours: policy.preDownloadHours ?? null,
   };
 }
 
@@ -113,7 +115,8 @@ interface NumberSpec {
     | 'scanStaleAfterHours'
     | 'maxConcurrentInstallsPerSite'
     | 'installDelayDays'
-    | 'securityInstallDelayDays';
+    | 'securityInstallDelayDays'
+    | 'preDownloadHours';
   label: string;
   unit: string;
   min: number;
@@ -142,6 +145,15 @@ const DELAY_FIELDS: NumberSpec[] = [
   },
   { key: 'installDelayDays', label: 'Other updates', unit: 'days', min: 0, max: 365, hint: 'Non-security updates in the allowed categories.' },
 ];
+
+const PRE_DOWNLOAD_FIELD: NumberSpec = {
+  key: 'preDownloadHours',
+  label: 'Download before the window',
+  unit: 'hours before it opens (0 = off)',
+  min: 0,
+  max: 24,
+  hint: 'Windows agents 1.8.0 and later download the updates up to this many hours before the window opens, without installing them, so the installation in the window starts with the downloads done. Downloads in a site are limited like installations.',
+};
 
 /** A delay this long leaves endpoints without fixes for a long time; the editor warns about it. */
 export const LONG_DELAY_DAYS = 30;
@@ -392,6 +404,16 @@ export function PolicyEditor({
           >
             <MaintenanceWindowFields form={form} setForm={setForm} disabled={readOnly || (!isGlobal && !windowExplicit)} isGlobal={isGlobal} />
           </Row>
+          <div className="md:max-w-md">
+            <NumberRow
+              spec={PRE_DOWNLOAD_FIELD}
+              value={form.preDownloadHours}
+              inherited={inherited?.preDownloadHours ?? 0}
+              isGlobal={isGlobal}
+              readOnly={readOnly}
+              onChange={(v) => update('preDownloadHours', v)}
+            />
+          </div>
         </div>
       </Card>
 
@@ -591,6 +613,8 @@ export function validatePolicy(form: PolicyRequest, isGlobal: boolean): string |
     const v = form[f.key];
     if (v !== null && (!Number.isInteger(v) || v < f.min || v > f.max)) return `Rollout delay for ${f.label.toLowerCase()} must be between ${f.min} and ${f.max} days.`;
   }
+  const pre = form.preDownloadHours;
+  if (pre !== null && (!Number.isInteger(pre) || pre < 0 || pre > 24)) return 'Download before the window must be between 0 and 24 hours.';
   if (isGlobal && (form.includeOptional === null || form.acceptEulas === null || form.autoInstallEnabled === null)) {
     return 'Every setting is required in the global policy.';
   }

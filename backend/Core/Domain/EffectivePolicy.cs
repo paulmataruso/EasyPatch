@@ -35,6 +35,9 @@ public sealed record EffectivePolicy
 
     public bool HasInstallDelay => InstallDelayDays > 0 || SecurityInstallDelayDays > 0;
     public MaintenanceWindowSettings? MaintenanceWindow { get; init; }
+
+    /// <summary>Hours before the maintenance window opens to download the updates (Windows agents); 0 = off.</summary>
+    public int PreDownloadHours { get; init; }
     public int ScanStaleAfterHours { get; init; }
     public int MaxConcurrentInstallsPerSite { get; init; }
     public bool TrayIconEnabled { get; init; } = true;
@@ -100,6 +103,7 @@ public static class PolicyDefaults
         MaintenanceDays = [],
         MaintenanceStart = new TimeOnly(2, 0),
         MaintenanceDurationMinutes = 180,
+        PreDownloadHours = 0,
         ScanStaleAfterHours = 48,
         MaxConcurrentInstallsPerSite = 10,
         TrayIconEnabled = true,
@@ -273,6 +277,7 @@ public static class PolicyResolver
             SecurityInstallDelayDays = Pick(nameof(EffectivePolicy.SecurityInstallDelayDays), p => p.SecurityInstallDelayDays, 0),
             KnownExploitedSkipsDelay = Pick(nameof(EffectivePolicy.KnownExploitedSkipsDelay), p => p.KnownExploitedSkipsDelay, true),
             MaintenanceWindow = window is { IsConfigured: true } ? window : null,
+            PreDownloadHours = Pick(nameof(EffectivePolicy.PreDownloadHours), p => p.PreDownloadHours, 0),
             ScanStaleAfterHours = Pick(nameof(EffectivePolicy.ScanStaleAfterHours), p => p.ScanStaleAfterHours, 48),
             MaxConcurrentInstallsPerSite = Pick(nameof(EffectivePolicy.MaxConcurrentInstallsPerSite), p => p.MaxConcurrentInstallsPerSite, 10),
             TrayIconEnabled = Pick(nameof(EffectivePolicy.TrayIconEnabled), p => p.TrayIconEnabled, true),
@@ -309,6 +314,7 @@ public static class PolicyResolver
         Range(nameof(policy.InventoryIntervalMinutes), policy.InventoryIntervalMinutes, 60, 10080);
         Range(nameof(policy.JitterPercent), policy.JitterPercent, 0, 50);
         Range(nameof(policy.MaintenanceDurationMinutes), policy.MaintenanceDurationMinutes, 15, 1440);
+        Range(nameof(policy.PreDownloadHours), policy.PreDownloadHours, 0, 24);
         Range(nameof(policy.ScanStaleAfterHours), policy.ScanStaleAfterHours, 1, 720);
         Range(nameof(policy.MaxConcurrentInstallsPerSite), policy.MaxConcurrentInstallsPerSite, 1, 1000);
         Range(nameof(policy.InstallDelayDays), policy.InstallDelayDays, 0, 365);

@@ -68,6 +68,11 @@ public sealed class InstallUpdatesHandler
     {
         ArgumentNullException.ThrowIfNull(record);
         var job = record.Job;
+        if (job.Type == JobType.DownloadUpdates)
+        {
+            return await DownloadOnlyAsync(record, cancellationToken);
+        }
+
         var jobId = job.JobId;
         var payload = job.Install ?? throw new InvalidOperationException("The install job has no payload.");
         var previous = record.Items.ToDictionary(i => i.UpdateGuid);
@@ -211,6 +216,115 @@ public sealed class InstallUpdatesHandler
             var verification = await _scans.RunScanAsync(ScanTrigger.PostInstall, jobId, gateHeld: true, cancellationToken);
 
             return Finish(jobId, items, plan.ToInstall.Count, cancelled, verification?.ScanId);
+        }
+        finally
+        {
+            Activity = null;
+        }
+    }
+
+    /// <summary>
+    /// Download job: downloads what the installation in the next maintenance window would install, and installs nothing. Windows
+    /// Update keeps the downloads, and the installation then skips downloading them. No restart check, no message to users and
+    /// no post-installation scan: the only change on the computer is the Windows Update download cache.
+    /// </summary>
+    private async Task<JobOutcome> DownloadOnlyAsync(JobRecord record, CancellationToken cancellationToken)
+    {
+        var jobId = record.Job.JobId;
+        var payload = record.Job.Install ?? throw new InvalidOperationException("The download job has no payload.");
+        var previous = record.Items.ToDictionary(i => i.UpdateGuid);
+        var wu = _platform.Updates;
+        try
+        {
+            if (payload.NotAfter is { } windowStart && _time.GetUtcNow() > windowStart)
+            {
+                const string late = "The maintenance window started before the download could begin. The installation downloads the updates.";
+                _reporter.Report(jobId, JobStatus.Cancelled, "NotStarted", 100, late, errorCode: "maintenance_window_started", errorMessage: late);
+                return JobOutcome.Finished;
+            }
+
+            if (wu is IBatchUpdateService)
+            {
+                const string unsupported = "Downloading updates ahead of the maintenance window is only available with Windows Update.";
+                _reporter.Report(jobId, JobStatus.Failed, "NotStarted", 100, unsupported, errorCode: "not_supported", errorMessage: unsupported);
+                return JobOutcome.Finished;
+            }
+
+            Activity = "Scanning for updates";
+            _reporter.Report(jobId, JobStatus.Running, "Scanning", 0, $"Checking {wu.Name} for applicable updates.", previous.Values.ToList());
+            using var scan = await wu.ScanAsync(includeInstalled: payload.Mode == InstallMode.Selected, cancellationToken);
+            var plan = BuildPlan(scan, payload, previous);
+            var items = plan.Items;
+            var count = plan.ToInstall.Count;
+            var cancelled = false;
+            _logger.LogInformation("Job {JobId}: {Count} update(s) to download before the maintenance window.", jobId, count);
+
+            for (var index = 0; index < count; index++)
+            {
+                var candidate = plan.ToInstall[index];
+                var guid = candidate.Update.UpdateGuid;
+                var label = Label(candidate.Update);
+                if (IsCancelRequested(jobId))
+                {
+                    cancelled = true;
+                    MarkRemaining(items, plan.ToInstall, index, JobItemStatus.Cancelled, SkipReasons.Cancelled);
+                    break;
+                }
+
+                if (payload.NotAfter is { } start && _time.GetUtcNow() > start)
+                {
+                    MarkRemaining(items, plan.ToInstall, index, JobItemStatus.Skipped, SkipReasons.WindowStarted);
+                    _logger.LogInformation("Job {JobId}: the maintenance window started; {Remaining} update(s) not downloaded in advance.", jobId, count - index);
+                    break;
+                }
+
+                var startedAt = _time.GetUtcNow();
+                if (candidate.Update.IsDownloaded)
+                {
+                    Set(items, guid, i => i with { Status = JobItemStatus.Downloaded, DownloadPercent = 100, StartedAt = i.StartedAt ?? startedAt, CompletedAt = startedAt });
+                    continue;
+                }
+
+                var position = $"{index + 1} of {count}";
+                int JobPercent(int itemPercent) => 5 + (int)(90.0 * (index + itemPercent / 100.0) / count);
+                Activity = $"Downloading {label}";
+                Set(items, guid, i => i with { Status = JobItemStatus.Downloading, StartedAt = startedAt, ErrorCode = null, ErrorMessage = null, DownloadPercent = null });
+                _reporter.Report(jobId, JobStatus.Running, "Downloading", JobPercent(0), $"Downloading {label} ({position}) before the maintenance window.", items);
+                var progress = ItemProgress(jobId, items, guid, installing: false, label, position, JobPercent, cancellationToken);
+                var download = await RunOperationAsync(() => wu.DownloadAsync(candidate.Handle, progress, cancellationToken));
+                if (download.IsSuccess)
+                {
+                    Set(items, guid, i => i with { Status = JobItemStatus.Downloaded, DownloadPercent = 100, CompletedAt = _time.GetUtcNow() });
+                }
+                else
+                {
+                    Fail(items, guid, download, "Download failed");
+                }
+
+                _reporter.Report(jobId, JobStatus.Running, "Downloading", JobPercent(100),
+                    download.IsSuccess ? $"Downloaded {label}." : $"Download of {label} failed.", items);
+            }
+
+            var downloaded = items.Count(i => i.Status == JobItemStatus.Downloaded);
+            var failed = items.Count(i => i.Status == JobItemStatus.Failed);
+            var status = cancelled ? JobStatus.Cancelled : count > 0 && downloaded == 0 && failed > 0 ? JobStatus.Failed : JobStatus.Completed;
+            var message = count == 0
+                ? "No updates needed to be downloaded."
+                : $"Downloaded {downloaded} of {count} update(s) for the maintenance window" + (failed > 0 ? $"; {failed} failed" : string.Empty) +
+                  (cancelled ? "; cancelled" : string.Empty) + ".";
+            var firstFailure = items.FirstOrDefault(i => i.Status == JobItemStatus.Failed);
+            _reporter.Report(jobId, status, "Completed", 100, message, items,
+                errorCode: status == JobStatus.Failed ? firstFailure?.ErrorCode : null,
+                errorMessage: status == JobStatus.Failed ? firstFailure?.ErrorMessage : null,
+                result: new JobResultSummary
+                {
+                    Planned = count,
+                    Succeeded = downloaded,
+                    Failed = failed,
+                    Skipped = items.Count(i => i.Status is JobItemStatus.Skipped or JobItemStatus.Cancelled),
+                });
+            _logger.LogInformation("Job {JobId} finished: {Status}. {Message}", jobId, status, message);
+            return JobOutcome.Finished;
         }
         finally
         {

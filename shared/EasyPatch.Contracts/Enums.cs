@@ -41,6 +41,11 @@ public enum JobType
     /// update supports it, otherwise DISM's <c>/Remove-Package</c> for the update's servicing package. Never runs anything
     /// else and never restarts the computer.</summary>
     UninstallUpdate,
+
+    /// <summary>Download updates ahead of a maintenance window without installing them (Windows agent 1.8.0 and later), so the
+    /// installation inside the window starts with the downloads done. Uses the install payload; <c>NotAfter</c> is the start of
+    /// the window.</summary>
+    DownloadUpdates,
 }
 
 /// <summary>How a <see cref="JobType.Restart"/> job treats signed-in users. With nobody signed in, every mode restarts at once.</summary>

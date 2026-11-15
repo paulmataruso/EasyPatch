@@ -17,7 +17,8 @@ the same server, enrollment, policies, jobs and console as the Windows agent
 * cannot run commands. It executes four job types: update scan, inventory refresh, install
   updates and restart, plus agent updates (see [Updating the agent](#updating-the-agent)) and
   removing its own package (see [Uninstalling](#uninstalling)).
-  There is no tray icon, so preset messages to signed-in users are Windows only.
+  There is no tray icon, so preset messages to signed-in users are Windows only. Removing an
+  installed update and downloading updates before the maintenance window are Windows only too.
 
 ## Supported distributions
 

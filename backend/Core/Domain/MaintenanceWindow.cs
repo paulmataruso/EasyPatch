@@ -47,6 +47,41 @@ public static class MaintenanceWindow
         return null;
     }
 
+    /// <summary>The next window occurrence that starts after <paramref name="now"/> (within the next 8 days), if any.</summary>
+    public static WindowOccurrence? FindNextWindow(MaintenanceWindowSettings settings, string? timeZoneId, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (!settings.IsConfigured)
+        {
+            return null;
+        }
+
+        var tz = ResolveTimeZone(timeZoneId);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, tz).DateTime);
+        for (var offset = 0; offset <= 8; offset++)
+        {
+            var day = today.AddDays(offset);
+            if (!settings.Days.Contains(day.DayOfWeek))
+            {
+                continue;
+            }
+
+            var localStart = day.ToDateTime(settings.Start, DateTimeKind.Unspecified);
+            if (tz.IsInvalidTime(localStart))
+            {
+                localStart = localStart.AddHours(1); // skipped by DST: start at the next valid hour
+            }
+
+            var start = new DateTimeOffset(localStart, tz.GetUtcOffset(localStart));
+            if (start > now)
+            {
+                return new WindowOccurrence(start, start + TimeSpan.FromMinutes(settings.DurationMinutes));
+            }
+        }
+
+        return null;
+    }
+
     public static TimeZoneInfo ResolveTimeZone(string? timeZoneId)
     {
         if (string.IsNullOrWhiteSpace(timeZoneId))

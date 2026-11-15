@@ -114,6 +114,9 @@ deadlineMinutes, expiryMinutes}`) and `windowsUpdate`. `windowsUpdate` has one e
 (inherit), `{managed: false}` (*Not configured*) or `{managed: true, value: {…}}`.
 `securityInstallDelayDays` (0 to 90) and `installDelayDays` (0 to 365) set the rollout delay;
 `knownExploitedSkipsDelay` (default `true`) lets updates that fix a CISA known-exploited vulnerability skip it.
+`preDownloadHours` (0 to 24, default `0` = off) downloads updates up to that many hours before the maintenance window
+opens, with automatic installation (see [architecture.md](architecture.md#downloading-before-the-maintenance-window));
+the effective policy returns it too.
 `applicationUpdates` (`{enabled, approvedApps[]}`, at most 100 winget package IDs such as
 `Mozilla.Firefox`) turns on [application updates](application-updates.md); it replaces the
 inherited value as a whole, and IDs are trimmed and de-duplicated. `allowedCategories` cannot
@@ -223,11 +226,11 @@ unless they are selected, and then adds a warning.
 
 | Method | Route | Notes |
 |---|---|---|
-| GET | `/jobs` | Filters: `endpointId, organizationId, status, type, trigger, active, from, to, page, pageSize`. Types: `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart`, `NotifyUser`, `AgentUpdate`, `UninstallAgent`, `UninstallUpdate` |
+| GET | `/jobs` | Filters: `endpointId, organizationId, status, type, trigger, active, from, to, page, pageSize`. Types: `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart`, `NotifyUser`, `AgentUpdate`, `UninstallAgent`, `UninstallUpdate`, `DownloadUpdates` |
 | GET | `/jobs/{id}` | Includes per-update results and the job's events |
 | POST | `/jobs/{id}/cancel` | Operator. Immediate when the job is queued, delivered or waiting for a reboot; otherwise the agent is asked to stop after the current update. A restart that is waiting for users is cancelled at the agent's next check-in, which also aborts a Windows restart that is still in its warning period. |
 | DELETE | `/jobs/{id}` | Same as `POST /jobs/{id}/cancel` |
-| POST | `/jobs/{id}/retry` | Operator. Creates a new job with the same parameters (`202`); only for finished jobs. |
+| POST | `/jobs/{id}/retry` | Operator. Creates a new job with the same parameters (`202`); only for finished jobs. `DownloadUpdates` jobs are not retried (`409 not_retryable`). |
 
 ### Agent management (Operator)
 

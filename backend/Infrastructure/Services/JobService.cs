@@ -71,18 +71,22 @@ public sealed class JobService(
                     "agent_upgrade_required");
             }
 
-            if (endpoint.Platform == AgentPlatforms.Linux && request.Type is JobType.NotifyUser or JobType.UninstallUpdate)
+            if (endpoint.Platform == AgentPlatforms.Linux && request.Type is JobType.NotifyUser or JobType.UninstallUpdate or JobType.DownloadUpdates)
             {
-                throw AppException.Conflict(request.Type == JobType.NotifyUser
-                        ? $"{endpoint.Hostname} is a Linux endpoint. Messages to users are only available on Windows."
-                        : $"{endpoint.Hostname} is a Linux endpoint. Removing updates is only available on Windows.",
+                throw AppException.Conflict(request.Type switch
+                    {
+                        JobType.NotifyUser => $"{endpoint.Hostname} is a Linux endpoint. Messages to users are only available on Windows.",
+                        JobType.UninstallUpdate => $"{endpoint.Hostname} is a Linux endpoint. Removing updates is only available on Windows.",
+                        _ => $"{endpoint.Hostname} is a Linux endpoint. Downloading updates ahead of the maintenance window is only available on Windows.",
+                    },
                     "not_supported_on_linux");
             }
 
-            if (request.Type == JobType.UninstallUpdate)
+            if (request.Type is JobType.UninstallUpdate or JobType.DownloadUpdates)
             {
+                var what = request.Type == JobType.UninstallUpdate ? "remove updates" : "download updates ahead of the maintenance window";
                 throw AppException.Conflict(
-                    $"The EasyPatch agent on {endpoint.Hostname} (version {endpoint.AgentVersion ?? "unknown"}) cannot remove updates. Update it to 1.8.0 or later.",
+                    $"The EasyPatch agent on {endpoint.Hostname} (version {endpoint.AgentVersion ?? "unknown"}) cannot {what}. Update it to 1.8.0 or later.",
                     "agent_upgrade_required");
             }
 
@@ -109,7 +113,7 @@ public sealed class JobService(
             case JobType.InventoryRefresh:
                 dedupeKey = "inventory";
                 break;
-            case JobType.InstallUpdates:
+            case JobType.InstallUpdates or JobType.DownloadUpdates:
             {
                 var selected = (request.UpdateGuids ?? []).Distinct().ToList();
                 if (request.InstallMode == InstallMode.Selected && selected.Count == 0)
@@ -137,9 +141,10 @@ public sealed class JobService(
                     NotAfter = request.NotAfter,
                 };
                 payloadJson = JsonSerializer.Serialize(payload, ContractJson.Options);
+                var prefix = request.Type == JobType.DownloadUpdates ? "download" : "install";
                 dedupeKey = request.InstallMode == InstallMode.AllEligible
-                    ? "install:all"
-                    : "install:sel:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(',', selected.Order()))))[..32];
+                    ? prefix + ":all"
+                    : prefix + ":sel:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(',', selected.Order()))))[..32];
                 plannedItems = preview.Items.Select(i => new JobUpdate
                 {
                     Id = Guid.CreateVersion7(now),
@@ -302,18 +307,21 @@ public sealed class JobService(
             RequestedBy = request.Trigger switch
             {
                 JobTrigger.Scheduled when request.Type == JobType.Restart => "Restart schedule",
+                JobTrigger.Scheduled when request.Type == JobType.DownloadUpdates => "Download before maintenance window",
                 JobTrigger.System when request.Type == JobType.AgentUpdate => "Automatic agent updates",
                 JobTrigger.Scheduled => "Maintenance window",
                 JobTrigger.System => "System",
                 _ => actor.Username ?? "unknown",
             },
             // An uninstall goes before anything still queued (it cancels the rest). Then scans and inventory, then update removals,
-            // then installs, then restarts (patch, then restart), then agent updates. Messages are leased separately.
+            // then installs, then downloads ahead of a window, then restarts (patch, then restart), then agent updates. Messages
+            // are leased separately.
             Priority = request.Type switch
             {
                 JobType.UninstallAgent => 20,
                 JobType.UninstallUpdate => 5,
                 JobType.InstallUpdates => 0,
+                JobType.DownloadUpdates => -5,
                 JobType.Restart => -10,
                 JobType.AgentUpdate => -20,
                 _ => 10,
@@ -413,6 +421,9 @@ public sealed class JobService(
                 new CreateJobRequest(original.EndpointId, original.Type, install.Mode, install.SelectedUpdateGuids),
             JobType.UninstallUpdate when Payload<UninstallUpdatePayload>(original) is { } removal =>
                 new CreateJobRequest(original.EndpointId, original.Type, UpdateGuids: [removal.UpdateGuid]),
+            JobType.DownloadUpdates => throw AppException.Conflict(
+                "Downloads ahead of a maintenance window are not retried: the installation in the window downloads what is missing, " +
+                "and the next window gets a new download.", "not_retryable"),
             _ => new CreateJobRequest(original.EndpointId, original.Type),
         };
         var job = await CreateAsync(request, ct);
@@ -506,7 +517,8 @@ public sealed class JobService(
             var next = await LeaseNextAsync(endpoint, policy, settings, allowInstall: !waitingForReboot,
                 allowRestart: endpoint.AgentCapabilities.Contains(AgentCapabilities.Restart),
                 allowAgentUpdate: endpoint.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate),
-                allowUninstall: endpoint.AgentCapabilities.Contains(AgentCapabilities.Uninstall), ct);
+                allowUninstall: endpoint.AgentCapabilities.Contains(AgentCapabilities.Uninstall),
+                allowDownload: endpoint.AgentCapabilities.Contains(AgentCapabilities.DownloadUpdates), ct);
             if (next is not null)
             {
                 deliver.Add(next);
@@ -556,7 +568,7 @@ public sealed class JobService(
     }
 
     private async Task<Job?> LeaseNextAsync(Endpoint endpoint, EffectivePolicy policy, ServerSettings settings, bool allowInstall, bool allowRestart,
-        bool allowAgentUpdate, bool allowUninstall, CancellationToken ct)
+        bool allowAgentUpdate, bool allowUninstall, bool allowDownload, CancellationToken ct)
     {
         for (var attempt = 0; attempt < 5; attempt++)
         {
@@ -567,7 +579,7 @@ public sealed class JobService(
                     WHERE endpoint_id = {endpoint.Id} AND status = 'Queued' AND (not_before IS NULL OR not_before <= {now})
                       AND ({allowInstall} OR type <> 'InstallUpdates')
                       AND ({allowRestart} OR type <> 'Restart') AND ({allowAgentUpdate} OR type <> 'AgentUpdate')
-                      AND ({allowUninstall} OR type <> 'UninstallAgent') AND type <> 'NotifyUser'
+                      AND ({allowUninstall} OR type <> 'UninstallAgent') AND ({allowDownload} OR type <> 'DownloadUpdates') AND type <> 'NotifyUser'
                     ORDER BY priority DESC, created_at
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -585,7 +597,7 @@ public sealed class JobService(
                 continue;
             }
 
-            if (candidate.Type == JobType.InstallUpdates && !await ApplyHoldsAsync(candidate, endpoint, now, ct))
+            if (candidate.Type is JobType.InstallUpdates or JobType.DownloadUpdates && !await ApplyHoldsAsync(candidate, endpoint, now, ct))
             {
                 await db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
@@ -608,6 +620,20 @@ public sealed class JobService(
                 if (await siteInFlight.CountAsync(ct) >= policy.MaxConcurrentInstallsPerSite)
                 {
                     logger.LogDebug("Site install concurrency limit reached; job {JobId} stays queued", candidate.Id);
+                    return null;
+                }
+            }
+            else if (candidate.Type == JobType.DownloadUpdates)
+            {
+                // Downloads do not take install slots, but a site downloads no more updates at once than it would install (bandwidth).
+                await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock({InstallSlotsLockKey})", ct);
+                var downloading = db.Jobs.Where(j => j.Type == JobType.DownloadUpdates && JobTransitions.ActiveOnAgent.Contains(j.Status));
+                downloading = endpoint.SiteId is { } siteId
+                    ? downloading.Where(j => j.SiteId == siteId)
+                    : downloading.Where(j => j.SiteId == null && j.OrganizationId == endpoint.OrganizationId);
+                if (await downloading.CountAsync(ct) >= policy.MaxConcurrentInstallsPerSite)
+                {
+                    logger.LogDebug("Site download concurrency limit reached; job {JobId} stays queued", candidate.Id);
                     return null;
                 }
             }
@@ -710,7 +736,7 @@ public sealed class JobService(
             Trigger = job.Trigger,
             CreatedAt = job.CreatedAt,
             ExpiresAt = job.ExpiresAt,
-            Install = job.Type == JobType.InstallUpdates ? Payload<InstallUpdatesPayload>(job) : null,
+            Install = job.Type is JobType.InstallUpdates or JobType.DownloadUpdates ? Payload<InstallUpdatesPayload>(job) : null,
             Restart = job.Type == JobType.Restart ? Payload<RestartPayload>(job) : null,
             Notify = job.Type == JobType.NotifyUser ? Payload<NotifyUserPayload>(job) : null,
             AgentUpdate = job.Type == JobType.AgentUpdate ? Payload<AgentUpdatePayload>(job) : null,
@@ -812,7 +838,9 @@ public sealed class JobService(
                 job.TimedOut = false; // genuine late result replaces the timeout outcome
             }
 
-            foreach (var item in job.Updates.Where(i => i.Status is JobItemStatus.Pending or JobItemStatus.Downloading or JobItemStatus.Downloaded or JobItemStatus.Installing))
+            // A download job ends with its downloaded items as they are.
+            foreach (var item in job.Updates.Where(i => i.Status is JobItemStatus.Pending or JobItemStatus.Downloading or JobItemStatus.Installing ||
+                                                        (i.Status == JobItemStatus.Downloaded && job.Type != JobType.DownloadUpdates)))
             {
                 item.Status = report.Status == JobStatus.Cancelled ? JobItemStatus.Cancelled : JobItemStatus.Skipped;
                 item.SkipReason ??= report.Status == JobStatus.Cancelled ? SkipReasons.Cancelled : SkipReasons.NotApplicable;
@@ -822,6 +850,8 @@ public sealed class JobService(
             var summary = report.Result;
             var text = report.Status switch
             {
+                JobStatus.Completed when summary is not null && job.Type == JobType.DownloadUpdates =>
+                    $"{Describe(job.Type)} completed: {summary.Succeeded} downloaded" + (summary.Failed > 0 ? $", {summary.Failed} failed." : "."),
                 JobStatus.Completed when summary is { Failed: > 0 } => $"{Describe(job.Type)} completed with errors: {summary.Succeeded} succeeded, {summary.Failed} failed.",
                 JobStatus.Completed when summary is not null && job.Type == JobType.InstallUpdates => $"{Describe(job.Type)} completed: {summary.Succeeded} installed, {summary.Skipped} skipped.",
                 JobStatus.Completed when job.Type == JobType.UninstallUpdate && !string.IsNullOrWhiteSpace(report.Message) =>
@@ -927,7 +957,7 @@ public sealed class JobService(
         }
 
         // A removal changes nothing here: the scan the agent runs afterwards reports what Windows now has installed.
-        if (finalGuids.Count > 0 && job.Type != JobType.UninstallUpdate)
+        if (finalGuids.Count > 0 && job.Type is not (JobType.UninstallUpdate or JobType.DownloadUpdates))
         {
             var guids = finalGuids.Select(f => f.Report.UpdateGuid).ToList();
             var rows = await db.EndpointUpdates.Where(u => u.EndpointId == endpoint.Id && guids.Contains(u.UpdateGuid))
@@ -999,6 +1029,7 @@ public sealed class JobService(
         JobType.AgentUpdate => "Agent update",
         JobType.UninstallAgent => "Agent uninstall",
         JobType.UninstallUpdate => "Update removal",
+        JobType.DownloadUpdates => "Download before the maintenance window",
         _ => type.ToString(),
     };
 }

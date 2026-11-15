@@ -344,7 +344,7 @@ public static class OrganizationEndpoints
         p.MaintenanceStart?.ToString("HH:mm", CultureInfo.InvariantCulture), p.MaintenanceDurationMinutes, p.ScanStaleAfterHours,
         p.MaxConcurrentInstallsPerSite, p.UpdatedAt, p.EndpointId, p.TrayIconEnabled, p.InstallNotificationsEnabled,
         ToDto(p.RestartSchedule), p.WindowsUpdate, p.AgentAutoUpdateEnabled, p.InstallDelayDays, p.SecurityInstallDelayDays, p.TagId,
-        p.KnownExploitedSkipsDelay, p.ApplicationUpdates);
+        p.KnownExploitedSkipsDelay, p.ApplicationUpdates, p.PreDownloadHours);
 
     internal static RestartScheduleDto? ToDto(RestartScheduleSettings? r) => r is null
         ? null
@@ -387,6 +387,7 @@ public static class OrganizationEndpoints
             MaintenanceDays = r.MaintenanceDays?.Distinct().Order().ToList(),
             MaintenanceStart = start,
             MaintenanceDurationMinutes = r.MaintenanceDurationMinutes,
+            PreDownloadHours = r.PreDownloadHours,
             ScanStaleAfterHours = r.ScanStaleAfterHours,
             MaxConcurrentInstallsPerSite = r.MaxConcurrentInstallsPerSite,
             TrayIconEnabled = r.TrayIconEnabled,

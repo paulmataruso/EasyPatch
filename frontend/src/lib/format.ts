@@ -91,6 +91,7 @@ export function humanize(value: string | null | undefined): string {
     AgentUpdate: 'Agent update',
     UninstallAgent: 'Agent uninstall',
     UninstallUpdate: 'Update removal',
+    DownloadUpdates: 'Download before the window',
     PromptWithDeadline: 'Ask users, with a deadline',
     PromptNoDeadline: 'Ask users, no deadline',
     OnlyIfPending: 'Only if a restart is pending',
@@ -176,6 +177,8 @@ export function describeSkipReason(reason: string | null | undefined): string {
       return 'Not installed';
     case 'Held':
       return 'On hold (not installed automatically)';
+    case 'WindowStarted':
+      return 'Not downloaded before the window started (the installation downloads it)';
     case null:
     case undefined:
     case '':

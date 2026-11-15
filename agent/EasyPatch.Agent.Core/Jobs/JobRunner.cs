@@ -312,6 +312,7 @@ public sealed class JobRunner
                 JobType.AgentUpdate => "Updating agent",
                 JobType.UninstallAgent => "Uninstalling agent",
                 JobType.UninstallUpdate => "Removing an update",
+                JobType.DownloadUpdates => "Downloading updates for the maintenance window",
                 _ => next.Job.Type.ToString(),
             };
         }
@@ -322,7 +323,7 @@ public sealed class JobRunner
             var record = _state.Read(s => s.FindJob(jobId))!;
             var outcome = next.Job.Type switch
             {
-                JobType.InstallUpdates => await _install.ExecuteAsync(record, cancellationToken),
+                JobType.InstallUpdates or JobType.DownloadUpdates => await _install.ExecuteAsync(record, cancellationToken),
                 JobType.UpdateScan => await RunScanJobAsync(jobId, cancellationToken),
                 JobType.InventoryRefresh => await RunInventoryJobAsync(jobId, cancellationToken),
                 JobType.AgentUpdate => await _agentUpdate.ExecuteAsync(record, cancellationToken),
@@ -453,6 +454,7 @@ public sealed class JobRunner
     {
         JobType.UpdateScan or JobType.InventoryRefresh => true,
         JobType.InstallUpdates => job.Install is not null,
+        JobType.DownloadUpdates => job.Install is not null && _platform.SupportsDownloadOnly,
         JobType.Restart => job.Restart is not null && _platform.SystemRestart is not null && RestartPayload.Validate(job.Restart).Count == 0,
         JobType.NotifyUser => job.Notify is not null && _platform.UserInteraction is not null && Enum.IsDefined(job.Notify.Preset),
         JobType.AgentUpdate => job.AgentUpdate is not null && _agentUpdate.CanUpdate,

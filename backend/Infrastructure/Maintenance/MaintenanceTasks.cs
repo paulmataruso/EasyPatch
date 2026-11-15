@@ -209,7 +209,7 @@ public sealed class ScheduledInstallTask(
             IReadOnlyList<Guid>? selected = null;
             if (policy.HasInstallDelay || held.Count > 0)
             {
-                var due = await DueUpdatesAsync(e.Id, held, ct);
+                var due = await DueUpdatesAsync(db, e.Id, held, ct);
                 if (due.Count == 0)
                 {
                     continue;
@@ -247,7 +247,8 @@ public sealed class ScheduledInstallTask(
     }
 
     /// <summary>Required (and therefore due) updates still outstanding on the endpoint and not on hold, security first, at most 500.</summary>
-    private async Task<IReadOnlyList<Guid>> DueUpdatesAsync(Guid endpointId, IReadOnlyCollection<Guid> held, CancellationToken ct)
+    internal static async Task<IReadOnlyList<Guid>> DueUpdatesAsync(EasyPatchDbContext db, Guid endpointId, IReadOnlyCollection<Guid> held,
+        CancellationToken ct)
     {
         var rows = await db.EndpointUpdates.AsNoTracking()
             .Where(u => u.EndpointId == endpointId && u.IsRequired && !u.IsExcluded &&
@@ -262,6 +263,90 @@ public sealed class ScheduledInstallTask(
             .Select(r => r.UpdateGuid)
             .Take(500)
             .ToList();
+    }
+}
+
+/// <summary>
+/// Downloads updates ahead of the maintenance window (policy <see cref="EffectivePolicy.PreDownloadHours"/>, with automatic
+/// installation): when the next window opens within that many hours, Windows endpoints whose agent can download without
+/// installing get a download job for the updates the window would install. The job must start before the window opens
+/// (<c>NotAfter</c> and expiry are the window's start), so the installation in the window finds the downloads done.
+/// </summary>
+public sealed class PreDownloadTask(
+    EasyPatchDbContext db,
+    PolicyService policies,
+    JobService jobs,
+    UpdateHoldService holds,
+    TimeProvider clock,
+    ILogger<PreDownloadTask> logger) : IMaintenanceTask
+{
+    /// <summary>Closer to the window than this, the installation downloads the updates itself.</summary>
+    public static readonly TimeSpan MinimumLead = TimeSpan.FromMinutes(15);
+
+    public string Name => "pre-downloads";
+    public long LockKey => 0x4550_000F;
+    public TimeSpan Interval => TimeSpan.FromMinutes(10);
+
+    public async Task RunOnceAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var resolver = await policies.CreateResolverAsync(ct);
+        var candidates = await db.Endpoints.AsNoTracking()
+            .Where(e => e.Status == EndpointStatus.Active && e.MissingRequiredCount > 0 && e.Organization!.IsActive &&
+                        e.Platform == AgentPlatforms.Windows && e.AgentCapabilities.Contains(AgentCapabilities.DownloadUpdates))
+            .Select(e => new { e.Id, e.OrganizationId, e.SiteId, SiteTz = e.Site != null ? e.Site.TimeZone : null, OrgTz = e.Organization!.TimeZone })
+            .ToListAsync(ct);
+
+        var created = 0;
+        var heldByOrg = new Dictionary<Guid, IReadOnlyCollection<Guid>>();
+        foreach (var e in candidates)
+        {
+            var policy = resolver(e.OrganizationId, e.SiteId, e.Id);
+            if (!policy.AutoInstallEnabled || policy.MaintenanceWindow is not { } settings || policy.PreDownloadHours <= 0)
+            {
+                continue;
+            }
+
+            var tz = e.SiteTz ?? e.OrgTz;
+            if (MaintenanceWindow.FindOpenWindow(settings, tz, now) is not null ||
+                MaintenanceWindow.FindNextWindow(settings, tz, now) is not { } next ||
+                next.Start - now > TimeSpan.FromHours(policy.PreDownloadHours) || next.Start - now < MinimumLead)
+            {
+                continue; // the window is open (the installation runs), or the next one is too far away or too close
+            }
+
+            if (!heldByOrg.TryGetValue(e.OrganizationId, out var held))
+            {
+                held = (await holds.ActiveForAsync(e.OrganizationId, ct)).Keys.ToHashSet();
+                heldByOrg[e.OrganizationId] = held;
+            }
+
+            // The same updates the window's installation would install (see ScheduledInstallTask), as far as they are due now.
+            var due = await ScheduledInstallTask.DueUpdatesAsync(db, e.Id, held, ct);
+            if (due.Count == 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                await jobs.CreateAsync(new CreateJobRequest(e.Id, JobType.DownloadUpdates,
+                    policy.HasInstallDelay ? InstallMode.Selected : InstallMode.AllEligible, policy.HasInstallDelay ? due : null,
+                    Trigger: JobTrigger.Scheduled, ExpiresAt: next.Start, NotAfter: next.Start,
+                    DedupeSuffix: "window:" + next.Start.UtcDateTime.ToString("yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture)), ct);
+                created++;
+            }
+            catch (AppException ex) when (ex.Code is "duplicate_job" or "endpoint_not_active" or "nothing_to_install" or "validation_failed" or
+                                              "agent_upgrade_required" or "not_supported_on_linux")
+            {
+                db.ChangeTracker.Clear();
+            }
+        }
+
+        if (created > 0)
+        {
+            logger.LogInformation("Queued {Count} download job(s) ahead of maintenance windows", created);
+        }
     }
 }
 

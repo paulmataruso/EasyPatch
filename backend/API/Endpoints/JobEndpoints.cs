@@ -121,7 +121,7 @@ public static class JobEndpoints
             .ThenBy(u => u.Title).Select(Mapping.JobItem).ToListAsync(ct);
         var events = await db.EndpointEvents.AsNoTracking().Where(e => e.JobId == id).OrderBy(e => e.Id).Select(Mapping.Event).ToListAsync(ct);
         InstallMode? mode = null;
-        if (job.Summary.Type == JobType.InstallUpdates && job.Payload is not null)
+        if (job.Summary.Type is JobType.InstallUpdates or JobType.DownloadUpdates && job.Payload is not null)
         {
             mode = JsonSerializer.Deserialize<InstallUpdatesPayload>(job.Payload, ContractJson.Options)?.Mode;
         }

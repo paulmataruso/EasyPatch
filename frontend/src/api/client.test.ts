@@ -158,6 +158,7 @@ describe('policy editor rules', () => {
     securityInstallDelayDays: 0,
     knownExploitedSkipsDelay: true,
     applicationUpdates: null,
+    preDownloadHours: 0,
     restartSchedule: null,
     windowsUpdate: {
       automaticUpdates: { managed: true, value: { mode: 'AutoDownloadNotifyInstall', scheduledInstallDay: 0, scheduledInstallHour: 3 } },

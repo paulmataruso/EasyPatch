@@ -2733,6 +2733,10 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
 
+                    b.Property<int?>("PreDownloadHours")
+                        .HasColumnType("integer")
+                        .HasColumnName("pre_download_hours");
+
                     b.Property<string>("RestartSchedule")
                         .HasColumnType("jsonb")
                         .HasColumnName("restart_schedule");

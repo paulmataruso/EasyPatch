@@ -169,6 +169,7 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
             values.MaintenanceDays ??= [];
             values.MaintenanceStart ??= defaults.MaintenanceStart;
             values.MaintenanceDurationMinutes ??= defaults.MaintenanceDurationMinutes;
+            values.PreDownloadHours ??= defaults.PreDownloadHours;
             values.ScanStaleAfterHours ??= defaults.ScanStaleAfterHours;
             values.MaxConcurrentInstallsPerSite ??= defaults.MaxConcurrentInstallsPerSite;
             values.TrayIconEnabled ??= defaults.TrayIconEnabled;
@@ -201,6 +202,7 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
         existing.MaintenanceDays = values.MaintenanceDays;
         existing.MaintenanceStart = values.MaintenanceStart;
         existing.MaintenanceDurationMinutes = values.MaintenanceDurationMinutes;
+        existing.PreDownloadHours = values.PreDownloadHours;
         existing.ScanStaleAfterHours = values.ScanStaleAfterHours;
         existing.MaxConcurrentInstallsPerSite = values.MaxConcurrentInstallsPerSite;
         existing.TrayIconEnabled = values.TrayIconEnabled;

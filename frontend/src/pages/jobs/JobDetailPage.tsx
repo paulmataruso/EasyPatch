@@ -47,7 +47,11 @@ export function JobDetailPage() {
   const j = d.summary;
   const active = ACTIVE_JOB_STATUSES.includes(j.status);
   const canCancel = canOperate && (active || j.status === 'WaitingForReboot') && !j.cancelRequested;
-  const canRetry = canOperate && (j.status === 'Failed' || j.status === 'Expired' || j.status === 'Cancelled' || (j.status === 'Completed' && j.failedCount > 0));
+  // Downloads ahead of a window are not retried: the installation in the window downloads what is missing.
+  const canRetry =
+    canOperate &&
+    j.type !== 'DownloadUpdates' &&
+    (j.status === 'Failed' || j.status === 'Expired' || j.status === 'Cancelled' || (j.status === 'Completed' && j.failedCount > 0));
   const counts = countItems(d.items.map((i) => i.status));
   const removal = j.type === 'UninstallUpdate';
 

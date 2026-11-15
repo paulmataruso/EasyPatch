@@ -74,6 +74,9 @@ public sealed class Policy
     public TimeOnly? MaintenanceStart { get; set; }
     public int? MaintenanceDurationMinutes { get; set; }
 
+    /// <summary>With automatic installation: download the updates this many hours before the maintenance window opens (0 = off).</summary>
+    public int? PreDownloadHours { get; set; }
+
     public int? ScanStaleAfterHours { get; set; }
     public int? MaxConcurrentInstallsPerSite { get; set; }
 

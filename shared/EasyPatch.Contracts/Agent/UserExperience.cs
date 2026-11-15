@@ -20,7 +20,11 @@ public static class AgentCapabilities
     /// <summary>The agent can remove an installed Windows update (Windows agent 1.8.0 and later).</summary>
     public const string UninstallUpdates = "uninstall-updates";
 
-    public static IReadOnlyList<string> All { get; } = [Restart, NotifyUser, WindowsUpdatePolicy, Tray, SelfUpdate, ApplicationUpdates, Uninstall, UninstallUpdates];
+    /// <summary>The agent can download Windows updates without installing them (Windows agent 1.8.0 and later).</summary>
+    public const string DownloadUpdates = "download-updates";
+
+    public static IReadOnlyList<string> All { get; } =
+        [Restart, NotifyUser, WindowsUpdatePolicy, Tray, SelfUpdate, ApplicationUpdates, Uninstall, UninstallUpdates, DownloadUpdates];
 
     /// <summary>The capability a job type needs, or null when every agent supports it.</summary>
     public static string? RequiredFor(JobType type) => type switch
@@ -30,6 +34,7 @@ public static class AgentCapabilities
         JobType.AgentUpdate => SelfUpdate,
         JobType.UninstallAgent => Uninstall,
         JobType.UninstallUpdate => UninstallUpdates,
+        JobType.DownloadUpdates => DownloadUpdates,
         _ => null,
     };
 }

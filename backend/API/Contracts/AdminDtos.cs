@@ -162,7 +162,8 @@ public sealed record PolicyDto(
     int? SecurityInstallDelayDays = null,
     Guid? TagId = null,
     bool? KnownExploitedSkipsDelay = null,
-    ApplicationUpdateSettings? ApplicationUpdates = null);
+    ApplicationUpdateSettings? ApplicationUpdates = null,
+    int? PreDownloadHours = null);
 
 /// <summary>Recurring restart. <c>Time</c> is "HH:mm" in the site (or organization) time zone; days use 0 = Sunday … 6 = Saturday.</summary>
 public sealed record RestartScheduleDto(
@@ -201,7 +202,8 @@ public sealed record PolicyRequest(
     int? InstallDelayDays = null,
     int? SecurityInstallDelayDays = null,
     bool? KnownExploitedSkipsDelay = null,
-    ApplicationUpdateSettings? ApplicationUpdates = null);
+    ApplicationUpdateSettings? ApplicationUpdates = null,
+    int? PreDownloadHours = null);
 
 public sealed record EffectivePolicyDto(
     int CheckInIntervalSeconds,
@@ -230,7 +232,8 @@ public sealed record EffectivePolicyDto(
     int SecurityInstallDelayDays = 0,
     IReadOnlyDictionary<string, string>? SourceTags = null,
     bool KnownExploitedSkipsDelay = true,
-    ApplicationUpdateSettings? ApplicationUpdates = null);
+    ApplicationUpdateSettings? ApplicationUpdates = null,
+    int PreDownloadHours = 0);
 
 // ---------------------------------------------------------------------------------------------
 // Tags

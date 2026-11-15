@@ -110,7 +110,9 @@ All screenshots show fictional demo data.
   for every organization. Scheduled installs and *Install all missing* then skip it, and an alert
   opens. Administrators can also hold an update themselves and release holds on the update's page.
 * **Optional scheduled installs** inside a per-policy maintenance window (off by default),
-  limited per site and globally. Updates still inside their rollout delay are skipped.
+  limited per site and globally. Updates still inside their rollout delay are skipped. Windows
+  agents 1.8.0 and later can download the updates up to 24 hours before the window opens, so the
+  window is spent installing.
 * **Restarts** of one endpoint or many selected endpoints, now or at a chosen time, or on a
   recurring restart schedule set in policy (optionally only when Windows needs a restart).
   Signed-in users see a countdown, or can postpone up to a deadline. A restart job completes

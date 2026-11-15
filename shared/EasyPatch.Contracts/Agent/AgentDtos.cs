@@ -185,7 +185,7 @@ public sealed record AgentJob
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset ExpiresAt { get; init; }
 
-    /// <summary>Present for <see cref="JobType.InstallUpdates"/>.</summary>
+    /// <summary>Present for <see cref="JobType.InstallUpdates"/> and <see cref="JobType.DownloadUpdates"/>.</summary>
     public InstallUpdatesPayload? Install { get; init; }
 
     /// <summary>Present for <see cref="JobType.Restart"/>.</summary>
@@ -227,7 +227,8 @@ public sealed record InstallUpdatesPayload
     public IReadOnlyList<Guid> SelectedUpdateGuids { get; init; } = [];
     public required InstallFilterOptions Filter { get; init; }
 
-    /// <summary>Do not start installing new updates after this time (end of a maintenance window).</summary>
+    /// <summary>Do not start installing new updates after this time (end of a maintenance window). For a download job: do not
+    /// start new downloads after this time (start of the maintenance window).</summary>
     public DateTimeOffset? NotAfter { get; init; }
 }
 
@@ -330,6 +331,9 @@ public static class SkipReasons
     /// <summary>Server only: the update is on hold (rollout guard or an administrator); only installed when selected.</summary>
     public const string Held = "Held";
 
+    /// <summary>A download job reached the start of the maintenance window first; the installation downloads the update.</summary>
+    public const string WindowStarted = "WindowStarted";
+
     public static string Describe(string? reason) => reason switch
     {
         AlreadyInstalled => "Already installed",
@@ -346,6 +350,7 @@ public static class SkipReasons
         Reoffered => "Offered again after a successful installation (select it to install it anyway)",
         NotInstalled => "Not installed",
         Held => "On hold (not installed automatically)",
+        WindowStarted => "Not downloaded before the maintenance window started (the installation downloads it)",
         Cancelled => "Cancelled",
         null => "",
         _ => reason,

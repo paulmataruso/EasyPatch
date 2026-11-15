@@ -877,6 +877,15 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
                   ? `${formatDays(p.maintenanceDays)} at ${p.maintenanceStart?.slice(0, 5) ?? '—'} for ${formatDuration(p.maintenanceDurationMinutes)} (${p.timeZone})`
                   : 'None',
               ),
+              ...(linux
+                ? []
+                : [
+                    row(
+                      'Download before the window',
+                      'preDownloadHours',
+                      (p.preDownloadHours ?? 0) > 0 ? `Up to ${p.preDownloadHours} hours before it opens (with automatic installation)` : 'Off',
+                    ),
+                  ]),
             ]}
           />
         </Card>

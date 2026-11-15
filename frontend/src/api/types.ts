@@ -83,7 +83,7 @@ export const DEFAULT_INSTALL_CATEGORIES: readonly UpdateCategory[] = [
   'Other',
 ];
 
-export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh', 'Restart', 'NotifyUser', 'AgentUpdate', 'UninstallAgent', 'UninstallUpdate'] as const;
+export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh', 'Restart', 'NotifyUser', 'AgentUpdate', 'UninstallAgent', 'UninstallUpdate', 'DownloadUpdates'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const JOB_STATUSES = [
@@ -125,6 +125,7 @@ export const AGENT_CAPABILITIES = {
   applicationUpdates: 'app-updates',
   uninstall: 'uninstall',
   uninstallUpdates: 'uninstall-updates',
+  downloadUpdates: 'download-updates',
 } as const;
 
 export const WINDOWS_UPDATE_POLICY_GROUPS = ['AutomaticUpdates', 'FeatureUpdates', 'QualityUpdates', 'RestartBehavior'] as const;
@@ -495,6 +496,9 @@ export interface PolicyValues {
   knownExploitedSkipsDelay: boolean | null;
   /** Third-party application updates through winget; replaces the inherited setting as a whole, null inherits (the global default is off). */
   applicationUpdates: ApplicationUpdateSettings | null;
+  /** With automatic installation: download updates this many hours before the maintenance window opens (Windows agents 1.8.0+);
+   * 0 = off, 0-24, null inherits (the global default is off). */
+  preDownloadHours: number | null;
 }
 
 /** winget application updates: only the approved package IDs are checked and upgraded, and only where already installed. */
@@ -550,6 +554,7 @@ export interface EffectivePolicyDto {
   sourceTags: Record<string, string> | null;
   knownExploitedSkipsDelay: boolean;
   applicationUpdates: ApplicationUpdateSettings | null;
+  preDownloadHours: number;
 }
 
 // ---------------------------------------------------------------------------------------------
