@@ -1134,6 +1134,8 @@ export interface InstallScriptResponse {
   requireSignature: boolean;
   /** "Windows" or "Linux". For Linux, packageFileName and sha256 list every package the script can install. */
   platform: string;
+  /** Windows: the downloads skip the certificate check and the agent trusts the server's published CA. */
+  skipCertificateCheck: boolean;
 }
 
 export interface EnrollmentRequestDto {

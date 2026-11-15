@@ -7,6 +7,8 @@
     ENROLLMENTTOKEN  limited-use enrollment token (hidden: never written to MSI logs)
     DEPLOYMENTCODE   non-secret deployment code; creates an enrollment request an administrator approves
     PROXYURL         optional http(s) proxy for the agent's connection to the server
+    SERVERCACERT     optional certificate authority (base64 DER) the agent trusts for its connection to the server only,
+                     for servers with a private CA (set by the install script's "Skip certificate check" option)
 
   The UpgradeCode below must never change: it is what lets new versions upgrade old ones.
 -->
@@ -39,6 +41,7 @@
 
     <Property Id="SERVERURL" Secure="yes" />
     <Property Id="PROXYURL" Secure="yes" />
+    <Property Id="SERVERCACERT" Secure="yes" />
     <Property Id="DEPLOYMENTCODE" Secure="yes" />
     <Property Id="ENROLLMENTTOKEN" Secure="yes" Hidden="yes" />
 
@@ -48,15 +51,19 @@
       <ProgressText Action="WriteRegistryValues" Message="Writing system registry values" Template="Key: [1], Name: [2]" />
     </UI>
 
-    <!-- Remember SERVERURL / PROXYURL across upgrades and repairs (command-line values win). -->
+    <!-- Remember SERVERURL / PROXYURL / SERVERCACERT across upgrades and repairs (command-line values win). -->
     <Property Id="SAVEDSERVERURL" Secure="yes">
       <RegistrySearch Id="SavedServerUrl" Root="HKLM" Key="SOFTWARE\EasyPatch\Agent" Name="ServerUrl" Type="raw" Bitness="always64" />
     </Property>
     <Property Id="SAVEDPROXYURL" Secure="yes">
       <RegistrySearch Id="SavedProxyUrl" Root="HKLM" Key="SOFTWARE\EasyPatch\Agent" Name="ProxyUrl" Type="raw" Bitness="always64" />
     </Property>
+    <Property Id="SAVEDSERVERCACERT" Secure="yes">
+      <RegistrySearch Id="SavedServerCaCertificate" Root="HKLM" Key="SOFTWARE\EasyPatch\Agent" Name="ServerCaCertificate" Type="raw" Bitness="always64" />
+    </Property>
     <SetProperty Id="SERVERURL" Value="[SAVEDSERVERURL]" After="AppSearch" Sequence="first" Condition="NOT SERVERURL AND SAVEDSERVERURL" />
     <SetProperty Id="PROXYURL" Value="[SAVEDPROXYURL]" After="AppSearch" Sequence="first" Condition="NOT PROXYURL AND SAVEDPROXYURL" />
+    <SetProperty Id="SERVERCACERT" Value="[SAVEDSERVERCACERT]" After="AppSearch" Sequence="first" Condition="NOT SERVERCACERT AND SAVEDSERVERCACERT" />
 
     <Launch Condition="Privileged" Message="The EasyPatch Agent must be installed by an administrator." />
     <Launch Condition="Installed OR (SERVERURL ~&lt;&lt; &quot;https://&quot;)"
@@ -150,6 +157,10 @@
 
       <Component Id="RegistryProxyUrl" Directory="INSTALLFOLDER" Guid="C4A1E8D2-6B3F-4A90-B2D7-8E5F1A3C6B42" Bitness="always64" Condition="PROXYURL">
         <RegistryValue Root="HKLM" Key="SOFTWARE\EasyPatch\Agent" Name="ProxyUrl" Type="string" Value="[PROXYURL]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegistryServerCaCertificate" Directory="INSTALLFOLDER" Guid="3D8A5F27-C61E-4B94-9F03-7A2E5B8C1D46" Bitness="always64" Condition="SERVERCACERT">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\EasyPatch\Agent" Name="ServerCaCertificate" Type="string" Value="[SERVERCACERT]" KeyPath="yes" />
       </Component>
 
       <!-- Consumed and deleted by the agent after enrollment; written only when supplied on this install. -->

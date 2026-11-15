@@ -1,11 +1,14 @@
 using System.Net;
 using EasyPatch.Agent.Core.Abstractions;
+using EasyPatch.Agent.Core.Security;
 
 namespace EasyPatch.Agent.Platform;
 
 /// <summary>
-/// Production HTTP stack. TLS certificate validation always uses the Windows trust store and cannot be disabled or
-/// configured. Redirects are not followed (a signed request must reach exactly the URL it was signed for).
+/// Production HTTP stack. TLS certificates are validated against the Windows trust store; validation cannot be disabled.
+/// When the installer recorded a server certificate authority (SERVERCACERT), certificates issued by it are accepted too,
+/// for this connection only (<see cref="ServerCertificateAuthority"/>). Redirects are not followed (a signed request must
+/// reach exactly the URL it was signed for).
 /// The proxy is the explicit PROXYURL when configured, otherwise .NET's system default (HTTPS_PROXY / HTTP_PROXY
 /// environment variables, then the service account's WinINET settings). WinHTTP (<c>netsh winhttp</c>) proxy settings
 /// are not used, so set PROXYURL on networks that require a proxy.
@@ -27,6 +30,9 @@ internal sealed class AgentHttpClientFactory : IAgentHttpClientFactory
             throw new ArgumentException("The EasyPatch server URL must use HTTPS.", nameof(serverUrl));
         }
 
+        var bootstrap = _bootstrap.Read();
+        var proxy = CreateProxy(bootstrap.ProxyUrl);
+        var authority = string.IsNullOrWhiteSpace(bootstrap.ServerCaCertificate) ? null : ServerCertificateAuthority.Parse(bootstrap.ServerCaCertificate);
         var handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
@@ -36,8 +42,12 @@ internal sealed class AgentHttpClientFactory : IAgentHttpClientFactory
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
             UseCookies = false,
             UseProxy = true,
-            Proxy = CreateProxy(_bootstrap.Read().ProxyUrl),
+            Proxy = proxy,
         };
+        if (authority is not null)
+        {
+            handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, chain, errors) => authority.Validate(certificate, chain, errors);
+        }
 
         return new HttpClient(handler, disposeHandler: true)
         {

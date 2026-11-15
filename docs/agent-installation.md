@@ -26,7 +26,7 @@ Update Agent API that Windows itself uses. The agent:
 | Operating system | Windows 10, Windows 11, Windows Server 2016 or later, 64-bit (x64 or ARM64) |
 | Privileges | Installation and the `enroll`/`unenroll` commands need an administrator; the service runs as LocalSystem |
 | Network | Outbound HTTPS (TCP 443 by default) from the endpoint to the EasyPatch server. No inbound ports |
-| TLS | The server certificate must be trusted by the Windows certificate store of the computer. Certificate validation cannot be disabled |
+| TLS | The server certificate must be trusted by the Windows certificate store of the computer, or chain to the CA recorded at installation with `SERVERCACERT` (see [Servers with a private certificate authority](#servers-with-a-private-certificate-authority)). Certificate validation cannot be disabled |
 | .NET | Not required: the agent is self-contained |
 
 ## Choosing an enrollment method
@@ -73,6 +73,7 @@ with the one on the computer. The agent prints it on the computer in three place
 | `ENROLLMENTTOKEN` | One of the two | Enrollment token. Hidden MSI property; see *Protecting the enrollment token*. Deleted by the agent once it has been used |
 | `DEPLOYMENTCODE` | One of the two | Deployment code. Deleted by the agent once the request is approved or rejected |
 | `PROXYURL` | No | `http://proxy:8080` style URL of an outbound proxy. Remembered on upgrade. Authenticating proxies are contacted with the computer account (Negotiate/NTLM) |
+| `SERVERCACERT` | No | A certificate authority certificate (base64 DER) that the agent trusts for its connection to the EasyPatch server only, for servers with a private CA. Set by the install script's *Skip certificate check* option; see [Servers with a private certificate authority](#servers-with-a-private-certificate-authority). Remembered on upgrade |
 
 Without `PROXYURL` the agent uses the `HTTPS_PROXY`/`HTTP_PROXY` environment variables or the
 service account's WinINET proxy settings. WinHTTP proxy settings (`netsh winhttp`) are **not**
@@ -188,6 +189,46 @@ Start-Sleep -Seconds 20
 The console generates an equivalent script that also checks the Authenticode signature when
 you require it.
 
+## Servers with a private certificate authority
+
+The agent connects only to a server whose certificate it trusts. A server with a public
+certificate (the production setup, with ACME) needs nothing more. A server with a private CA,
+such as the lab setup with Caddy's internal CA, fails with *Could not establish trust
+relationship for the SSL/TLS secure channel* on computers that do not trust that CA. There are
+two ways to install agents on such computers:
+
+* **Trust the CA on the computer.** Import the CA's root certificate into *Trusted Root
+  Certification Authorities* of the local computer (for example by Group Policy). Every
+  program on the computer then trusts that CA.
+* **Skip certificate check** in the console's install script dialog (*Agent Management →
+  Deployment codes → Install script*, Windows tab). The script then:
+  1. downloads itself, the server's CA certificate and the MSI **without checking the server
+     certificate** (the MSI's SHA-256 is still checked against the value in the script);
+  2. reads the CA certificate from `https://<server>/server-ca.crt`, which the lab proxy
+     (`Caddyfile.dev`) publishes. It prints its subject and SHA-256 and passes it to the MSI as
+     `SERVERCACERT`. If the server publishes no CA certificate, the script warns and installs
+     without it;
+  3. switches certificate checking back on when it ends.
+
+  The agent then trusts that CA **for its own connection to EasyPatch only**, not for anything
+  else on the computer, and still checks every certificate: it accepts a certificate that
+  Windows trusts, or one that chains to the recorded CA, is currently valid and matches the
+  server name. It does not accept any other certificate.
+
+Because the downloads are not checked, someone who can intercept the connection during the
+installation could hand the computer a different script. Use *Skip certificate check* only
+on a network you trust, and compare the CA's SHA-256 that the script prints with the one the
+server host shows:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec caddy cat /data/caddy/pki/authorities/local/root.crt \
+  | openssl x509 -outform der | sha256sum
+```
+
+Caddy's internal root certificate is valid for 10 years and survives restarts (it is kept in
+the `caddy_data` volume). If it is ever replaced, reinstall the agents with the new one
+(`SERVERCACERT` on the MSI command line replaces the recorded certificate).
+
 ## How the agent works
 
 * **Check-in**: every 60 seconds (±10 % jitter; 15 seconds while a job is active). Picks up
@@ -276,7 +317,8 @@ Notifications show the preset messages. During a restart request a small window 
 ### Status window
 
 Clicking the icon (or **Open EasyPatch status** in its menu) opens the status window. Agent
-1.5.0 and later have it.
+1.5.0 and later have it. From 1.5.1 the window, the menus and the restart prompts follow the
+user's Windows app mode (*Settings → Personalization → Colors*), dark or light.
 
 * **Summary.** A colored heading: *up to date*, *N updates available*, *restart required*,
   *checking for updates* or *installing updates*, *can't reach the EasyPatch server*,
@@ -377,7 +419,7 @@ need them.
 | Enrollment rejected (exit code 4, event 1003) | Token expired, revoked or used up, deployment code revoked, or the request was rejected by an administrator. Create a new token or code |
 | Stays at `PendingApproval` | Approve the request in the console (*Agent Management → Pending approvals*). Requests expire after 7 days; the agent then submits a new one |
 | `Revoked` (event 1004) | The endpoint was removed or its credential revoked in the console. Re-enroll with `enroll --force` |
-| "Could not reach the EasyPatch server" | DNS, firewall, proxy (`PROXYURL`), or TLS: the server certificate must chain to a root trusted by the computer |
+| "Could not reach the EasyPatch server" | DNS, firewall, proxy (`PROXYURL`), or TLS: the server certificate must chain to a root trusted by the computer, or to the CA recorded with `SERVERCACERT` (see [Servers with a private certificate authority](#servers-with-a-private-certificate-authority)) |
 | Scans fail with `0x8024402C`, `0x80244022` or similar | The Windows Update source (Microsoft or WSUS) is unreachable. The error code and its description are shown in the console |
 | Updates not offered that you expected | WSUS approvals, Windows Update for Business deferrals or a target release version apply. The console shows the detected update source, and the endpoint's *Policy* tab shows any Windows Update settings EasyPatch applied |
 | No tray icon | On Windows 11, look in the hidden-icons flyout (**^**) first. Otherwise the policy setting *EasyPatch icon in the notification area* is *Hide*, the user signed in less than 15 seconds ago, or the session is a remote session that is disconnected. *Signed-in users* on the endpoint's overview shows how many sessions have a tray. If a session is signed in but has no tray, the agent log says *did not connect to the service*. Agent 1.1.0 had this problem for every user who was not running as administrator; install 1.1.1 or later |

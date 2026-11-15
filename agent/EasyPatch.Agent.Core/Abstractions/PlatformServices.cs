@@ -221,7 +221,10 @@ public interface ISecretProtector
 }
 
 /// <summary>Installer-provided bootstrap values (HKLM\SOFTWARE\EasyPatch\Agent on Windows, /etc/easypatch/agent.conf on Linux).</summary>
-public sealed record BootstrapConfig(string? ServerUrl, string? EnrollmentToken, string? DeploymentCode, string? ProxyUrl)
+/// <param name="ServerCaCertificate">Optional certificate authority (base64 DER) trusted for the connection to the server
+/// only; see <see cref="Security.ServerCertificateAuthority"/>.</param>
+public sealed record BootstrapConfig(string? ServerUrl, string? EnrollmentToken, string? DeploymentCode, string? ProxyUrl,
+    string? ServerCaCertificate = null)
 {
     public static BootstrapConfig Empty { get; } = new(null, null, null, null);
 

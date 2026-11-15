@@ -601,7 +601,7 @@ public sealed record CreateDeploymentCodeRequest(Guid OrganizationId, Guid? Site
     int? MaxPendingRequests);
 
 public sealed record InstallScriptResponse(string Script, string OneLiner, string ScriptUrl, string PackageFileName, string PackageVersion, string Sha256,
-    bool RequireSignature, string Platform = "Windows");
+    bool RequireSignature, string Platform = "Windows", bool SkipCertificateCheck = false);
 
 public sealed record EnrollmentRequestDto(
     Guid Id,

@@ -5,7 +5,8 @@ namespace EasyPatch.Agent.Platform;
 
 /// <summary>
 /// Installer-provided bootstrap settings in <c>HKLM\SOFTWARE\EasyPatch\Agent</c> (64-bit view). The MSI writes them
-/// from SERVERURL / ENROLLMENTTOKEN / DEPLOYMENTCODE / PROXYURL; <c>EasyPatch.Agent.exe enroll</c> writes them too.
+/// from SERVERURL / ENROLLMENTTOKEN / DEPLOYMENTCODE / PROXYURL / SERVERCACERT; <c>EasyPatch.Agent.exe enroll</c> writes
+/// them too.
 /// The enrollment token and deployment code are deleted as soon as enrollment completes or is rejected.
 /// The key is ACL-restricted to SYSTEM and Administrators (<see cref="SecureStorage"/>).
 /// </summary>
@@ -17,6 +18,7 @@ internal sealed class RegistryBootstrapConfigSource : IBootstrapConfigSource
     private const string EnrollmentTokenValue = "EnrollmentToken";
     private const string DeploymentCodeValue = "DeploymentCode";
     private const string ProxyUrlValue = "ProxyUrl";
+    private const string ServerCaCertificateValue = "ServerCaCertificate";
 
     public BootstrapConfig Read()
     {
@@ -31,7 +33,8 @@ internal sealed class RegistryBootstrapConfigSource : IBootstrapConfigSource
             ReadString(key, ServerUrlValue),
             ReadString(key, EnrollmentTokenValue),
             ReadString(key, DeploymentCodeValue),
-            ReadString(key, ProxyUrlValue));
+            ReadString(key, ProxyUrlValue),
+            ReadString(key, ServerCaCertificateValue));
     }
 
     public void ClearEnrollmentSecrets()
@@ -42,7 +45,8 @@ internal sealed class RegistryBootstrapConfigSource : IBootstrapConfigSource
         key?.DeleteValue(DeploymentCodeValue, throwOnMissingValue: false);
     }
 
-    /// <summary>Writes new bootstrap settings (CLI <c>enroll</c>). Null proxy removes a previously configured proxy.</summary>
+    /// <summary>Writes new bootstrap settings (CLI <c>enroll</c>). Null proxy removes a previously configured proxy; a null
+    /// server certificate authority keeps the one the installer recorded.</summary>
     public static void Write(BootstrapConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -51,6 +55,10 @@ internal sealed class RegistryBootstrapConfigSource : IBootstrapConfigSource
         SetOrDelete(key, EnrollmentTokenValue, config.EnrollmentToken);
         SetOrDelete(key, DeploymentCodeValue, config.DeploymentCode);
         SetOrDelete(key, ProxyUrlValue, config.ProxyUrl);
+        if (!string.IsNullOrWhiteSpace(config.ServerCaCertificate))
+        {
+            SetOrDelete(key, ServerCaCertificateValue, config.ServerCaCertificate);
+        }
     }
 
     /// <summary>Removes all bootstrap settings (CLI <c>unenroll</c>).</summary>
@@ -63,7 +71,7 @@ internal sealed class RegistryBootstrapConfigSource : IBootstrapConfigSource
             return;
         }
 
-        foreach (var name in new[] { ServerUrlValue, EnrollmentTokenValue, DeploymentCodeValue, ProxyUrlValue })
+        foreach (var name in new[] { ServerUrlValue, EnrollmentTokenValue, DeploymentCodeValue, ProxyUrlValue, ServerCaCertificateValue })
         {
             key.DeleteValue(name, throwOnMissingValue: false);
         }

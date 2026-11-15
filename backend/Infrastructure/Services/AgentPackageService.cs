@@ -187,10 +187,19 @@ public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> optio
 }
 
 /// <summary>Builds the tokenless PowerShell installer used by RMM tools. The script verifies the MSI SHA-256 (and,
-/// optionally, its Authenticode signature) before installing; the endpoint then waits for approval.</summary>
+/// optionally, its Authenticode signature) before installing; the endpoint then waits for approval.
+/// <para><paramref name="skipCertificateCheck"/> is for servers whose certificate the endpoint does not trust (a private CA,
+/// such as Caddy's internal one in the lab configuration): the one-liner and the script then download without checking the
+/// certificate, and the script passes the certificate authority the proxy publishes at <c>/server-ca.crt</c> to the MSI
+/// (SERVERCACERT), so the agent trusts that authority for its own connection to EasyPatch only and keeps checking
+/// certificates afterwards.</para></summary>
 public static class InstallScriptBuilder
 {
-    public static string Build(string publicUrl, AgentPackage package, string deploymentCode, string label, bool requireSignature, DateTimeOffset generatedAt)
+    /// <summary>Published by the lab proxy (Caddyfile.dev): the root certificate of Caddy's internal CA.</summary>
+    public const string ServerCaPath = "/server-ca.crt";
+
+    public static string Build(string publicUrl, AgentPackage package, string deploymentCode, string label, bool requireSignature, DateTimeOffset generatedAt,
+        bool skipCertificateCheck = false)
     {
         ArgumentNullException.ThrowIfNull(package);
         var server = publicUrl.TrimEnd('/');
@@ -208,6 +217,8 @@ public static class InstallScriptBuilder
         sb.AppendLine($"$PackageUrl = {Q($"{server}/downloads/agent/{Uri.EscapeDataString(package.FileName)}")}");
         sb.AppendLine($"$ExpectedSha256 = {Q(package.Sha256)}");
         sb.AppendLine($"$RequireSignature = ${(requireSignature ? "true" : "false")}");
+        sb.AppendLine($"$SkipCertificateCheck = ${(skipCertificateCheck ? "true" : "false")}");
+        sb.AppendLine($"$ServerCaUrl = {Q(server + ServerCaPath)}");
         sb.AppendLine("""
             $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
             if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run this script as Administrator or SYSTEM.' }
@@ -216,9 +227,33 @@ public static class InstallScriptBuilder
             New-Item -ItemType Directory -Path $work -Force | Out-Null
             $msi = Join-Path $work 'EasyPatchAgent.msi'
             $log = Join-Path $env:TEMP 'EasyPatchAgent-install.log'
+            function Save-EasyPatchFile([string]$Uri, [string]$Path) {
+                $download = @{ Uri = $Uri; OutFile = $Path; UseBasicParsing = $true }
+                if ($SkipCertificateCheck -and $PSVersionTable.PSVersion.Major -ge 6) { $download.SkipCertificateCheck = $true }
+                Invoke-WebRequest @download
+            }
             try {
+                $serverCa = $null
+                if ($SkipCertificateCheck) {
+                    Write-Warning 'Skip certificate check: the downloads below do not check the server certificate. Use this only on a network you trust.'
+                    [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+                    # The certificate authority the agent will trust for its own connection to EasyPatch (and nothing else).
+                    $caFile = Join-Path $work 'server-ca.crt'
+                    try {
+                        Save-EasyPatchFile $ServerCaUrl $caFile
+                        $ca = New-Object Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $caFile
+                        $constraints = @($ca.Extensions | Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension] })
+                        if ($constraints.Count -eq 0 -or -not $constraints[0].CertificateAuthority) { throw 'it is not a certificate authority certificate' }
+                        $serverCa = [Convert]::ToBase64String($ca.RawData)
+                        $caHash = ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($ca.RawData))) -replace '-', ''
+                        Write-Output "The agent will trust this certificate authority for its connection to EasyPatch only: $($ca.Subject), SHA-256 $caHash"
+                    }
+                    catch {
+                        Write-Warning "The server does not publish its certificate authority at $ServerCaUrl ($($_.Exception.Message)). The agent will connect only if Windows trusts the server certificate."
+                    }
+                }
                 Write-Output "Downloading $PackageUrl"
-                Invoke-WebRequest -Uri $PackageUrl -OutFile $msi -UseBasicParsing
+                Save-EasyPatchFile $PackageUrl $msi
                 $hash = (Get-FileHash -Path $msi -Algorithm SHA256).Hash
                 if ($hash -ne $ExpectedSha256) { throw "Package hash $hash does not match the expected $ExpectedSha256. Aborting." }
                 if ($RequireSignature) {
@@ -227,10 +262,12 @@ public static class InstallScriptBuilder
                     Write-Output "Package signed by: $($sig.SignerCertificate.Subject)"
                 }
                 $arguments = @('/i', "`"$msi`"", '/qn', '/norestart', "SERVERURL=$ServerUrl", "DEPLOYMENTCODE=$DeploymentCode", '/l*v', "`"$log`"")
+                if ($serverCa) { $arguments += "SERVERCACERT=$serverCa" }
                 $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $arguments -Wait -PassThru
                 if (@(0, 1641, 3010) -notcontains $process.ExitCode) { throw "msiexec failed with exit code $($process.ExitCode). See $log" }
             }
             finally {
+                if ($SkipCertificateCheck) { [Net.ServicePointManager]::ServerCertificateValidationCallback = $null }
                 Remove-Item -Path $work -Recurse -Force -ErrorAction SilentlyContinue
             }
             $agent = Join-Path $env:ProgramFiles 'EasyPatch Agent\EasyPatch.Agent.exe'
@@ -247,8 +284,32 @@ public static class InstallScriptBuilder
         return sb.ToString();
     }
 
-    public static string OneLiner(string publicUrl, string deploymentCode) =>
-        $"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"[Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object Net.WebClient).DownloadString('{publicUrl.TrimEnd('/')}/downloads/install/{deploymentCode}.ps1'))\"";
+    /// <summary>The script's download URL, with the options it was generated for.</summary>
+    public static string ScriptUrl(string publicUrl, string deploymentCode, bool requireSignature = false, bool skipCertificateCheck = false)
+    {
+        var options = new List<string>(2);
+        if (requireSignature)
+        {
+            options.Add("requireSignature=true");
+        }
+
+        if (skipCertificateCheck)
+        {
+            options.Add("skipCertificateCheck=true");
+        }
+
+        return $"{publicUrl.TrimEnd('/')}/downloads/install/{deploymentCode}.ps1" + (options.Count == 0 ? string.Empty : "?" + string.Join('&', options));
+    }
+
+    /// <summary>
+    /// The RMM one-liner. With <paramref name="skipCertificateCheck"/> the download of the script does not check the server
+    /// certificate. The callback is <c>{[bool]1}</c> rather than <c>{$true}</c> so that the line also works when it is pasted
+    /// into a PowerShell prompt, which would expand <c>$true</c> inside the double quotes.
+    /// </summary>
+    public static string OneLiner(string publicUrl, string deploymentCode, bool requireSignature = false, bool skipCertificateCheck = false) =>
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"[Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor 3072; " +
+        (skipCertificateCheck ? "[Net.ServicePointManager]::ServerCertificateValidationCallback={[bool]1}; " : string.Empty) +
+        $"iex ((New-Object Net.WebClient).DownloadString('{ScriptUrl(publicUrl, deploymentCode, requireSignature, skipCertificateCheck)}'))\"";
 
     public static string MsiExecCommand(string publicUrl, string token, string? fileName) =>
         $"msiexec /i {fileName ?? "EasyPatchAgent.msi"} /qn /norestart SERVERURL=\"{publicUrl.TrimEnd('/')}\" ENROLLMENTTOKEN=\"{token}\"";

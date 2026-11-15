@@ -1,5 +1,6 @@
-# Development / lab: certificates from Caddy's internal CA (browsers will warn; agents will not trust it unless the
-# Caddy root certificate is installed in the Windows machine store). Never use this on the internet.
+# Development / lab: certificates from Caddy's internal CA (browsers will warn; agents trust it only when the Caddy root
+# certificate is installed in the Windows machine store, or when they were installed with the install script's "Skip
+# certificate check" option, which reads it from /server-ca.crt). Never use this on the internet.
 {
 	local_certs
 	# The root certificate cannot be installed into the container's trust store (read-only); do not try.
@@ -17,4 +18,14 @@ import /etc/caddy/easypatch.caddy
 
 {$EASYPATCH_DOMAIN:localhost} {
 	import easypatch
+
+	# The root certificate of Caddy's internal CA, for the Windows install script's "Skip certificate check" option: the
+	# agent then trusts this CA for its own connection to EasyPatch only. Exactly root.crt is served (never root.key).
+	handle /server-ca.crt {
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		header Content-Type "application/x-pem-file"
+		header Cache-Control "no-store"
+		file_server
+	}
 }

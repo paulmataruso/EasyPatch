@@ -358,8 +358,8 @@ internal sealed class StatusForm : Form
                     ToolTipText = entry.Message,
                     ForeColor = entry.Level switch
                     {
-                        TrayLogLevel.Error => Color.Firebrick,
-                        TrayLogLevel.Warning => Color.DarkGoldenrod,
+                        TrayLogLevel.Error => TrayTheme.ErrorText,
+                        TrayLogLevel.Warning => TrayTheme.WarningText,
                         _ => SystemColors.WindowText,
                     },
                 };
@@ -464,9 +464,9 @@ internal sealed class StatusForm : Form
         SetText(_detail, summary.Detail);
         _title.ForeColor = summary.Level switch
         {
-            StatusLevel.Good => StatusBadge.GoodColor,
-            StatusLevel.Warning => StatusBadge.WarningTextColor,
-            StatusLevel.Error => StatusBadge.ErrorColor,
+            StatusLevel.Good => TrayTheme.GoodText,
+            StatusLevel.Warning => TrayTheme.WarningText,
+            StatusLevel.Error => TrayTheme.ErrorText,
             _ => SystemColors.ControlText,
         };
 
@@ -528,7 +528,7 @@ internal sealed class StatusForm : Form
     private void ShowResult(string text, bool? success)
     {
         _result.Text = text;
-        _result.ForeColor = success == false ? StatusBadge.WarningTextColor : success == true ? StatusBadge.GoodColor : SystemColors.ControlText;
+        _result.ForeColor = success == false ? TrayTheme.WarningText : success == true ? TrayTheme.GoodText : SystemColors.ControlText;
         _result.Visible = true;
     }
 
@@ -581,13 +581,24 @@ internal sealed class StatusForm : Form
     };
 }
 
+/// <summary>Status colors that stay readable on the light and the dark (Windows app mode) background.</summary>
+internal static class TrayTheme
+{
+    public static bool Dark => Application.IsDarkModeEnabled;
+
+    public static Color GoodText => Dark ? Color.FromArgb(0x6C, 0xCB, 0x5F) : Color.FromArgb(0x1E, 0x7B, 0x34);
+
+    public static Color WarningText => Dark ? Color.FromArgb(0xFC, 0xC1, 0x5A) : Color.FromArgb(0xA8, 0x5A, 0x00);
+
+    public static Color ErrorText => Dark ? Color.FromArgb(0xFF, 0x99, 0xA4) : Color.FromArgb(0xC0, 0x1C, 0x28);
+}
+
 /// <summary>A filled circle with a check mark, exclamation mark, cross, "i" or three dots.</summary>
 internal sealed class StatusBadge : Control
 {
     public static readonly Color GoodColor = Color.FromArgb(0x1E, 0x7B, 0x34);
     public static readonly Color InfoColor = Color.FromArgb(0x1A, 0x5F, 0xB4);
     public static readonly Color WarningColor = Color.FromArgb(0xE0, 0x8A, 0x00);
-    public static readonly Color WarningTextColor = Color.FromArgb(0xA8, 0x5A, 0x00);
     public static readonly Color ErrorColor = Color.FromArgb(0xC0, 0x1C, 0x28);
 
     private StatusLevel _level = StatusLevel.Info;

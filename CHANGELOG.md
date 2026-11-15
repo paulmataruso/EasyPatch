@@ -3,6 +3,22 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and both agents share one version number.
 
+## [1.5.1] - 2026-11-15
+
+### Added
+
+- **Skip certificate check** for the Windows install script (off by default), for servers with
+  a private CA such as the lab setup. The one-liner and the script download without checking the
+  server certificate; the script then passes the CA that the lab proxy publishes at
+  `/server-ca.crt` to the MSI. The agent trusts that CA for its connection to EasyPatch only and
+  keeps checking certificates (name, validity, chain). Use it only on a network you trust.
+- MSI property `SERVERCACERT`: a certificate authority the agent trusts for its connection to the
+  server only. It is remembered on upgrade.
+
+### Changed
+
+- The tray's status window, menus and restart prompts follow the Windows app mode (dark or light).
+
 ## [1.5.0] - 2026-11-15
 
 Update the server before the Windows agents: a 1.5.0 agent reports update checks started from

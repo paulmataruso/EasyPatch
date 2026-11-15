@@ -25,7 +25,7 @@ ARM64). You need the repository for `docker-compose.yml`, the Caddy configuratio
 scripts. Check out the release tag you want to run:
 
 ```bash
-git clone --branch v1.5.0 https://github.com/paulmataruso/EasyPatch.git easypatch
+git clone --branch v1.5.1 https://github.com/paulmataruso/EasyPatch.git easypatch
 cd easypatch
 ```
 
@@ -51,7 +51,7 @@ Edit `.env`:
 |---|---|---|
 | `EASYPATCH_DOMAIN` | yes | The public DNS name. Browsers and agents connect to `https://<EASYPATCH_DOMAIN>` |
 | `ACME_EMAIL` | yes | Contact address given to the certificate authority |
-| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.5.0`). Images you build yourself get this tag too |
+| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.5.1`). Images you build yourself get this tag too |
 | `EASYPATCH_PUBLIC_URL` | no | Overrides the URL used in install commands, reset links and scripts. Defaults to `https://<EASYPATCH_DOMAIN>` |
 | `EASYPATCH_EDGE_SUBNET` | no | Subnet of the network between Caddy and the API (default `172.30.0.0/24`). Change it only if it collides with an existing network. The API trusts `X-Forwarded-For` only from this subnet |
 
@@ -113,12 +113,12 @@ Download the agent packages of the same release from
 each with its `.sig` release signature, to `data/agent-packages/`:
 
 ```bash
-mkdir -p /tmp/easypatch-v1.5.0
-gh release download v1.5.0 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.5.0 \
+mkdir -p /tmp/easypatch-v1.5.1
+gh release download v1.5.1 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.5.1 \
   --pattern 'EasyPatchAgent-*' --pattern SHA256SUMS
 # or download the same files from the release page in a browser
-(cd /tmp/easypatch-v1.5.0 && sha256sum --check --ignore-missing SHA256SUMS)
-cp /tmp/easypatch-v1.5.0/EasyPatchAgent-1.5.0-* data/agent-packages/
+(cd /tmp/easypatch-v1.5.1 && sha256sum --check --ignore-missing SHA256SUMS)
+cp /tmp/easypatch-v1.5.1/EasyPatchAgent-1.5.1-* data/agent-packages/
 chmod 644 data/agent-packages/*
 ```
 
@@ -279,9 +279,13 @@ To reach a lab server from other machines on a private network, set both the add
 name to the host's LAN IP address in `.env`, for example `EASYPATCH_BIND_ADDRESS=192.168.1.20`
 and `EASYPATCH_DOMAIN=192.168.1.20`. Then open `https://192.168.1.20:8443`. Caddy's internal CA
 issues a certificate for the IP address. Anyone who can reach that address can reach the sign-in
-page, so do this only on a trusted network. Agents only connect to a server
-whose certificate chains to a root trusted by Windows. A lab agent therefore needs Caddy's root
-certificate in the computer's Trusted Root store. Do not use this mode in production.
+page, so do this only on a trusted network. Agents only connect to a server whose certificate
+they trust. For a lab agent, either put Caddy's root certificate in the computer's Trusted Root
+store, or turn on *Skip certificate check* when you generate the Windows install script: the
+agent then trusts Caddy's CA, which the lab proxy publishes at `/server-ca.crt`, for its
+EasyPatch connection only (see
+[Servers with a private certificate authority](agent-installation.md#servers-with-a-private-certificate-authority)).
+Do not use this mode in production.
 
 ## Building the images from source
 
@@ -293,7 +297,7 @@ docker compose build        # tags the images with EASYPATCH_VERSION from .env
 docker compose up -d
 ```
 
-Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.5.0-local`) so that
+Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.5.1-local`) so that
 `docker compose pull` never replaces your images with the release images.
 
 ## Building and testing from source

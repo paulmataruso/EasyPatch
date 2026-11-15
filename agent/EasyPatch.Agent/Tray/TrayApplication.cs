@@ -39,6 +39,10 @@ internal static class TrayApplication
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            // Follow the user's Windows app mode (Settings > Personalization > Colors): dark windows, menus and title
+            // bars in dark mode. Must be set before the first window exists.
+            Application.SetColorMode(SystemColorMode.System);
             using var context = new TrayContext();
             Application.Run(context);
         });

@@ -102,6 +102,34 @@ Microsoft does not document masking for every line of a verbose Windows Installe
 Treat verbose logs and command-line telemetry from token installs as sensitive, or use one of
 the alternatives in [agent-installation.md](agent-installation.md#protecting-the-enrollment-token).
 
+### Install scripts and private CAs
+
+The Windows install script normally downloads over TLS with the computer's certificate
+validation, and its trust rests on that connection: the script carries the MSI's SHA-256.
+*Skip certificate check* (off by default, chosen per generated script) is for servers whose
+certificate the endpoint does not trust, such as the lab setup with Caddy's internal CA:
+
+* The one-liner, the script, the CA certificate and the MSI are downloaded **without
+  certificate validation**. Someone who can intercept the connection during the installation can
+  hand the computer a different script, which then runs as Administrator or SYSTEM. This is the
+  same trust as a first visit to a site whose certificate warning you click through, so the
+  option is for networks you trust. The MSI hash is still checked, but against the script that
+  came over the same connection.
+* The script reads the CA certificate from `/server-ca.crt` (published by `Caddyfile.dev` only;
+  Caddy serves exactly `root.crt`, never the CA key) and passes it to the MSI as `SERVERCACERT`.
+  The agent stores it with its other bootstrap values (`HKLM\SOFTWARE\EasyPatch\Agent`,
+  SYSTEM and Administrators only) and adds it as a trust root **for its own connection to the
+  server only**. Other programs on the computer are not affected, unlike importing the CA into
+  the machine's Trusted Root store, which would also let the CA's key impersonate any website.
+* After the installation, every connection is validated again. Certificates are accepted when
+  Windows trusts them, or when they chain to the recorded CA, are valid now, are meant for
+  server authentication and match the server name. Revocation is not checked for the recorded
+  CA (Caddy's internal CA publishes no revocation information). The window in which an
+  attacker on the network could interfere is therefore the installation only, not the life of
+  the agent.
+* Turning certificate validation off in the agent itself is not possible. It would let anyone
+  on the network impersonate the server to the agent for as long as it runs.
+
 ## Agent request signing
 
 Every agent request after enrollment carries these headers:
@@ -441,7 +469,7 @@ LocalSystem.
 | # | Threat | Mitigation |
 |---|---|---|
 | S1 | Attacker impersonates an agent | Per-device ECDSA keys, signed requests, nonce and timestamp checks, revocation |
-| S2 | Attacker impersonates the server to an agent | The agent uses the operating system's normal TLS validation of the server certificate (the Windows certificate store, or the system CA store on Linux; the public CA from Caddy's ACME). TLS validation cannot be turned off. |
+| S2 | Attacker impersonates the server to an agent | The agent uses the operating system's normal TLS validation of the server certificate (the Windows certificate store, or the system CA store on Linux; the public CA from Caddy's ACME). TLS validation cannot be turned off. A Windows agent installed with *Skip certificate check* also accepts certificates from the one CA recorded at installation (`SERVERCACERT`), for its EasyPatch connection only, still with name and validity checks. See [Install scripts and private CAs](#install-scripts-and-private-cas). |
 | S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory TOTP |
 | T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select, by GUID or category, Windows updates, Linux package upgrades or upgrades of approved, installed applications (winget) that the agent's own scan found, never arbitrary binaries or packages. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. |
 | T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |

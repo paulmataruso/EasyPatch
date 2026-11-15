@@ -103,7 +103,7 @@ public static class AgentManagementEndpoints
             return TypedResults.NoContent();
         });
 
-        codes.MapGet("/{id:guid}/install-script", async (Guid id, string? package, bool? requireSignature, string? platform, EasyPatchDbContext db,
+        codes.MapGet("/{id:guid}/install-script", async (Guid id, string? package, bool? requireSignature, bool? skipCertificateCheck, string? platform, EasyPatchDbContext db,
             ITenantContext tenant, AgentPackageService packages, IOptions<EasyPatchOptions> options, TimeProvider clock, CancellationToken ct) =>
         {
             var code = await db.DeploymentCodes.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct) ?? throw AppException.NotFound("Deployment code");
@@ -128,10 +128,12 @@ public static class AgentManagementEndpoints
                       ?? throw AppException.Conflict("No agent package is available. Copy a signed EasyPatchAgent MSI into the agent packages directory.",
                           "no_agent_package");
             var url = options.Value.PublicUrl.TrimEnd('/');
-            var script = InstallScriptBuilder.Build(url, pkg, code.Code, code.Name, requireSignature ?? false, clock.GetUtcNow());
-            var scriptUrl = $"{url}/downloads/install/{code.Code}.ps1" + (requireSignature == true ? "?requireSignature=true" : string.Empty);
-            return TypedResults.Ok(new InstallScriptResponse(script, OneLiner(url, code.Code, requireSignature == true), scriptUrl, pkg.FileName, pkg.Version,
-                pkg.Sha256, requireSignature ?? false));
+            var signature = requireSignature ?? false;
+            var skipCheck = skipCertificateCheck ?? false;
+            var script = InstallScriptBuilder.Build(url, pkg, code.Code, code.Name, signature, clock.GetUtcNow(), skipCheck);
+            return TypedResults.Ok(new InstallScriptResponse(script, InstallScriptBuilder.OneLiner(url, code.Code, signature, skipCheck),
+                InstallScriptBuilder.ScriptUrl(url, code.Code, signature, skipCheck), pkg.FileName, pkg.Version, pkg.Sha256, signature,
+                SkipCertificateCheck: skipCheck));
         });
 
         // ---------------------------------------------------------------- enrollment requests (pending approvals)
@@ -230,12 +232,6 @@ public static class AgentManagementEndpoints
         }).WithTags("Agent management").RequireAuthorization(Policies.Viewer);
     }
 
-    private static string OneLiner(string url, string code, bool requireSignature)
-    {
-        var line = InstallScriptBuilder.OneLiner(url, code);
-        return requireSignature ? line.Replace($"/{code}.ps1'", $"/{code}.ps1?requireSignature=true'", StringComparison.Ordinal) : line;
-    }
-
     private static IQueryable<EnrollmentTokenDto> TokenQuery(EasyPatchDbContext db, IQueryable<EnrollmentToken> query) =>
         query.Join(db.Organizations, t => t.OrganizationId, o => o.Id, (t, o) => new { t, OrgName = o.Name })
             .Select(x => new EnrollmentTokenDto(x.t.Id, x.t.OrganizationId, x.OrgName, x.t.SiteId,
@@ -261,7 +257,7 @@ public static class AgentManagementEndpoints
         return rows.Select(r => new DeploymentCodeDto(r.Code.Id, r.Code.Code, r.Code.Name, r.Code.OrganizationId, r.OrgName, r.Code.SiteId, r.SiteName,
             r.Code.MaxPendingRequests, r.Code.AllowedSourceCidrs, r.Code.CreatedAt, r.Code.ExpiresAt, r.Code.RevokedAt, r.Pending, r.Approved,
             r.Code.RevokedAt is not null ? "Revoked" : r.Code.ExpiresAt is { } exp && exp <= now ? "Expired" : "Active",
-            InstallScriptBuilder.OneLiner(url, r.Code.Code), $"{url}/downloads/install/{r.Code.Code}.ps1",
+            InstallScriptBuilder.OneLiner(url, r.Code.Code), InstallScriptBuilder.ScriptUrl(url, r.Code.Code),
             LinuxInstallScriptBuilder.OneLiner(url, r.Code.Code), $"{url}/downloads/install/{r.Code.Code}.sh")).ToList();
     }
 
@@ -355,7 +351,7 @@ public static class DownloadEndpoints
                 "text/plain; charset=utf-8");
         });
 
-        g.MapGet("/install/{code}.ps1", async (string code, bool? requireSignature, EasyPatchDbContext db, AgentPackageService packages,
+        g.MapGet("/install/{code}.ps1", async (string code, bool? requireSignature, bool? skipCertificateCheck, EasyPatchDbContext db, AgentPackageService packages,
             IOptions<EasyPatchOptions> options, TimeProvider clock, HttpContext http, CancellationToken ct) =>
         {
             var now = clock.GetUtcNow();
@@ -380,7 +376,8 @@ public static class DownloadEndpoints
             }
 
             http.Response.Headers.CacheControl = "no-store";
-            var script = InstallScriptBuilder.Build(options.Value.PublicUrl, package, deployment.Code, deployment.Name, requireSignature ?? false, now);
+            var script = InstallScriptBuilder.Build(options.Value.PublicUrl, package, deployment.Code, deployment.Name, requireSignature ?? false, now,
+                skipCertificateCheck ?? false);
             return Results.Text(script, "text/plain; charset=utf-8");
         });
     }

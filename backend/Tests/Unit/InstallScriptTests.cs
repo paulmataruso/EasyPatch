@@ -59,6 +59,55 @@ public sealed class InstallScriptTests
     }
 
     [Fact]
+    public void Skipping_the_certificate_check_passes_the_published_ca_to_the_msi_and_restores_checking()
+    {
+        var plain = InstallScriptBuilder.Build("https://patch.example.com", Package, "EPD-ABCDEFGHJKMNPQRS", "x", false, DateTimeOffset.UnixEpoch);
+        Assert.Contains("$SkipCertificateCheck = $false", plain, StringComparison.Ordinal);
+
+        var script = InstallScriptBuilder.Build("https://patch.example.com/", Package, "EPD-ABCDEFGHJKMNPQRS", "x", false, DateTimeOffset.UnixEpoch,
+            skipCertificateCheck: true);
+        Assert.Contains("$SkipCertificateCheck = $true", script, StringComparison.Ordinal);
+        Assert.Contains("$ServerCaUrl = 'https://patch.example.com/server-ca.crt'", script, StringComparison.Ordinal);
+        Assert.Contains("if ($serverCa) { $arguments += \"SERVERCACERT=$serverCa\" }", script, StringComparison.Ordinal);
+        Assert.Contains("CertificateAuthority", script, StringComparison.Ordinal);
+        // Checking is switched back on when the script ends, and the package hash is still verified.
+        Assert.Contains("[Net.ServicePointManager]::ServerCertificateValidationCallback = $null", script, StringComparison.Ordinal);
+        Assert.Contains("if ($hash -ne $ExpectedSha256)", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void One_liner_skips_the_certificate_check_only_when_asked_and_contains_no_variables()
+    {
+        var plain = InstallScriptBuilder.OneLiner("https://patch.example.com/", "EPD-ABC");
+        Assert.DoesNotContain("ServerCertificateValidationCallback", plain, StringComparison.Ordinal);
+        Assert.EndsWith("DownloadString('https://patch.example.com/downloads/install/EPD-ABC.ps1'))\"", plain, StringComparison.Ordinal);
+
+        var skip = InstallScriptBuilder.OneLiner("https://patch.example.com/", "EPD-ABC", requireSignature: true, skipCertificateCheck: true);
+        Assert.Contains("[Net.ServicePointManager]::ServerCertificateValidationCallback={[bool]1}; iex", skip, StringComparison.Ordinal);
+        Assert.Contains("'https://patch.example.com/downloads/install/EPD-ABC.ps1?requireSignature=true&skipCertificateCheck=true'", skip, StringComparison.Ordinal);
+        // No $ anywhere: a PowerShell prompt would expand variables inside the double-quoted -Command argument.
+        Assert.DoesNotContain("$", skip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_msi_records_the_server_ca_where_the_agent_reads_it_and_the_lab_proxy_publishes_it()
+    {
+        var root = RepositoryRoot();
+        var wxs = File.ReadAllText(Path.Combine(root, "agent", "Installer", "Package.wxs"));
+        Assert.Matches("<Property Id=\"SERVERCACERT\" Secure=\"yes\" />", wxs);
+        Assert.Matches("Name=\"ServerCaCertificate\" Type=\"string\" Value=\"\\[SERVERCACERT\\]\"", wxs);
+        Assert.Contains("<SetProperty Id=\"SERVERCACERT\" Value=\"[SAVEDSERVERCACERT]\"", wxs, StringComparison.Ordinal);
+
+        var source = File.ReadAllText(Path.Combine(root, "agent", "EasyPatch.Agent", "Platform", "RegistryBootstrapConfigSource.cs"));
+        Assert.Contains("ServerCaCertificateValue = \"ServerCaCertificate\"", source, StringComparison.Ordinal);
+
+        var caddy = File.ReadAllText(Path.Combine(root, "deployment", "caddy", "Caddyfile.dev"));
+        Assert.Contains($"handle {InstallScriptBuilder.ServerCaPath} {{", caddy, StringComparison.Ordinal);
+        Assert.Contains("rewrite * /root.crt", caddy, StringComparison.Ordinal);
+        Assert.DoesNotContain(InstallScriptBuilder.ServerCaPath, File.ReadAllText(Path.Combine(root, "deployment", "caddy", "Caddyfile")), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void One_liner_and_msiexec_commands_point_at_the_public_url()
     {
         Assert.Contains("https://patch.example.com/downloads/install/EPD-ABC.ps1", InstallScriptBuilder.OneLiner("https://patch.example.com/", "EPD-ABC"),

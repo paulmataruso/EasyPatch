@@ -276,10 +276,12 @@ function InstallScriptDialog({ code, onClose }: { code: DeploymentCodeDto | null
 function WindowsScript({ code }: { code: DeploymentCodeDto }) {
   const [pkg, setPkg] = useState('');
   const [requireSignature, setRequireSignature] = useState(false);
+  const [skipCertificateCheck, setSkipCertificateCheck] = useState(false);
   const packages = useList<AgentPackageDto>('/agent-packages');
   const script = useApi<InstallScriptResponse>(`/deployment-codes/${code.id}/install-script`, {
     package: pkg || undefined,
     requireSignature: requireSignature || undefined,
+    skipCertificateCheck: skipCertificateCheck || undefined,
   });
   const s = script.data;
   // The PowerShell script installs MSI packages only.
@@ -298,13 +300,20 @@ function WindowsScript({ code }: { code: DeploymentCodeDto }) {
             ))}
           </Select>
         </Field>
-        <Checkbox
-          label="Require a valid Authenticode signature"
-          hint="Enable when your MSI is code-signed. The script refuses to install an unsigned or tampered package."
-          checked={requireSignature}
-          onChange={(e) => setRequireSignature(e.target.checked)}
-          className="pb-1"
-        />
+        <div className="flex max-w-xl flex-col gap-2 pb-1">
+          <Checkbox
+            label="Require a valid Authenticode signature"
+            hint="Enable when your MSI is code-signed. The script refuses to install an unsigned or tampered package."
+            checked={requireSignature}
+            onChange={(e) => setRequireSignature(e.target.checked)}
+          />
+          <Checkbox
+            label="Skip certificate check"
+            hint="For a server with a private CA, such as the lab setup. The downloads don't check the certificate, so use it only on a network you trust. The agent then trusts that CA for its EasyPatch connection only."
+            checked={skipCertificateCheck}
+            onChange={(e) => setSkipCertificateCheck(e.target.checked)}
+          />
+        </div>
       </div>
       {script.isPending ? (
         <Spinner label="Generating script…" />
