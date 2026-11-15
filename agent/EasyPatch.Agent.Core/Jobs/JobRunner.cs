@@ -24,6 +24,7 @@ public sealed class JobRunner
     private readonly InstallUpdatesHandler _install;
     private readonly RestartHandler _restart;
     private readonly AgentUpdateHandler _agentUpdate;
+    private readonly UninstallAgentHandler _uninstall;
     private readonly UserNotifier _notifier;
     private readonly WuaOperationGate _gate;
     private readonly AgentRuntimeOptions _options;
@@ -42,6 +43,7 @@ public sealed class JobRunner
         InstallUpdatesHandler install,
         RestartHandler restart,
         AgentUpdateHandler agentUpdate,
+        UninstallAgentHandler uninstall,
         UserNotifier notifier,
         WuaOperationGate gate,
         AgentRuntimeOptions options,
@@ -56,6 +58,7 @@ public sealed class JobRunner
         _install = install;
         _restart = restart;
         _agentUpdate = agentUpdate;
+        _uninstall = uninstall;
         _notifier = notifier;
         _gate = gate;
         _options = options;
@@ -301,7 +304,12 @@ public sealed class JobRunner
         lock (_lock)
         {
             _executingJobId = jobId;
-            _activity = next.Job.Type == JobType.AgentUpdate ? "Updating agent" : next.Job.Type.ToString();
+            _activity = next.Job.Type switch
+            {
+                JobType.AgentUpdate => "Updating agent",
+                JobType.UninstallAgent => "Uninstalling agent",
+                _ => next.Job.Type.ToString(),
+            };
         }
 
         await _gate.EnterAsync(cancellationToken);
@@ -314,6 +322,7 @@ public sealed class JobRunner
                 JobType.UpdateScan => await RunScanJobAsync(jobId, cancellationToken),
                 JobType.InventoryRefresh => await RunInventoryJobAsync(jobId, cancellationToken),
                 JobType.AgentUpdate => await _agentUpdate.ExecuteAsync(record, cancellationToken),
+                JobType.UninstallAgent => await _uninstall.ExecuteAsync(record, cancellationToken),
                 _ => throw new NotSupportedException($"Job type {next.Job.Type} is not supported."),
             };
 
@@ -442,6 +451,7 @@ public sealed class JobRunner
         JobType.Restart => job.Restart is not null && _platform.SystemRestart is not null && RestartPayload.Validate(job.Restart).Count == 0,
         JobType.NotifyUser => job.Notify is not null && _platform.UserInteraction is not null && Enum.IsDefined(job.Notify.Preset),
         JobType.AgentUpdate => job.AgentUpdate is not null && _agentUpdate.CanUpdate,
+        JobType.UninstallAgent => _uninstall.CanUninstall,
         _ => false,
     };
 }

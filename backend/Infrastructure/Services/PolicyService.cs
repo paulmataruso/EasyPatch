@@ -23,13 +23,20 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
     public Task<Policy?> GetTagPolicyAsync(Guid tagId, CancellationToken ct = default) =>
         db.Policies.AsNoTracking().FirstOrDefaultAsync(p => p.Scope == PolicyScope.Tag && p.TagId == tagId, ct);
 
-    /// <summary>Policy layers of the tags an endpoint has (only tags that carry a policy).</summary>
-    public async Task<IReadOnlyList<TagPolicyLayer>> GetTagLayersAsync(Guid endpointId, CancellationToken ct = default)
+    /// <summary>Policy layers of the tags an endpoint has, its own and those of its site and organization (only tags that
+    /// carry a policy).</summary>
+    public async Task<IReadOnlyList<TagPolicyLayer>> GetTagLayersAsync(Endpoint endpoint, CancellationToken ct = default)
     {
-        var rows = await (from et in db.EndpointTags.AsNoTracking()
-                          join t in db.Tags.AsNoTracking() on et.TagId equals t.Id
+        ArgumentNullException.ThrowIfNull(endpoint);
+        var tagIds = (await EffectiveTags.ForEndpointsAsync(db, [endpoint.Id], ct)).Select(t => t.TagId).ToList();
+        if (tagIds.Count == 0)
+        {
+            return [];
+        }
+
+        var rows = await (from t in db.Tags.AsNoTracking()
                           join p in db.Policies.AsNoTracking() on t.Id equals p.TagId
-                          where et.EndpointId == endpointId && p.Scope == PolicyScope.Tag
+                          where tagIds.Contains(t.Id) && p.Scope == PolicyScope.Tag
                           select new { t.Name, t.Priority, Policy = p }).ToListAsync(ct);
         return rows.Select(r => new TagPolicyLayer(r.Name, r.Priority, r.Policy)).ToList();
     }
@@ -50,7 +57,7 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
         var global = await GetGlobalAsync(ct);
         var org = await GetOrganizationPolicyAsync(endpoint.OrganizationId, ct);
         var site = endpoint.SiteId is { } s ? await GetSitePolicyAsync(s, ct) : null;
-        var tags = await GetTagLayersAsync(endpoint.Id, ct);
+        var tags = await GetTagLayersAsync(endpoint, ct);
         var own = await GetEndpointPolicyAsync(endpoint.Id, ct);
         return PolicyResolver.Resolve(global, org, site, own, tags);
     }
@@ -65,26 +72,23 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
         var sites = all.Where(p => p.Scope == PolicyScope.Site && p.SiteId != null).ToDictionary(p => p.SiteId!.Value);
         var endpoints = all.Where(p => p.Scope == PolicyScope.Endpoint && p.EndpointId != null).ToDictionary(p => p.EndpointId!.Value);
         var tagPolicies = all.Where(p => p.Scope == PolicyScope.Tag && p.TagId != null).ToDictionary(p => p.TagId!.Value);
-        var endpointTags = new Dictionary<Guid, List<TagPolicyLayer>>();
+        var layersByTag = new Dictionary<Guid, TagPolicyLayer>();
+        ILookup<Guid, Guid> endpointTags = Array.Empty<EndpointTag>().ToLookup(l => l.EndpointId, l => l.TagId);
+        ILookup<Guid, Guid> siteTags = Array.Empty<SiteTag>().ToLookup(l => l.SiteId, l => l.TagId);
+        ILookup<Guid, Guid> organizationTags = Array.Empty<OrganizationTag>().ToLookup(l => l.OrganizationId, l => l.TagId);
         if (tagPolicies.Count > 0)
         {
             var taggedIds = tagPolicies.Keys.ToList();
-            var tags = await db.Tags.AsNoTracking().Where(t => taggedIds.Contains(t.Id)).ToDictionaryAsync(t => t.Id, ct);
-            var links = await db.EndpointTags.AsNoTracking().Where(et => taggedIds.Contains(et.TagId)).ToListAsync(ct);
-            foreach (var link in links)
+            foreach (var tag in await db.Tags.AsNoTracking().Where(t => taggedIds.Contains(t.Id)).ToListAsync(ct))
             {
-                if (!tags.TryGetValue(link.TagId, out var tag))
-                {
-                    continue;
-                }
-
-                if (!endpointTags.TryGetValue(link.EndpointId, out var layers))
-                {
-                    endpointTags[link.EndpointId] = layers = [];
-                }
-
-                layers.Add(new TagPolicyLayer(tag.Name, tag.Priority, tagPolicies[link.TagId]));
+                layersByTag[tag.Id] = new TagPolicyLayer(tag.Name, tag.Priority, tagPolicies[tag.Id]);
             }
+
+            // An endpoint has its own tags and those of its site and organization.
+            endpointTags = (await db.EndpointTags.AsNoTracking().Where(l => taggedIds.Contains(l.TagId)).ToListAsync(ct)).ToLookup(l => l.EndpointId, l => l.TagId);
+            siteTags = (await db.SiteTags.AsNoTracking().Where(l => taggedIds.Contains(l.TagId)).ToListAsync(ct)).ToLookup(l => l.SiteId, l => l.TagId);
+            organizationTags = (await db.OrganizationTags.AsNoTracking().Where(l => taggedIds.Contains(l.TagId)).ToListAsync(ct))
+                .ToLookup(l => l.OrganizationId, l => l.TagId);
         }
 
         var cache = new Dictionary<(Guid, Guid?, string), EffectivePolicy>();
@@ -92,13 +96,15 @@ public sealed class PolicyService(EasyPatchDbContext db, TimeProvider clock)
         {
             var org = orgs.GetValueOrDefault(orgId);
             var site = siteId is { } s ? sites.GetValueOrDefault(s) : null;
-            var tags = endpointTags.GetValueOrDefault(endpointId);
+            var tagIds = endpointTags[endpointId].Concat(siteId is { } sid ? siteTags[sid] : []).Concat(organizationTags[orgId])
+                .Where(layersByTag.ContainsKey).Distinct().Order().ToList();
+            var tags = tagIds.Count == 0 ? null : tagIds.Select(id => layersByTag[id]).ToList();
             if (endpoints.TryGetValue(endpointId, out var own))
             {
                 return PolicyResolver.Resolve(global, org, site, own, tags);
             }
 
-            var tagKey = tags is null ? "" : string.Join(',', tags.Select(t => t.Policy.TagId).Order());
+            var tagKey = string.Join(',', tagIds);
             if (!cache.TryGetValue((orgId, siteId, tagKey), out var policy))
             {
                 policy = PolicyResolver.Resolve(global, org, site, null, tags);

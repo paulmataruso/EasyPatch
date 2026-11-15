@@ -123,11 +123,12 @@ Invalid values return `400 validation_failed`.
 
 | Method | Route | Notes |
 |---|---|---|
-| GET | `/tags` | Viewer. Every tag (`id, name, color, description, priority, endpointCount, hasPolicy`). Organization-restricted users get only the tags on their endpoints, with `endpointCount` 0. |
+| GET | `/tags` | Viewer. Every tag (`id, name, color, description, priority, endpointCount, hasPolicy, siteCount, organizationCount`). `endpointCount` counts endpoints with the tag directly or through their site or organization. Organization-restricted users get only the tags on their endpoints, sites and organizations, with the counts 0. |
 | POST | `/tags` | SuperAdmin. `{name (1-40), color, description?, priority (0-1000)}`. `color`: `gray, blue, green, amber, red, purple, teal, pink`. `409 tag_exists` for a duplicate name (case-insensitive). |
-| PUT/DELETE | `/tags/{id}` | SuperAdmin. DELETE removes the tag from every endpoint and deletes its policy. |
+| PUT/DELETE | `/tags/{id}` | SuperAdmin. DELETE removes the tag from every endpoint, site and organization and deletes its policy. |
 | GET/PUT/DELETE | `/tags/{id}/policy` | SuperAdmin. A policy body as above; `maxConcurrentInstallsPerSite` cannot be set. |
-| PUT | `/endpoints/{id}/tags` | `{tagIds[]}` replaces the endpoint's tags (at most 20). Operator without organization restrictions. |
+| PUT | `/endpoints/{id}/tags` | `{tagIds[]}` replaces the endpoint's own tags (at most 20). Operator without organization restrictions. |
+| PUT | `/organizations/{id}/tags`, `/sites/{id}/tags` | `{tagIds[]}` replaces the tags of an organization or site (at most 20). Every endpoint of the organization or site has these tags, and their tag policies apply to it. Operator without organization restrictions. Organization and site responses include their `tags`. |
 | POST | `/endpoints/tags/bulk` | `{endpointIds[], addTagIds[]?, removeTagIds[]?}` → `{changed}`. At most 1000 endpoints. Operator without organization restrictions. |
 | GET | `/endpoints/{id}/tag-policies` | Viewer. The tag policies that apply to the endpoint, in resolution order (`{tag, priority, policy}`). |
 
@@ -152,7 +153,7 @@ Invalid values return `400 validation_failed`.
 
 | Method | Route | Notes |
 |---|---|---|
-| GET | `/endpoints` | Filters: `organizationId, siteId, search, compliance, online, os, rebootPending, outdatedAgent, status, tagId, knownExploited`. Each item includes `tags`, `missingDeferredCount` (updates inside their rollout delay) and `knownExploitedMissingCount` (outstanding allowed updates that fix a CISA known-exploited vulnerability). Sort: `hostname` (default), `organization, site, os, missing, knownExploited, lastCheckIn, compliance, agentVersion`. |
+| GET | `/endpoints` | Filters: `organizationId, siteId, search, compliance, online, os, rebootPending, outdatedAgent, status, tagId, knownExploited`. Each item includes `tags` (with `inheritedFrom`: `null` for the endpoint's own tags, `Site` or `Organization` for tags it has through its site or organization; `tagId` matches all three), `missingDeferredCount` (updates inside their rollout delay) and `knownExploitedMissingCount` (outstanding allowed updates that fix a CISA known-exploited vulnerability). Sort: `hostname` (default), `organization, site, os, missing, knownExploited, lastCheckIn, compliance, agentVersion`. |
 | GET/PUT/DELETE | `/endpoints/{id}` | GET includes `platform` (`Windows` or `Linux`) and, for Linux, `linux`: `osId`, `osVersion`, `kernelVersion`, `packageManager`, `keyProtection`. For Windows, `applications` describes application updates: `enabled` (effective policy), `supported` (agent 1.4.0 or newer), `approvedApps` (count), `wingetVersion`, `lastCheckAt`, `lastError`. PUT: `siteId`, `notes`, `esuOverride`. DELETE revokes the credentials and removes the record. |
 | POST | `/endpoints/{id}/revoke` | `{reason?}`. Revokes all credentials; the agent can no longer call the server. |
 | GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification and excluded updates, with the live state of an active job overlaid. `deferredUntil` is set while an update is inside its rollout delay. `cveIds`, `knownExploited` and `kevDueDate` (the earliest CISA due date) describe the vulnerabilities the update fixes on this endpoint; known-exploited updates are listed first within each state. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). Application updates (category `Application`) include `package` with the winget package ID as the name, the target and installed versions and `winget` as the repository. |
@@ -170,6 +171,7 @@ Invalid values return `400 validation_failed`.
 | POST | `/endpoints/{id}/restart` | `{mode, condition, countdownMinutes?, deadlineMinutes?, scheduledAt?, expiresAfterMinutes?, force}` → `202` with the job. `mode`: `Immediate`, `Countdown`, `PromptWithDeadline`, `PromptNoDeadline`; `condition`: `Always`, `OnlyIfPending`. `scheduledAt` is at most 31 days ahead; `expiresAfterMinutes` (15 to 1440, default 120) is how long an offline computer may take to pick it up. `409 duplicate_job` while another restart is active, `409 agent_upgrade_required` for agents without restart support. |
 | POST | `/endpoints/{id}/notify` | `{preset, restartAt?}` → `202` with the job. `restartAt` is required for `RestartScheduled`. `409 agent_upgrade_required` for agents without message support, `409 not_supported_on_linux` for Linux endpoints. |
 | POST | `/endpoints/{id}/agent-update` | `{version?}` (send `{}` for the newest) → `202` with an `AgentUpdate` job for the newest signed package for the agent's architecture and package format, or the given version. `409` with `agent_upgrade_required` (agent older than 1.2.0 or built without a release key), `no_agent_package`, `agent_up_to_date` (also for older versions: agents are never downgraded), `package_not_signed`, `release_key_not_trusted` or `duplicate_job`. |
+| POST | `/endpoints/{id}/uninstall-agent` | → `202` with an `UninstallAgent` job. The agent removes its own package, which unenrolls it; the job completes when the unenrollment arrives and the endpoint becomes `Decommissioned`. `409 agent_upgrade_required` for agents older than 1.6.0 (or not installed from their package), `409 duplicate_job`, `409 endpoint_not_active`. |
 | POST | `/endpoints/bulk/scan`, `/endpoints/bulk/install-updates` | `{endpointIds[], force}`. Returns a per-endpoint outcome. |
 | POST | `/endpoints/bulk/restart` | `{endpointIds[], restart: {…as above}}`. Per-endpoint outcome. |
 | POST | `/endpoints/bulk/notify` | `{endpointIds[], message: {preset, restartAt?}}`. Per-endpoint outcome. |
@@ -198,7 +200,7 @@ creates a `Selected` install job on each affected endpoint, at most 1000).
 
 | Method | Route | Notes |
 |---|---|---|
-| GET | `/jobs` | Filters: `endpointId, organizationId, status, type, trigger, active, from, to, page, pageSize`. Types: `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart`, `NotifyUser`, `AgentUpdate` |
+| GET | `/jobs` | Filters: `endpointId, organizationId, status, type, trigger, active, from, to, page, pageSize`. Types: `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart`, `NotifyUser`, `AgentUpdate`, `UninstallAgent` |
 | GET | `/jobs/{id}` | Includes per-update results and the job's events |
 | POST | `/jobs/{id}/cancel` | Operator. Immediate when the job is queued, delivered or waiting for a reboot; otherwise the agent is asked to stop after the current update. A restart that is waiting for users is cancelled at the agent's next check-in, which also aborts a Windows restart that is still in its warning period. |
 | DELETE | `/jobs/{id}` | Same as `POST /jobs/{id}/cancel` |

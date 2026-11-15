@@ -51,8 +51,14 @@ if [ -d /run/systemd/system ]; then
 fi
 
 %preun
-if [ "$1" -eq 0 ] && [ -d /run/systemd/system ]; then
-    systemctl disable --now easypatch-agent.service >/dev/null 2>&1 || :
+if [ "$1" -eq 0 ]; then
+    if [ -d /run/systemd/system ]; then
+        systemctl disable --now easypatch-agent.service >/dev/null 2>&1 || :
+    fi
+    # Best effort, like the Windows uninstaller: tell the server and delete the agent identity. Never on upgrade.
+    if [ -x /opt/easypatch/easypatch-agent ]; then
+        /opt/easypatch/easypatch-agent unenroll --reason "Agent uninstalled" >/dev/null || :
+    fi
 fi
 
 %postun

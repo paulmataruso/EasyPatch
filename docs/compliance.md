@@ -80,6 +80,24 @@ manually ignores the delay; the install preview warns when that happens.
 A long delay keeps endpoints compliant while they lack released fixes. The policy editor warns
 about delays longer than 30 days.
 
+#### Setting up a pilot ring
+
+1. Set the delay everyone else should wait in the global policy (**Settings → Global policy**)
+   or in each organization's policy, for example 7 days for security updates and 14 for others.
+2. Create a tag such as **Pilot** (**Settings → Tags**, super administrators) and give it a
+   policy with both delays at 0. Give it a higher priority than other tags with delays.
+3. Put the tag where the pilot computers are:
+   * on an **organization** (its page, **Add tags**) for a whole customer;
+   * on a **site** (the organization's **Sites** tab) for one office;
+   * on single **endpoints** (endpoint page, or several at once from the endpoint list).
+
+An endpoint has its own tags plus the tags of its site and organization, and a tag policy
+applies however the endpoint got the tag. Tag policies sit between the site policy and the
+endpoint's own policy, so the pilot tag's 0-day delay wins over the organization's or site's
+delay. Inherited tags are shown with a dashed outline on the endpoint, and the endpoint list's
+tag filter includes them. Adding or removing a tag recalculates the compliance of the affected
+endpoints at once.
+
 ## Vulnerabilities and known-exploited updates
 
 EasyPatch shows which CVEs each outstanding update fixes, and flags updates that fix a

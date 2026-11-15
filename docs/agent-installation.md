@@ -18,8 +18,9 @@ Update Agent API that Windows itself uses. The agent:
   and Intune settings are honored and only reported;
 * shows an EasyPatch icon in the notification area of signed-in users, with a status window
   (see [Tray icon](#tray-icon));
-* cannot run commands. It executes five job types: update scan, inventory refresh, install
-  updates, restart, and preset messages to signed-in users.
+* cannot run commands. It executes a fixed set of job types: update scan, inventory refresh,
+  install updates, restart, preset messages to signed-in users, agent update and uninstall
+  (removing its own package).
 
 ## Requirements
 
@@ -297,6 +298,8 @@ agent's informational events, including:
 | 1013 | Installing an agent update (the service is about to be restarted by Windows Installer) |
 | 1014 | Agent updated (logged by the new version) |
 | 1015 | Agent update failed or refused (warning, with the reason) |
+| 1016 | Removing the agent for an uninstall job (warning) |
+| 1017 | Uninstall job failed (warning, with the reason) |
 
 ## Tray icon
 
@@ -403,6 +406,17 @@ An agent that never finished enrolling loses its token or deployment code on upg
 again or run `enroll`.
 
 ## Uninstalling
+
+From the console (agent 1.6.0 or later): open the endpoint, **More → Uninstall agent…** and type
+the computer name to confirm. The agent removes itself the next time it checks in, after any
+job it is running, with `msiexec /x` of its own product (nothing else can be removed this
+way). The job completes when the agent's uninstaller has unenrolled it; the endpoint is then
+shown as decommissioned, its other queued jobs are cancelled and its history is kept (delete
+the endpoint if you no longer need it). If the computer is offline, the uninstall waits until
+the job expires. If Windows Installer fails, the agent stays installed and reports the job as
+failed with the error; the log is `C:\ProgramData\EasyPatch\logs\uninstall.log`.
+
+On the computer:
 
 ```powershell
 msiexec /x EasyPatchAgent-1.0.0-x64.msi /qn

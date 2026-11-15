@@ -31,7 +31,8 @@ export function TagsTab() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="max-w-3xl text-sm text-muted">
           Tags group endpoints across organizations, for example update rings (“Pilot”, “Broad”) or roles (“SQL servers”). A tag can carry a policy that applies
-          after the site policy and before the endpoint’s own policy; when an endpoint has several tags with policies, the higher priority wins.
+          after the site policy and before the endpoint’s own policy; when an endpoint has several tags with policies, the higher priority wins. Put a tag on an
+          endpoint, or on an organization or site (on the organization’s page) to give it to every endpoint there.
         </p>
         {isSuperAdmin && (
           <Button variant="primary" icon={<Plus className="size-4" aria-hidden />} onClick={() => setEditing('new')}>
@@ -72,6 +73,16 @@ export function TagsTab() {
                     <Link className="text-accent hover:underline" to={`/endpoints?tagId=${t.id}`}>
                       {t.endpointCount}
                     </Link>
+                    {(t.siteCount > 0 || t.organizationCount > 0) && (
+                      <div className="text-xs text-muted">
+                        {[
+                          t.organizationCount > 0 && `${t.organizationCount} organization${t.organizationCount === 1 ? '' : 's'}`,
+                          t.siteCount > 0 && `${t.siteCount} site${t.siteCount === 1 ? '' : 's'}`,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    )}
                   </td>
                   <td>{t.hasPolicy ? <Badge tone="accent">Policy</Badge> : <span className="text-sm text-subtle">None</span>}</td>
                   <td>
@@ -107,7 +118,9 @@ export function TagsTab() {
         loading={remove.isPending}
         error={remove.error}
       >
-        The tag is removed from {deleting?.endpointCount ?? 0} endpoint(s){deleting?.hasPolicy ? ' and its policy is deleted; those endpoints go back to their site, organization and global policy' : ''}.
+        The tag is removed from {deleting?.endpointCount ?? 0} endpoint(s)
+        {(deleting?.siteCount ?? 0) + (deleting?.organizationCount ?? 0) > 0 ? ' (including those that have it through a site or organization)' : ''}
+        {deleting?.hasPolicy ? ' and its policy is deleted; those endpoints go back to their site, organization and global policy' : ''}.
       </ConfirmDialog>
     </>
   );

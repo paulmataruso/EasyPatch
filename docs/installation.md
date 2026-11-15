@@ -25,7 +25,7 @@ ARM64). You need the repository for `docker-compose.yml`, the Caddy configuratio
 scripts. Check out the release tag you want to run:
 
 ```bash
-git clone --branch v1.5.3 https://github.com/paulmataruso/EasyPatch.git easypatch
+git clone --branch v1.6.0 https://github.com/paulmataruso/EasyPatch.git easypatch
 cd easypatch
 ```
 
@@ -51,7 +51,7 @@ Edit `.env`:
 |---|---|---|
 | `EASYPATCH_DOMAIN` | yes | The public DNS name. Browsers and agents connect to `https://<EASYPATCH_DOMAIN>` |
 | `ACME_EMAIL` | yes | Contact address given to the certificate authority |
-| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.5.3`). Images you build yourself get this tag too |
+| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.6.0`). Images you build yourself get this tag too |
 | `EASYPATCH_PUBLIC_URL` | no | Overrides the URL used in install commands, reset links and scripts. Defaults to `https://<EASYPATCH_DOMAIN>` |
 | `EASYPATCH_EDGE_SUBNET` | no | Subnet of the network between Caddy and the API (default `172.30.0.0/24`). Change it only if it collides with an existing network. The API trusts `X-Forwarded-For` only from this subnet |
 
@@ -113,12 +113,12 @@ Download the agent packages of the same release from
 each with its `.sig` release signature, to `data/agent-packages/`:
 
 ```bash
-mkdir -p /tmp/easypatch-v1.5.3
-gh release download v1.5.3 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.5.3 \
+mkdir -p /tmp/easypatch-v1.6.0
+gh release download v1.6.0 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.6.0 \
   --pattern 'EasyPatchAgent-*' --pattern SHA256SUMS
 # or download the same files from the release page in a browser
-(cd /tmp/easypatch-v1.5.3 && sha256sum --check --ignore-missing SHA256SUMS)
-cp /tmp/easypatch-v1.5.3/EasyPatchAgent-1.5.3-* data/agent-packages/
+(cd /tmp/easypatch-v1.6.0 && sha256sum --check --ignore-missing SHA256SUMS)
+cp /tmp/easypatch-v1.6.0/EasyPatchAgent-1.6.0-* data/agent-packages/
 chmod 644 data/agent-packages/*
 ```
 
@@ -297,7 +297,7 @@ docker compose build        # tags the images with EASYPATCH_VERSION from .env
 docker compose up -d
 ```
 
-Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.5.3-local`) so that
+Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.6.0-local`) so that
 `docker compose pull` never replaces your images with the release images.
 
 ## Building and testing from source

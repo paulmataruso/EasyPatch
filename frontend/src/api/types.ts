@@ -82,7 +82,7 @@ export const DEFAULT_INSTALL_CATEGORIES: readonly UpdateCategory[] = [
   'Other',
 ];
 
-export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh', 'Restart', 'NotifyUser', 'AgentUpdate'] as const;
+export const JOB_TYPES = ['UpdateScan', 'InstallUpdates', 'InventoryRefresh', 'Restart', 'NotifyUser', 'AgentUpdate', 'UninstallAgent'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const JOB_STATUSES = [
@@ -122,6 +122,7 @@ export const AGENT_CAPABILITIES = {
   tray: 'tray',
   selfUpdate: 'self-update',
   applicationUpdates: 'app-updates',
+  uninstall: 'uninstall',
 } as const;
 
 export const WINDOWS_UPDATE_POLICY_GROUPS = ['AutomaticUpdates', 'FeatureUpdates', 'QualityUpdates', 'RestartBehavior'] as const;
@@ -423,6 +424,8 @@ export interface SiteDto {
   endpointCount: number;
   createdAt: Instant;
   archivedAt: Instant | null;
+  /** The site's own tags; every endpoint of the site has them. */
+  tags?: TagRefDto[] | null;
 }
 
 export interface OrganizationDto {
@@ -439,6 +442,8 @@ export interface OrganizationDto {
   archivedAt: Instant | null;
   sites: SiteDto[];
   summary: OrganizationSummaryDto;
+  /** The organization's own tags; every endpoint of the organization has them. */
+  tags?: TagRefDto[] | null;
 }
 
 export interface OrganizationRequest {
@@ -556,16 +561,21 @@ export interface TagRefDto {
   id: Guid;
   name: string;
   color: string;
+  /** On an endpoint's tags: set when the endpoint has the tag through its site or organization. */
+  inheritedFrom?: 'Site' | 'Organization' | null;
 }
 
 export interface TagDto extends TagRefDto {
   description: string | null;
   /** Higher priority tag policies override lower ones on endpoints with several tags. */
   priority: number;
-  /** 0 for organization-restricted users. */
+  /** Endpoints with the tag, directly or through their site or organization. 0 for organization-restricted users. */
   endpointCount: number;
   hasPolicy: boolean;
   createdAt: Instant;
+  /** Sites and organizations tagged with it (0 for organization-restricted users). */
+  siteCount: number;
+  organizationCount: number;
 }
 
 export interface TagRequest {
@@ -580,6 +590,11 @@ export interface TagPolicyLayerDto {
   tag: TagRefDto;
   priority: number;
   policy: PolicyDto;
+}
+
+/** The tags of an organization or site (replaces the whole set). */
+export interface TagAssignmentRequest {
+  tagIds: Guid[];
 }
 
 export interface BulkEndpointTagsRequest {

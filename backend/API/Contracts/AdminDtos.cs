@@ -109,7 +109,8 @@ public sealed record OrganizationDto(
     DateTimeOffset UpdatedAt,
     DateTimeOffset? ArchivedAt,
     IReadOnlyList<SiteDto> Sites,
-    OrganizationSummaryDto Summary);
+    OrganizationSummaryDto Summary,
+    IReadOnlyList<TagRefDto>? Tags = null);
 
 public sealed record OrganizationRequest(string Name, string? Description, string? ContactName, string? ContactEmail, string? Notes, string? TimeZone);
 
@@ -124,7 +125,8 @@ public sealed record SiteDto(
     bool IsActive,
     int EndpointCount,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? ArchivedAt);
+    DateTimeOffset? ArchivedAt,
+    IReadOnlyList<TagRefDto>? Tags = null);
 
 public sealed record SiteRequest(string Name, string? Description, string? Address, string? TimeZone);
 
@@ -234,14 +236,20 @@ public sealed record EffectivePolicyDto(
 // Tags
 // ---------------------------------------------------------------------------------------------
 
-public sealed record TagRefDto(Guid Id, string Name, string Color);
+/// <param name="InheritedFrom">Null for an endpoint's own tag; "Site" or "Organization" when the endpoint has it through its
+/// site or organization.</param>
+public sealed record TagRefDto(Guid Id, string Name, string Color, string? InheritedFrom = null);
 
+/// <param name="EndpointCount">Endpoints with the tag, directly or through their site or organization.</param>
 public sealed record TagDto(Guid Id, string Name, string Color, string? Description, int Priority, int EndpointCount, bool HasPolicy,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt, int SiteCount = 0, int OrganizationCount = 0);
 
 public sealed record TagRequest(string Name, string Color, string? Description, int Priority);
 
 public sealed record EndpointTagsRequest(IReadOnlyList<Guid> TagIds);
+
+/// <summary>The tags of an organization or site (replaces the whole set).</summary>
+public sealed record TagAssignmentRequest(IReadOnlyList<Guid> TagIds);
 
 public sealed record BulkEndpointTagsRequest(IReadOnlyList<Guid> EndpointIds, IReadOnlyList<Guid>? AddTagIds, IReadOnlyList<Guid>? RemoveTagIds);
 

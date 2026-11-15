@@ -517,3 +517,68 @@ public sealed class FakeAgentInstaller : IAgentInstaller
         }
     }
 }
+
+/// <summary>
+/// Stands in for <c>msiexec /x</c> (or apt-get remove). By default it behaves like a real removal: starting it "stops the
+/// service" (cancels <see cref="ServiceStopping"/>) and it never exits while the agent is alive. Set <see cref="ExitCode"/>
+/// to make it return while the agent is still running instead.
+/// </summary>
+public sealed class FakeAgentUninstaller : IAgentUninstaller
+{
+    public List<string> Started { get; } = [];
+
+    public CancellationTokenSource? ServiceStopping { get; set; }
+
+    public int? ExitCode { get; set; }
+
+    /// <summary>What <see cref="ReadResult"/> returns (the result of a removal started by an earlier process).</summary>
+    public int? Result { get; set; }
+
+    public int BusyChecks { get; set; }
+
+    public string DisplayName => "Windows Installer";
+
+    public IInstallerProcess Start(string logPath)
+    {
+        Started.Add(logPath);
+        if (ExitCode is null)
+        {
+            ServiceStopping?.Cancel();
+        }
+
+        return new Process(ExitCode);
+    }
+
+    public bool IsInstallerBusy()
+    {
+        if (BusyChecks > 0)
+        {
+            BusyChecks--;
+            return true;
+        }
+
+        return false;
+    }
+
+    public int? ReadResult(string logPath) => Result;
+
+    public string DescribeResult(int code) => code == 1603 ? " (a fatal error occurred during installation)" : string.Empty;
+
+    private sealed class Process(int? exitCode) : IInstallerProcess
+    {
+        public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
+        {
+            if (exitCode is { } code)
+            {
+                return code;
+            }
+
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+}

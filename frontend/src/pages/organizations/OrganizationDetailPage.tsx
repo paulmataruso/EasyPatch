@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { Archive, ArchiveRestore, KeyRound, MapPin, Pencil, Plus, ScrollText, Settings2, Terminal, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, KeyRound, MapPin, Pencil, Plus, ScrollText, Settings2, Tag as TagIcon, Terminal, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApi, useApiMutation, usePolicy } from '../../api/hooks';
 import type { OrganizationDto, PolicyRequest, SiteDto, SiteRequest } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { ConfirmDialog, Dialog } from '../../components/Dialog';
 import { PolicyEditor, resolveInherited } from '../../components/PolicyEditor';
+import { GroupTagsDialog, TagList } from '../../components/Tags';
 import { useToast } from '../../components/Toast';
 import {
   Badge,
@@ -35,6 +36,8 @@ export function OrganizationDetailPage() {
   const url = useUrlState();
   const tab = url.get('tab', 'overview');
   const org = useApi<OrganizationDto>(`/organizations/${id}`, undefined, { refetchInterval: 60_000 });
+  const { canOperate, isUnrestricted } = useAuth();
+  const [tagsOpen, setTagsOpen] = useState(false);
 
   if (org.isPending) return <Spinner />;
   if (org.isError) return <ErrorState error={org.error} onRetry={() => void org.refetch()} />;
@@ -50,7 +53,21 @@ export function OrganizationDetailPage() {
             {!o.isActive && <Badge>Archived</Badge>}
           </span>
         }
-        subtitle={o.description ?? `${o.summary.endpointCount} endpoints · ${o.sites.length} sites · ${o.timeZone}`}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>{o.description ?? `${o.summary.endpointCount} endpoints · ${o.sites.length} sites · ${o.timeZone}`}</span>
+            {(o.tags?.length ?? 0) > 0 && <TagList tags={o.tags} max={8} />}
+            {canOperate && isUnrestricted && (
+              <Button size="sm" variant="ghost" icon={<TagIcon className="size-3.5" aria-hidden />} onClick={() => setTagsOpen(true)}>
+                {(o.tags?.length ?? 0) > 0 ? 'Edit tags' : 'Add tags'}
+              </Button>
+            )}
+          </span>
+        }
+      />
+      <GroupTagsDialog
+        target={tagsOpen ? { kind: 'organization', id: o.id, name: o.name, current: o.tags ?? [] } : null}
+        onClose={() => setTagsOpen(false)}
       />
       <Tabs
         active={tab}
@@ -177,9 +194,10 @@ function OverviewTab({ org }: { org: OrganizationDto }) {
 }
 
 function SitesTab({ org }: { org: OrganizationDto }) {
-  const { canOperate } = useAuth();
+  const { canOperate, isUnrestricted } = useAuth();
   const toast = useToast();
   const [editing, setEditing] = useState<SiteDto | 'new' | null>(null);
+  const [tagging, setTagging] = useState<SiteDto | null>(null);
   const [policySite, setPolicySite] = useState<SiteDto | null>(null);
   const [confirm, setConfirm] = useState<{ site: SiteDto; action: 'archive' | 'restore' | 'delete' } | null>(null);
 
@@ -214,6 +232,7 @@ function SitesTab({ org }: { org: OrganizationDto }) {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Tags</th>
                 <th>Address</th>
                 <th>Time zone</th>
                 <th className="text-right">Endpoints</th>
@@ -228,6 +247,18 @@ function SitesTab({ org }: { org: OrganizationDto }) {
                     <span className="font-medium">{site.name}</span>
                     {!site.isActive && <Badge className="ml-2">Archived</Badge>}
                     {site.description && <p className="text-xs text-muted">{site.description}</p>}
+                  </td>
+                  <td>
+                    <span className="inline-flex flex-wrap items-center gap-1">
+                      <TagList tags={site.tags} max={4} />
+                      {canOperate && isUnrestricted && (
+                        <Button size="sm" variant="ghost" icon={<TagIcon className="size-3.5" aria-hidden />} onClick={() => setTagging(site)}
+                          aria-label={`Tags of ${site.name}`} title="Edit tags">
+                          {(site.tags?.length ?? 0) > 0 ? undefined : 'Add'}
+                        </Button>
+                      )}
+                      {(site.tags?.length ?? 0) === 0 && !(canOperate && isUnrestricted) && <span className="text-subtle">—</span>}
+                    </span>
                   </td>
                   <td className="text-muted">{site.address ?? '—'}</td>
                   <td>{site.timeZone}</td>
@@ -271,6 +302,10 @@ function SitesTab({ org }: { org: OrganizationDto }) {
         </TableWrap>
       )}
       <SiteFormDialog org={org} site={editing === 'new' ? undefined : (editing ?? undefined)} open={editing !== null} onClose={() => setEditing(null)} />
+      <GroupTagsDialog
+        target={tagging ? { kind: 'site', id: tagging.id, name: tagging.name, current: tagging.tags ?? [], organization: { name: org.name, tags: org.tags ?? [] } } : null}
+        onClose={() => setTagging(null)}
+      />
       <SitePolicyDialog org={org} site={policySite} onClose={() => setPolicySite(null)} />
       <ConfirmDialog
         open={confirm !== null}

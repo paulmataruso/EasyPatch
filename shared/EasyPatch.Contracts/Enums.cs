@@ -32,6 +32,10 @@ public enum JobType
     /// <summary>Install a newer EasyPatch agent MSI. The agent installs it only when its release signature verifies
     /// against a release key built into the agent.</summary>
     AgentUpdate,
+
+    /// <summary>Remove the EasyPatch agent from the endpoint (Windows Installer, apt or rpm removal of the agent package only).
+    /// The agent unenrolls as part of the removal; the server completes the job when that unenrollment arrives.</summary>
+    UninstallAgent,
 }
 
 /// <summary>How a <see cref="JobType.Restart"/> job treats signed-in users. With nobody signed in, every mode restarts at once.</summary>

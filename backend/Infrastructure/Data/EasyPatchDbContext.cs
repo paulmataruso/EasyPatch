@@ -22,6 +22,8 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
     public DbSet<Policy> Policies => Set<Policy>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<EndpointTag> EndpointTags => Set<EndpointTag>();
+    public DbSet<OrganizationTag> OrganizationTags => Set<OrganizationTag>();
+    public DbSet<SiteTag> SiteTags => Set<SiteTag>();
     public DbSet<ServerSettingsRow> ServerSettings => Set<ServerSettingsRow>();
     public DbSet<OsLifecycleEntry> OsLifecycleEntries => Set<OsLifecycleEntry>();
     public DbSet<ComplianceSnapshot> ComplianceSnapshots => Set<ComplianceSnapshot>();
@@ -202,6 +204,22 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.HasKey(x => new { x.EndpointId, x.TagId });
             e.HasIndex(x => x.TagId);
             e.HasOne<Endpoint>().WithMany().HasForeignKey(x => x.EndpointId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<OrganizationTag>(e =>
+        {
+            e.ToTable("organization_tags");
+            e.HasKey(x => new { x.OrganizationId, x.TagId });
+            e.HasIndex(x => x.TagId);
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<SiteTag>(e =>
+        {
+            e.ToTable("site_tags");
+            e.HasKey(x => new { x.SiteId, x.TagId });
+            e.HasIndex(x => x.TagId);
+            e.HasOne<Site>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<ServerSettingsRow>(e =>

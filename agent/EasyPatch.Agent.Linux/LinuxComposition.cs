@@ -68,6 +68,7 @@ internal static class LinuxComposition
         {
             SystemRestart = new LinuxSystemRestart(commands),
             AgentInstaller = new LinuxAgentInstaller(units, family),
+            AgentUninstaller = new LinuxAgentUninstaller(units, family),
             SessionCounter = new LinuxUserSessions(commands),
         };
     }

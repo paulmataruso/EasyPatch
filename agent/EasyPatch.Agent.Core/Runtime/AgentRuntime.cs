@@ -107,7 +107,9 @@ public sealed class AgentRuntime : IUserRequestHandler, IDisposable
         _releaseKeys = LoadReleaseKeys(options.ReleasePublicKeys);
         _agentUpdate = new AgentUpdateHandler(platform, State, reporter, _releaseKeys, GetActiveClient, options, _time,
             loggerFactory.CreateLogger<AgentUpdateHandler>());
-        _jobs = new JobRunner(platform, State, reporter, _scans, _inventory, install, restart, _agentUpdate, notifier, _gate, options, _time,
+        var uninstall = new UninstallAgentHandler(platform, State, reporter, FlushOutboxAsync, options, _time,
+            loggerFactory.CreateLogger<UninstallAgentHandler>());
+        _jobs = new JobRunner(platform, State, reporter, _scans, _inventory, install, restart, _agentUpdate, uninstall, notifier, _gate, options, _time,
             loggerFactory.CreateLogger<JobRunner>());
         if (platform.PolicyRegistry is not null)
         {

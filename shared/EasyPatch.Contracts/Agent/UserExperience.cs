@@ -14,7 +14,10 @@ public static class AgentCapabilities
     /// <summary>The agent can check and install third-party application updates (winget; Windows agent 1.4.0 and later).</summary>
     public const string ApplicationUpdates = "app-updates";
 
-    public static IReadOnlyList<string> All { get; } = [Restart, NotifyUser, WindowsUpdatePolicy, Tray, SelfUpdate, ApplicationUpdates];
+    /// <summary>The agent can remove itself for an administrator's uninstall job (agent 1.6.0 and later, installed from its package).</summary>
+    public const string Uninstall = "uninstall";
+
+    public static IReadOnlyList<string> All { get; } = [Restart, NotifyUser, WindowsUpdatePolicy, Tray, SelfUpdate, ApplicationUpdates, Uninstall];
 
     /// <summary>The capability a job type needs, or null when every agent supports it.</summary>
     public static string? RequiredFor(JobType type) => type switch
@@ -22,6 +25,7 @@ public static class AgentCapabilities
         JobType.Restart => Restart,
         JobType.NotifyUser => NotifyUser,
         JobType.AgentUpdate => SelfUpdate,
+        JobType.UninstallAgent => Uninstall,
         _ => null,
     };
 }

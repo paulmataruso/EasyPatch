@@ -63,21 +63,32 @@ internal static class Mapping
         r.MissingTotalCount, r.FailedCount, r.RebootPending, r.OsSupportStatus, r.CurrentActivity, r.LastSeenIp, r.Platform, r.MissingDeferredCount,
         tags ?? [], r.KnownExploitedMissingCount);
 
-    /// <summary>Tags of the given endpoints (for list and detail views).</summary>
+    /// <summary>Tags of the given endpoints (for list and detail views): their own tags first, then those they have through
+    /// their site or organization, each group by name.</summary>
     public static async Task<Dictionary<Guid, List<TagRefDto>>> LoadTagsAsync(EasyPatch.Infrastructure.Data.EasyPatchDbContext db,
         IReadOnlyCollection<Guid> endpointIds, CancellationToken ct)
     {
-        if (endpointIds.Count == 0)
+        var links = await EffectiveTags.ForEndpointsAsync(db, endpointIds, ct);
+        if (links.Count == 0)
         {
             return [];
         }
 
-        var rows = await (from et in db.EndpointTags.AsNoTracking()
-                          join t in db.Tags.AsNoTracking() on et.TagId equals t.Id
-                          where endpointIds.Contains(et.EndpointId)
-                          orderby t.Name
-                          select new { et.EndpointId, t.Id, t.Name, t.Color }).ToListAsync(ct);
-        return rows.GroupBy(r => r.EndpointId).ToDictionary(g => g.Key, g => g.Select(r => new TagRefDto(r.Id, r.Name, r.Color)).ToList());
+        var tagIds = links.Select(l => l.TagId).Distinct().ToList();
+        var tags = await db.Tags.AsNoTracking().Where(t => tagIds.Contains(t.Id)).ToDictionaryAsync(t => t.Id, ct);
+        return links.Where(l => tags.ContainsKey(l.TagId))
+            .GroupBy(l => l.EndpointId)
+            .ToDictionary(g => g.Key, g => g
+                .OrderBy(l => l.Source == TagSource.Endpoint ? 0 : 1)
+                .ThenBy(l => tags[l.TagId].Name, StringComparer.OrdinalIgnoreCase)
+                .Select(l => ToRef(tags[l.TagId], l.Source))
+                .ToList());
+    }
+
+    public static TagRefDto ToRef(Tag tag, TagSource source = TagSource.Endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(tag);
+        return new TagRefDto(tag.Id, tag.Name, tag.Color, source == TagSource.Endpoint ? null : source.ToString());
     }
 
     public static bool IsOutdated(string? agentVersion, Version? latest) =>

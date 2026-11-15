@@ -46,7 +46,7 @@ and tracks compliance across every customer.
   inbound firewall rule or port forwarding is needed, so agents work behind NAT.
 * **Patching, and nothing else.** The agent has no remote shell and no command execution. It
   runs a fixed set of job types: update scan, inventory refresh, install updates, restart,
-  agent update, and (Windows) preset messages to signed-in users.
+  agent update, uninstalling itself, and (Windows) preset messages to signed-in users.
 * **No surprise restarts.** EasyPatch reports when a restart is pending and why. It restarts a
   computer only when an administrator asks for it, either once or through a restart schedule
   the administrator configured, and it warns signed-in users first. Installing updates never
@@ -90,9 +90,13 @@ All screenshots show fictional demo data.
   overrides at organization, site and endpoint level. Administrators can be restricted to
   specific organizations.
 * **Tags and update rings.** Endpoints can carry MSP-wide tags (such as "Pilot" or "SQL
-  servers"), and a tag can carry its own policy layer. A **rollout delay** in policy (separate
-  values for security and other updates) keeps new updates from being required or installed by
-  schedule until they have been out for a given number of days, so a pilot ring can go first.
+  servers"), and a tag can carry its own policy layer. Tag a whole organization or site and
+  every endpoint in it has the tag. A **rollout delay** in policy (separate values for security
+  and other updates) keeps new updates from being required or installed by schedule until they
+  have been out for a given number of days, so a pilot ring can go first.
+* **Uninstall from the console.** Removing the agent from an endpoint is one confirmed action;
+  the agent removes its own package, restores the Windows Update settings EasyPatch changed and
+  unenrolls.
 * **Install all missing updates** on one endpoint or on many selected endpoints at once, or
   install chosen updates. A single update can also be rolled out across an organization or a
   site. Installing on a single endpoint first shows exactly which updates will be installed.
@@ -191,7 +195,7 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 On a Linux host (x64 or ARM64) with Docker, a DNS name pointing at it, and ports 80 and 443 open:
 
 ```bash
-git clone --branch v1.5.3 https://github.com/paulmataruso/EasyPatch.git easypatch && cd easypatch
+git clone --branch v1.6.0 https://github.com/paulmataruso/EasyPatch.git easypatch && cd easypatch
 ./scripts/init-secrets.sh                 # database password secret, data directories, .env
 $EDITOR .env                              # set EASYPATCH_DOMAIN and ACME_EMAIL
 docker compose pull                       # ghcr.io/paulmataruso/easypatch-server and -proxy
@@ -250,7 +254,7 @@ The agent builds and tests on Linux with `scripts/build-agent.sh`. The MSIs can 
 Linux with Docker (`scripts/build-msi-linux.sh`, which runs WiX under Wine) or on Windows with
 `scripts/build-agent.ps1`, which can also sign them. The `agent` GitHub Actions workflow builds
 them on Windows. `scripts/build-linux-packages.sh` builds the signed `.deb` and `.rpm`
-packages of the Linux agent (Docker). Pushing a version tag (`v1.5.3`) runs the `release`
+packages of the Linux agent (Docker). Pushing a version tag (`v1.6.0`) runs the `release`
 workflow, which tests everything, builds and release-signs the agent packages, publishes the x64
 and ARM64 images to GitHub Container Registry and creates the GitHub Release.
 
@@ -268,7 +272,7 @@ docs/        Documentation
 
 ## Project status
 
-Version 1.5.3 (1.4.0 was the first public release). Server, console and agent logic are covered
+Version 1.6.0 (1.4.0 was the first public release). Server, console and agent logic are covered
 by automated tests on Linux, including an end-to-end test that drives the real agent runtime
 against the real API and PostgreSQL. Release builds are made and signed by GitHub Actions.
 

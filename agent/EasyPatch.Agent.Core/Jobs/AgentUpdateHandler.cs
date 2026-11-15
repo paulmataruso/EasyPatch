@@ -440,7 +440,7 @@ public sealed partial class AgentUpdateHandler
     private static partial Regex InstallerResultRegex();
 
     /// <summary>The final result code from a verbose Windows Installer log (ANSI or UTF-16), or null.</summary>
-    internal static int? ReadInstallerResult(string logPath)
+    public static int? ReadInstallerResult(string logPath)
     {
         try
         {
@@ -480,7 +480,7 @@ public sealed partial class AgentUpdateHandler
         }
     }
 
-    internal static string DescribeInstallerError(int code) => code switch
+    public static string DescribeInstallerError(int code) => code switch
     {
         1601 => " (the Windows Installer service could not be accessed)",
         1602 => " (the installation was cancelled)",

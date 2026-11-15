@@ -30,7 +30,10 @@ internal sealed class WindowsAgentInstaller : IAgentInstaller
         return new InstallerProcess(process);
     }
 
-    public bool IsInstallerBusy()
+    public bool IsInstallerBusy() => IsWindowsInstallerBusy();
+
+    /// <summary>True while a Windows Installer installation or removal is running (the <c>_MSIExecute</c> mutex exists).</summary>
+    internal static bool IsWindowsInstallerBusy()
     {
         try
         {

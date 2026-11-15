@@ -1982,6 +1982,27 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.ToTable("organizations", (string)null);
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.OrganizationTag", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("TagId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tag_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("OrganizationId", "TagId");
+
+                    b.HasIndex("TagId");
+
+                    b.ToTable("organization_tags", (string)null);
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.OsLifecycleEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2872,6 +2893,27 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.ToTable("sites", (string)null);
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.SiteTag", b =>
+                {
+                    b.Property<Guid>("SiteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("site_id");
+
+                    b.Property<Guid>("TagId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tag_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("SiteId", "TagId");
+
+                    b.HasIndex("TagId");
+
+                    b.ToTable("site_tags", (string)null);
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.Tag", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3705,6 +3747,21 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.OrganizationTag", b =>
+                {
+                    b.HasOne("EasyPatch.Core.Entities.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EasyPatch.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.PasswordResetToken", b =>
                 {
                     b.HasOne("EasyPatch.Core.Entities.User", null)
@@ -3755,6 +3812,21 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("EasyPatch.Core.Entities.SiteTag", b =>
+                {
+                    b.HasOne("EasyPatch.Core.Entities.Site", null)
+                        .WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EasyPatch.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("EasyPatch.Core.Entities.UpdateExclusion", b =>

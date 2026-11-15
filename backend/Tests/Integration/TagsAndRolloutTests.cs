@@ -101,6 +101,75 @@ public sealed class TagsAndRolloutTests(PostgresFixture postgres) : IntegrationT
     }
 
     [Fact]
+    public async Task A_pilot_tag_on_a_site_or_organization_applies_to_every_endpoint_in_it()
+    {
+        var pilotSite = await root.SendAsync<SiteDto>(HttpMethod.Post, $"/api/v1/organizations/{org.Id}/sites", new SiteRequest("Pilot office", null, null, null),
+            HttpStatusCode.Created);
+        var early = await EnrollAgentAsync(root, org.Id, pilotSite.Id, "PC-EARLY");
+        var late = await EnrollAgentAsync(root, org.Id, site.Id, "PC-LATE");
+        var (otherOrg, otherSite) = await CreateOrgAsync(root, "Fabrikam");
+        var elsewhere = await EnrollAgentAsync(root, otherOrg.Id, otherSite.Id, "PC-ELSEWHERE");
+
+        // Everyone waits a week, except the pilot ring.
+        await root.SendAsync<PolicyDto>(HttpMethod.Put, "/api/v1/policies/global", Delays(7, 7), HttpStatusCode.OK);
+        var pilot = await CreateTagAsync("Pilot", priority: 10);
+        await root.SendAsync<PolicyDto>(HttpMethod.Put, $"/api/v1/tags/{pilot.Id}/policy", Delays(0, 0), HttpStatusCode.OK);
+        ReportedUpdate[] missing = [JobQueueTests.SecurityUpdate("KB5046617")];
+        foreach (var agent in new[] { early, late, elsewhere })
+        {
+            await ReportScanAsync(agent, missing);
+        }
+
+        async Task<EndpointSummaryDto> SummaryAsync(SignedAgent agent) => (await root.GetAsync<EndpointDetailDto>($"/api/v1/endpoints/{agent.EndpointId}")).Summary;
+        Assert.Equal(1, (await SummaryAsync(early)).MissingDeferredCount);
+
+        // Tagging the site puts its endpoints in the pilot ring at once.
+        await root.ExpectAsync(HttpMethod.Put, $"/api/v1/sites/{pilotSite.Id}/tags", new TagAssignmentRequest([pilot.Id]), HttpStatusCode.NoContent);
+        var summary = await SummaryAsync(early);
+        Assert.Equal(1, summary.MissingRequiredCount);
+        Assert.Equal(0, summary.MissingDeferredCount);
+        var inherited = Assert.Single(summary.Tags!);
+        Assert.Equal(("Pilot", "Site"), (inherited.Name, inherited.InheritedFrom));
+        Assert.Equal(1, (await SummaryAsync(late)).MissingDeferredCount);
+        var layer = Assert.Single(await root.GetAsync<List<TagPolicyLayerDto>>($"/api/v1/endpoints/{early.EndpointId}/tag-policies"));
+        Assert.Equal("Pilot", layer.Tag.Name);
+        Assert.Equal("Pilot", (await root.GetAsync<EffectivePolicyDto>($"/api/v1/endpoints/{early.EndpointId}/effective-policy")).SourceTags!["InstallDelayDays"]);
+        Assert.Equal([early.EndpointId], (await root.GetAsync<PagedResult<EndpointSummaryDto>>($"/api/v1/endpoints?tagId={pilot.Id}")).Items.Select(e => e.Id));
+        var listed = Assert.Single(await root.GetAsync<List<TagDto>>("/api/v1/tags"));
+        Assert.Equal((1, 1, 0), (listed.EndpointCount, listed.SiteCount, listed.OrganizationCount));
+        Assert.Equal("Pilot", Assert.Single((await root.GetAsync<SiteDto>($"/api/v1/sites/{pilotSite.Id}")).Tags!).Name);
+
+        // Tagging the organization covers all of its sites; an endpoint's own tag is listed once, as its own.
+        await root.ExpectAsync(HttpMethod.Put, $"/api/v1/organizations/{org.Id}/tags", new TagAssignmentRequest([pilot.Id]), HttpStatusCode.NoContent);
+        await root.ExpectAsync(HttpMethod.Put, $"/api/v1/endpoints/{early.EndpointId}/tags", new EndpointTagsRequest([pilot.Id]), HttpStatusCode.NoContent);
+        Assert.Equal(1, (await SummaryAsync(late)).MissingRequiredCount);
+        Assert.Equal("Organization", Assert.Single((await SummaryAsync(late)).Tags!).InheritedFrom);
+        Assert.Null(Assert.Single((await SummaryAsync(early)).Tags!).InheritedFrom);
+        Assert.Equal(1, (await SummaryAsync(elsewhere)).MissingDeferredCount);
+        Assert.Equal(2, (await root.GetAsync<PagedResult<EndpointSummaryDto>>($"/api/v1/endpoints?tagId={pilot.Id}")).TotalCount);
+        Assert.Equal("Pilot", Assert.Single((await root.GetAsync<OrganizationDto>($"/api/v1/organizations/{org.Id}")).Tags!).Name);
+
+        // Only administrators without organization restrictions assign tags; restricted ones see the tags of their organization.
+        var restricted = await CreateAndLoginAsync("restricted", UserRole.Admin, org.Id);
+        await restricted.ExpectAsync(HttpMethod.Put, $"/api/v1/sites/{pilotSite.Id}/tags", new TagAssignmentRequest([]), HttpStatusCode.Forbidden);
+        await restricted.ExpectAsync(HttpMethod.Put, $"/api/v1/organizations/{org.Id}/tags", new TagAssignmentRequest([]), HttpStatusCode.Forbidden);
+        Assert.Equal("Pilot", Assert.Single(await restricted.GetAsync<List<TagDto>>("/api/v1/tags")).Name);
+        var outsider = await CreateAndLoginAsync("outsider", UserRole.Admin, otherOrg.Id);
+        Assert.Empty(await outsider.GetAsync<List<TagDto>>("/api/v1/tags"));
+
+        // Untagging puts the endpoints back on the normal delay.
+        await root.ExpectAsync(HttpMethod.Put, $"/api/v1/organizations/{org.Id}/tags", new TagAssignmentRequest([]), HttpStatusCode.NoContent);
+        Assert.Equal(1, (await SummaryAsync(late)).MissingDeferredCount);
+        await root.ExpectAsync(HttpMethod.Put, $"/api/v1/sites/{pilotSite.Id}/tags", new TagAssignmentRequest([Guid.NewGuid()]), HttpStatusCode.NotFound);
+        await root.ExpectAsync(HttpMethod.Delete, $"/api/v1/tags/{pilot.Id}", null, HttpStatusCode.NoContent);
+        Assert.Equal(0, await WithDbAsync(db => db.SiteTags.CountAsync()));
+        Assert.Equal(1, (await SummaryAsync(early)).MissingDeferredCount);
+        var actions = await WithDbAsync(db => db.AuditLogs.Select(a => a.Action).ToListAsync());
+        Assert.Contains("site.tags_update", actions);
+        Assert.Contains("organization.tags_update", actions);
+    }
+
+    [Fact]
     public async Task Tag_rollout_delay_defers_updates_until_the_delay_ends()
     {
         var agent = await EnrollAgentAsync(root, org.Id, site.Id, "PC-RING2");

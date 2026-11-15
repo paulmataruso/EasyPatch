@@ -37,3 +37,24 @@ public interface IInstallerProcess : IDisposable
     /// <summary>Waits for the installer to exit and returns its exit code.</summary>
     Task<int> WaitForExitAsync(CancellationToken cancellationToken);
 }
+
+/// <summary>Removes the installed agent package for an administrator's uninstall job: Windows Installer for the MSI (by its
+/// fixed upgrade code), apt-get or rpm for the easypatch-agent package. The package's own uninstall steps stop the service
+/// and unenroll the agent. Nothing else is ever run, and the log path is the only caller-supplied argument.</summary>
+public interface IAgentUninstaller
+{
+    /// <summary>Used in messages, e.g. "Windows Installer", "apt".</summary>
+    string DisplayName { get; }
+
+    /// <summary>Starts removing the agent. The removal stops this service, so it normally outlives the process that started it.</summary>
+    IInstallerProcess Start(string logPath);
+
+    /// <summary>True while an installation or removal is running.</summary>
+    bool IsInstallerBusy();
+
+    /// <summary>The result of a removal started by an earlier agent process, read after the service came back. Null when unknown.</summary>
+    int? ReadResult(string logPath);
+
+    /// <summary>Text appended after an exit code.</summary>
+    string DescribeResult(int code);
+}

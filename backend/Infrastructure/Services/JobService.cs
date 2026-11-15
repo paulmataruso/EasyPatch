@@ -63,6 +63,13 @@ public sealed class JobService(
         if (request.Type != JobType.AgentUpdate && AgentCapabilities.RequiredFor(request.Type) is { } capability &&
             !endpoint.AgentCapabilities.Contains(capability))
         {
+            if (request.Type == JobType.UninstallAgent)
+            {
+                throw AppException.Conflict(
+                    $"The EasyPatch agent on {endpoint.Hostname} (version {endpoint.AgentVersion ?? "unknown"}) cannot uninstall itself. Update it to 1.6.0 or later, or uninstall it on the computer.",
+                    "agent_upgrade_required");
+            }
+
             if (endpoint.Platform == AgentPlatforms.Linux && request.Type == JobType.NotifyUser)
             {
                 throw AppException.Conflict($"{endpoint.Hostname} is a Linux endpoint. Messages to users are only available on Windows.",
@@ -200,6 +207,11 @@ public sealed class JobService(
                 break;
             }
 
+            case JobType.UninstallAgent:
+                // No payload: the agent removes its own package and nothing else.
+                dedupeKey = "uninstall";
+                break;
+
             default:
                 throw AppException.BadRequest("Unsupported job type.");
         }
@@ -238,10 +250,11 @@ public sealed class JobService(
                 JobTrigger.System => "System",
                 _ => actor.Username ?? "unknown",
             },
-            // Scans and inventory first, then installs, then restarts (patch, then restart), then agent updates. Messages are
-            // leased separately.
+            // An uninstall goes before anything still queued (it cancels the rest). Then scans and inventory, then installs, then
+            // restarts (patch, then restart), then agent updates. Messages are leased separately.
             Priority = request.Type switch
             {
+                JobType.UninstallAgent => 20,
                 JobType.InstallUpdates => 0,
                 JobType.Restart => -10,
                 JobType.AgentUpdate => -20,
@@ -432,7 +445,8 @@ public sealed class JobService(
         {
             var next = await LeaseNextAsync(endpoint, policy, settings, allowInstall: !waitingForReboot,
                 allowRestart: endpoint.AgentCapabilities.Contains(AgentCapabilities.Restart),
-                allowAgentUpdate: endpoint.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate), ct);
+                allowAgentUpdate: endpoint.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate),
+                allowUninstall: endpoint.AgentCapabilities.Contains(AgentCapabilities.Uninstall), ct);
             if (next is not null)
             {
                 deliver.Add(next);
@@ -482,7 +496,7 @@ public sealed class JobService(
     }
 
     private async Task<Job?> LeaseNextAsync(Endpoint endpoint, EffectivePolicy policy, ServerSettings settings, bool allowInstall, bool allowRestart,
-        bool allowAgentUpdate, CancellationToken ct)
+        bool allowAgentUpdate, bool allowUninstall, CancellationToken ct)
     {
         for (var attempt = 0; attempt < 5; attempt++)
         {
@@ -492,7 +506,8 @@ public sealed class JobService(
                     SELECT *, xmin FROM jobs
                     WHERE endpoint_id = {endpoint.Id} AND status = 'Queued' AND (not_before IS NULL OR not_before <= {now})
                       AND ({allowInstall} OR type <> 'InstallUpdates')
-                      AND ({allowRestart} OR type <> 'Restart') AND ({allowAgentUpdate} OR type <> 'AgentUpdate') AND type <> 'NotifyUser'
+                      AND ({allowRestart} OR type <> 'Restart') AND ({allowAgentUpdate} OR type <> 'AgentUpdate')
+                      AND ({allowUninstall} OR type <> 'UninstallAgent') AND type <> 'NotifyUser'
                     ORDER BY priority DESC, created_at
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -820,6 +835,7 @@ public sealed class JobService(
         JobType.Restart => "Restart",
         JobType.NotifyUser => "Message to users",
         JobType.AgentUpdate => "Agent update",
+        JobType.UninstallAgent => "Agent uninstall",
         _ => type.ToString(),
     };
 }

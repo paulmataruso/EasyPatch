@@ -219,7 +219,18 @@ public sealed class EnrollmentService(
         var openJobs = await db.Jobs.Include(j => j.Updates).Where(j => j.EndpointId == endpointId && j.CompletedAt == null).ToListAsync(ct);
         foreach (var job in openJobs.Where(j => !j.Status.IsTerminal()))
         {
-            JobService.Finish(job, JobStatus.Cancelled, now, "Endpoint credentials were revoked.");
+            if (status == EndpointStatus.Decommissioned && job.Type == JobType.UninstallAgent)
+            {
+                // The agent itself reported its removal (the package's uninstall step unenrolls it): the uninstall worked.
+                job.Phase = "Completed";
+                job.ProgressPercent = 100;
+                job.ProgressMessage = "The agent was removed and unenrolled from the server.";
+                JobService.Finish(job, JobStatus.Completed, now, null);
+                continue;
+            }
+
+            JobService.Finish(job, JobStatus.Cancelled, now,
+                status == EndpointStatus.Decommissioned ? "The agent was uninstalled." : "Endpoint credentials were revoked.");
         }
 
         EndpointEvents.Add(db, endpoint, status == EndpointStatus.Revoked ? "CredentialsRevoked" : "Decommissioned", reason, now, EventSeverity.Warning);
@@ -455,7 +466,10 @@ public sealed class EnrollmentService(
     }
 
     public Task UnenrollAsync(Guid endpointId, string? reason, CancellationToken ct = default) =>
-        RevokeEndpointAsync(endpointId, "Agent uninstalled" + (string.IsNullOrWhiteSpace(reason) ? "." : $": {ScanIngestionService.Truncate(reason, 200)}"),
+        RevokeEndpointAsync(endpointId,
+            string.IsNullOrWhiteSpace(reason) || reason.Trim().TrimEnd('.').Equals("Agent uninstalled", StringComparison.OrdinalIgnoreCase)
+                ? "Agent uninstalled."
+                : $"Agent uninstalled: {ScanIngestionService.Truncate(reason, 200)}",
             EndpointStatus.Decommissioned, ct);
 
     // -------------------------------------------------------------------------------------------

@@ -201,8 +201,12 @@ editor has no per-site install limit).
 
 **Tags** are MSP-wide labels (for example update rings such as "Pilot" and "Broad"). Super
 administrators create tags and tag policies. Administrators without organization restrictions
-assign tags to endpoints; restricted users only see the tags on their own endpoints. A tag
-policy applies to every endpoint with the tag. When an endpoint has several tags with policies,
+assign tags to endpoints, sites and organizations (`endpoint_tags`, `site_tags`,
+`organization_tags`); restricted users only see the tags of their own endpoints, sites and
+organizations. An endpoint has its own tags plus those of its site and organization, so tagging
+a site or a customer puts all of its computers in a ring. A tag policy applies to every
+endpoint with the tag, however it got it; the tag filter, alert rule scopes and counts use the
+same set. When an endpoint has several tags with policies,
 they are applied in ascending priority, so the highest priority wins; on equal priority the
 alphabetically first name wins. A tag policy cannot set the per-site install limit.
 
@@ -268,7 +272,7 @@ an endpoint will receive. How the agent applies and restores them is described i
 ## 4. Job system
 
 Job types are `UpdateScan`, `InstallUpdates`, `InventoryRefresh`, `Restart`,
-`NotifyUser` (a preset message to signed-in users) and `AgentUpdate`.
+`NotifyUser` (a preset message to signed-in users), `AgentUpdate` and `UninstallAgent`.
 
 ```
 Queued ──lease──► Delivered ──ack──► Acknowledged ──► Running ──► Completed
@@ -438,6 +442,20 @@ server never signs anything; see [security.md](security.md#agent-release-signing
   and Automatic Updates mode. It changes Windows Update policy values only for the groups an
   administrator configured (below), and never the WSUS settings.
 
+
+### Uninstall jobs
+
+An `UninstallAgent` job has no payload. Agents 1.6.0 and newer that were installed from their
+package report the `uninstall` capability and are the only ones the server delivers it to. The
+agent removes its own package and nothing else: on Windows `msiexec /x` with the product code
+it looks up from the MSI's fixed upgrade code, on Linux `apt-get remove easypatch-agent` or
+`rpm -e easypatch-agent` in the transient unit `easypatch-agent-uninstall`. The package's
+uninstall step stops the service and runs `unenroll` (which restores the Windows Update values
+EasyPatch changed and tells the server). The server marks the job `Completed` when that
+unenrollment arrives, decommissions the endpoint and cancels its other open jobs. If the agent
+is still running after the removal (it failed or was rolled back), it reports the job
+`Failed` with the installer's exit code. If the unenrollment never reaches the server, the job
+times out like any running job.
 ### Linux agent
 
 The Linux agent runs the same `EasyPatch.Agent.Core` runtime (check-in, scan, inventory, jobs,
@@ -453,6 +471,7 @@ outbox, restarts, self-update) with Linux implementations of the platform servic
 | Key protection | `systemd-creds` with the host key, or file permissions |
 | Bootstrap | `/etc/easypatch/agent.conf` |
 | Agent update | `apt-get install` or `dnf install` of the verified package in the transient unit `easypatch-agent-update` |
+| Uninstall | `apt-get remove easypatch-agent` or `rpm -e easypatch-agent` in the transient unit `easypatch-agent-uninstall` |
 
 There is no tray, no user messages and no Windows Update policy. See
 [linux-agent.md](linux-agent.md).

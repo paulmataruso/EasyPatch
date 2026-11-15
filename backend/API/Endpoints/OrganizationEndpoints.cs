@@ -96,7 +96,7 @@ public static class OrganizationEndpoints
         orgs.MapGet("/{id:guid}/sites", async (Guid id, bool? includeArchived, EasyPatchDbContext db, ITenantContext tenant, CancellationToken ct) =>
         {
             tenant.EnsureAccess(id);
-            return TypedResults.Ok(await SiteQuery(db, s => s.OrganizationId == id && (includeArchived == true || s.IsActive)).ToListAsync(ct));
+            return TypedResults.Ok(await WithTagsAsync(db, await SiteQuery(db, s => s.OrganizationId == id && (includeArchived == true || s.IsActive)).ToListAsync(ct), ct));
         });
 
         orgs.MapPost("/{id:guid}/sites", async (Guid id, SiteRequest request, EasyPatchDbContext db, ITenantContext tenant, AuditService audit,
@@ -154,7 +154,7 @@ public static class OrganizationEndpoints
 
         sites.MapGet("/{id:guid}", async (Guid id, EasyPatchDbContext db, ITenantContext tenant, CancellationToken ct) =>
         {
-            var site = await SiteQuery(db, s => s.Id == id).FirstOrDefaultAsync(ct) ?? throw AppException.NotFound("Site");
+            var site = (await WithTagsAsync(db, [await SiteQuery(db, s => s.Id == id).FirstOrDefaultAsync(ct) ?? throw AppException.NotFound("Site")], ct))[0];
             tenant.EnsureAccess(site.OrganizationId);
             return TypedResults.Ok(site);
         });
@@ -314,10 +314,28 @@ public static class OrganizationEndpoints
     private static async Task<OrganizationDto> LoadOrganizationAsync(EasyPatchDbContext db, Guid id, CancellationToken ct)
     {
         var org = await db.Organizations.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id, ct) ?? throw AppException.NotFound("Organization");
-        var sites = await SiteQuery(db, s => s.OrganizationId == id).ToListAsync(ct);
+        var sites = await WithTagsAsync(db, await SiteQuery(db, s => s.OrganizationId == id).ToListAsync(ct), ct);
         var stats = await OrganizationStats.LoadAsync(db, [id], ct);
+        var tags = await (from ot in db.OrganizationTags.AsNoTracking()
+                          join t in db.Tags.AsNoTracking() on ot.TagId equals t.Id
+                          where ot.OrganizationId == id
+                          orderby t.Name
+                          select t).ToListAsync(ct);
         return new OrganizationDto(org.Id, org.Name, org.Description, org.ContactName, org.ContactEmail, org.Notes, org.TimeZone, org.IsActive,
-            org.CreatedAt, org.UpdatedAt, org.ArchivedAt, sites, OrganizationStats.ToSummary(org, stats));
+            org.CreatedAt, org.UpdatedAt, org.ArchivedAt, sites, OrganizationStats.ToSummary(org, stats), tags.Select(t => Mapping.ToRef(t)).ToList());
+    }
+
+    /// <summary>Adds each site's own tags (an organization's tags are on the organization).</summary>
+    private static async Task<List<SiteDto>> WithTagsAsync(EasyPatchDbContext db, List<SiteDto> sites, CancellationToken ct)
+    {
+        var ids = sites.Select(s => s.Id).ToList();
+        var rows = await (from st in db.SiteTags.AsNoTracking()
+                          join t in db.Tags.AsNoTracking() on st.TagId equals t.Id
+                          where ids.Contains(st.SiteId)
+                          orderby t.Name
+                          select new { st.SiteId, Tag = t }).ToListAsync(ct);
+        var bySite = rows.ToLookup(r => r.SiteId, r => Mapping.ToRef(r.Tag));
+        return sites.Select(s => s with { Tags = bySite[s.Id].ToList() }).ToList();
     }
 
     internal static PolicyDto ToDto(Policy p) => new(

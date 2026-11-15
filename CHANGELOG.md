@@ -3,6 +3,29 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and both agents share one version number.
 
+## [1.6.0] - 2026-11-15
+
+### Added
+
+- **Uninstall the agent from the console**: *More → Uninstall agent…* on the endpoint page
+  (Operators, confirmed by typing the computer name). The agent removes its own package the
+  next time it checks in (Windows Installer by the MSI's upgrade code; `apt-get remove` or
+  `rpm -e easypatch-agent` on Linux) and nothing else. The package's uninstall step restores
+  the Windows Update settings EasyPatch changed and unenrolls the agent; the job completes when
+  that unenrollment reaches the server, and the endpoint becomes decommissioned with its other
+  queued jobs cancelled. Needs agent 1.6.0 or later. API: `POST /endpoints/{id}/uninstall-agent`.
+- **Tags on organizations and sites** (pilot groups): tag a customer or an office, for example
+  *Pilot*, and every endpoint in it has the tag and its tag policy, including its rollout
+  delay. Set on the organization page (header and *Sites* tab). Inherited tags are shown with a
+  dashed outline on endpoints, count in *Settings → Tags*, and match the endpoint tag filter and
+  alert rule tag scopes. API: `PUT /organizations/{id}/tags`, `PUT /sites/{id}/tags`.
+
+### Changed
+
+- Removing the Linux package (not upgrading it) now stops the service and unenrolls the agent
+  first, as the Windows uninstaller does.
+- Endpoint events for an uninstall read "Agent uninstalled." instead of repeating the reason.
+
 ## [1.5.3] - 2026-11-15
 
 ### Added

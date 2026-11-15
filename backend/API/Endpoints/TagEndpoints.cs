@@ -28,8 +28,10 @@ public static class TagEndpoints
             if (!tenant.IsUnrestricted)
             {
                 var allowed = tenant.AllowedOrganizationIds.ToList();
-                query = query.Where(t => db.EndpointTags.Any(et => et.TagId == t.Id &&
-                    db.Endpoints.Any(e => e.Id == et.EndpointId && allowed.Contains(e.OrganizationId))));
+                query = query.Where(t =>
+                    db.EndpointTags.Any(et => et.TagId == t.Id && db.Endpoints.Any(e => e.Id == et.EndpointId && allowed.Contains(e.OrganizationId))) ||
+                    db.SiteTags.Any(st => st.TagId == t.Id && db.Sites.Any(s => s.Id == st.SiteId && allowed.Contains(s.OrganizationId))) ||
+                    db.OrganizationTags.Any(ot => ot.TagId == t.Id && allowed.Contains(ot.OrganizationId)));
             }
 
             var rows = await query
@@ -37,11 +39,19 @@ public static class TagEndpoints
                 .Select(t => new
                 {
                     Tag = t,
-                    Endpoints = db.EndpointTags.Count(et => et.TagId == t.Id),
+                    // Endpoints with the tag directly or through their site or organization.
+                    Endpoints = db.Endpoints.Count(e =>
+                        db.EndpointTags.Any(et => et.EndpointId == e.Id && et.TagId == t.Id) ||
+                        db.SiteTags.Any(st => st.SiteId == e.SiteId && st.TagId == t.Id) ||
+                        db.OrganizationTags.Any(ot => ot.OrganizationId == e.OrganizationId && ot.TagId == t.Id)),
+                    Sites = db.SiteTags.Count(st => st.TagId == t.Id),
+                    Organizations = db.OrganizationTags.Count(ot => ot.TagId == t.Id),
                     HasPolicy = db.Policies.Any(p => p.Scope == PolicyScope.Tag && p.TagId == t.Id),
                 })
                 .ToListAsync(ct);
-            return TypedResults.Ok(rows.Select(r => ToDto(r.Tag, tenant.IsUnrestricted ? r.Endpoints : 0, r.HasPolicy)).ToList());
+            return TypedResults.Ok(rows.Select(r => tenant.IsUnrestricted
+                ? ToDto(r.Tag, r.Endpoints, r.HasPolicy, r.Sites, r.Organizations)
+                : ToDto(r.Tag, 0, r.HasPolicy)).ToList());
         });
 
         tags.MapPost("/", async (TagRequest request, EasyPatchDbContext db, AuditService audit, TimeProvider clock, CancellationToken ct) =>
@@ -93,9 +103,11 @@ public static class TagEndpoints
                 await compliance.RecomputeAsync(await TaggedEndpointsAsync(db, id, ct), ct);
             }
 
-            var count = await db.EndpointTags.CountAsync(et => et.TagId == id, ct);
+            var count = await db.Endpoints.WithTag(db, id).CountAsync(ct);
+            var sites = await db.SiteTags.CountAsync(st => st.TagId == id, ct);
+            var organizations = await db.OrganizationTags.CountAsync(ot => ot.TagId == id, ct);
             var hasPolicy = await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Tag && p.TagId == id, ct);
-            return TypedResults.Ok(ToDto(tag, count, hasPolicy));
+            return TypedResults.Ok(ToDto(tag, count, hasPolicy, sites, organizations));
         }).RequireAuthorization(Policies.SuperAdmin);
 
         tags.MapDelete("/{id:guid}", async (Guid id, EasyPatchDbContext db, AuditService audit, ComplianceService compliance, CancellationToken ct) =>
@@ -103,7 +115,7 @@ public static class TagEndpoints
             var tag = await db.Tags.FirstOrDefaultAsync(t => t.Id == id, ct) ?? throw AppException.NotFound("Tag");
             var affected = await TaggedEndpointsAsync(db, id, ct);
             var hadPolicy = await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Tag && p.TagId == id, ct);
-            db.Tags.Remove(tag); // endpoint_tags and the tag policy cascade
+            db.Tags.Remove(tag); // endpoint, site and organization tags and the tag policy cascade
             audit.Record("tag.delete", "Tag", id.ToString(), details: new { tag.Name, Endpoints = affected.Count });
             await db.SaveChangesAsync(ct);
             if (hadPolicy)
@@ -151,10 +163,10 @@ public static class TagEndpoints
         app.MapGet("/api/v1/endpoints/{id:guid}/tag-policies", async (Guid id, EasyPatchDbContext db, ITenantContext tenant, CancellationToken ct) =>
         {
             await EndpointEndpoints.EnsureEndpointAccessAsync(db, tenant, id, ct);
-            var rows = await (from et in db.EndpointTags.AsNoTracking()
-                              join t in db.Tags.AsNoTracking() on et.TagId equals t.Id
+            var tagIds = (await EffectiveTags.ForEndpointsAsync(db, [id], ct)).Select(t => t.TagId).ToList();
+            var rows = await (from t in db.Tags.AsNoTracking()
                               join p in db.Policies.AsNoTracking() on t.Id equals p.TagId
-                              where et.EndpointId == id && p.Scope == PolicyScope.Tag
+                              where tagIds.Contains(t.Id) && p.Scope == PolicyScope.Tag
                               select new { Tag = t, Policy = p }).ToListAsync(ct);
             var byName = rows.ToDictionary(r => r.Tag.Name, StringComparer.OrdinalIgnoreCase);
             var ordered = PolicyResolver.OrderTags(rows.Select(r => new TagPolicyLayer(r.Tag.Name, r.Tag.Priority, r.Policy)))
@@ -163,6 +175,47 @@ public static class TagEndpoints
                 .ToList();
             return TypedResults.Ok(ordered);
         }).WithTags("Tags").RequireAuthorization(Policies.Viewer);
+
+        // Tags on an organization or a site apply to every endpoint in it (for example a pilot customer or office).
+        app.MapPut("/api/v1/organizations/{id:guid}/tags", async (Guid id, TagAssignmentRequest request, EasyPatchDbContext db, ITenantContext tenant,
+            AuditService audit, ComplianceService compliance, TimeProvider clock, CancellationToken ct) =>
+        {
+            EnsureCanAssign(tenant);
+            _ = await db.Organizations.AnyAsync(o => o.Id == id, ct) ? 0 : throw AppException.NotFound("Organization");
+            var now = clock.GetUtcNow();
+            var current = await db.OrganizationTags.Where(t => t.OrganizationId == id).ToListAsync(ct);
+            var (added, removed) = await ReplaceAsync(db, db.OrganizationTags, current, l => l.TagId, request.TagIds,
+                t => new OrganizationTag { OrganizationId = id, TagId = t, CreatedAt = now }, ct);
+            if (added.Count == 0 && removed.Count == 0)
+            {
+                return TypedResults.NoContent();
+            }
+
+            audit.Record("organization.tags_update", "Organization", id.ToString(), id, details: new { Added = added, Removed = removed });
+            await db.SaveChangesAsync(ct);
+            await RecomputeIfPolicyTagsChangedAsync(db, compliance, db.Endpoints.Where(e => e.OrganizationId == id), [.. added, .. removed], ct);
+            return TypedResults.NoContent();
+        }).WithTags("Tags").RequireAuthorization(Policies.Operator);
+
+        app.MapPut("/api/v1/sites/{id:guid}/tags", async (Guid id, TagAssignmentRequest request, EasyPatchDbContext db, ITenantContext tenant,
+            AuditService audit, ComplianceService compliance, TimeProvider clock, CancellationToken ct) =>
+        {
+            EnsureCanAssign(tenant);
+            var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct) ?? throw AppException.NotFound("Site");
+            var now = clock.GetUtcNow();
+            var current = await db.SiteTags.Where(t => t.SiteId == id).ToListAsync(ct);
+            var (added, removed) = await ReplaceAsync(db, db.SiteTags, current, l => l.TagId, request.TagIds,
+                t => new SiteTag { SiteId = id, TagId = t, CreatedAt = now }, ct);
+            if (added.Count == 0 && removed.Count == 0)
+            {
+                return TypedResults.NoContent();
+            }
+
+            audit.Record("site.tags_update", "Site", id.ToString(), site.OrganizationId, details: new { Added = added, Removed = removed });
+            await db.SaveChangesAsync(ct);
+            await RecomputeIfPolicyTagsChangedAsync(db, compliance, db.Endpoints.Where(e => e.SiteId == id), [.. added, .. removed], ct);
+            return TypedResults.NoContent();
+        }).WithTags("Tags").RequireAuthorization(Policies.Operator);
 
         var endpoints = app.MapGroup("/api/v1/endpoints").WithTags("Tags").RequireAuthorization(Policies.Operator);
 
@@ -251,8 +304,8 @@ public static class TagEndpoints
         });
     }
 
-    internal static TagDto ToDto(Tag t, int endpointCount, bool hasPolicy) =>
-        new(t.Id, t.Name, t.Color, t.Description, t.Priority, endpointCount, hasPolicy, t.CreatedAt);
+    internal static TagDto ToDto(Tag t, int endpointCount, bool hasPolicy, int siteCount = 0, int organizationCount = 0) =>
+        new(t.Id, t.Name, t.Color, t.Description, t.Priority, endpointCount, hasPolicy, t.CreatedAt, siteCount, organizationCount);
 
     private static (string Name, string Color, string? Description) Validate(TagRequest request)
     {
@@ -306,8 +359,38 @@ public static class TagEndpoints
         }
     }
 
+    /// <summary>Endpoints with the tag, directly or through their site or organization.</summary>
     private static Task<List<Guid>> TaggedEndpointsAsync(EasyPatchDbContext db, Guid tagId, CancellationToken ct) =>
-        db.EndpointTags.AsNoTracking().Where(et => et.TagId == tagId).Select(et => et.EndpointId).ToListAsync(ct);
+        EffectiveTags.EndpointIdsAsync(db, tagId, ct);
+
+    /// <summary>Replaces the tags of an organization or site. Returns the tags added and removed.</summary>
+    private static async Task<(List<Guid> Added, List<Guid> Removed)> ReplaceAsync<TLink>(EasyPatchDbContext db, DbSet<TLink> set,
+        List<TLink> current, Func<TLink, Guid> tagOf, IReadOnlyList<Guid>? requested, Func<Guid, TLink> create, CancellationToken ct)
+        where TLink : class
+    {
+        var wanted = (requested ?? []).Distinct().ToList();
+        if (wanted.Count > MaxTagsPerEndpoint)
+        {
+            throw AppException.BadRequest($"An organization or site can have at most {MaxTagsPerEndpoint} tags.", "validation_failed");
+        }
+
+        await EnsureTagsExistAsync(db, wanted, ct);
+        var removed = current.Where(l => !wanted.Contains(tagOf(l))).ToList();
+        var added = wanted.Where(t => current.All(l => tagOf(l) != t)).ToList();
+        set.RemoveRange(removed);
+        set.AddRange(added.Select(create));
+        return (added, removed.Select(tagOf).ToList());
+    }
+
+    /// <summary>Recalculates compliance of the endpoints in an organization or site when a tag with a policy was added or removed.</summary>
+    private static async Task RecomputeIfPolicyTagsChangedAsync(EasyPatchDbContext db, ComplianceService compliance, IQueryable<EasyPatch.Core.Entities.Endpoint> endpoints,
+        List<Guid> changedTags, CancellationToken ct)
+    {
+        if (changedTags.Count > 0 && await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Tag && p.TagId != null && changedTags.Contains(p.TagId.Value), ct))
+        {
+            await compliance.RecomputeAsync(await endpoints.Select(e => e.Id).ToListAsync(ct), ct);
+        }
+    }
 
     private static void EnsureCanAssign(ITenantContext tenant)
     {

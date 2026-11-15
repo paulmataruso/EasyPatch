@@ -213,6 +213,13 @@ shape and to an explicit administrator decision.
   removed, when the agent is uninstalled and when its credential is revoked. When another
   policy source changes a value, the agent reports a conflict and stops re-applying, instead
   of overriding domain Group Policy in a loop.
+* **Uninstalling the agent.** An `UninstallAgent` job is created only by an Operator for one
+  endpoint, after typing the computer name to confirm, and is recorded in the audit log. It
+  has no payload: the agent can only remove its own package (`msiexec /x` of the product with
+  EasyPatch's fixed upgrade code, or `apt-get remove`/`rpm -e easypatch-agent`), never another
+  program, and the server cannot pass it a command or arguments. The package's own uninstall
+  step unenrolls the agent; the server marks the job completed only when that authenticated
+  unenrollment arrives, not when the job is sent.
 
 ### Tray and local pipe
 
@@ -477,7 +484,7 @@ LocalSystem.
 | S1 | Attacker impersonates an agent | Per-device ECDSA keys, signed requests, nonce and timestamp checks, revocation |
 | S2 | Attacker impersonates the server to an agent | The agent uses the operating system's normal TLS validation of the server certificate (the Windows certificate store, or the system CA store on Linux; the public CA from Caddy's ACME). TLS validation cannot be turned off. A Windows agent installed with *Skip certificate check* also accepts certificates from the one CA recorded at installation (`SERVERCACERT`), for its EasyPatch connection only, still with name and validity checks. See [Install scripts and private CAs](#install-scripts-and-private-cas). |
 | S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory TOTP |
-| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select, by GUID or category, Windows updates, Linux package upgrades or upgrades of approved, installed applications (winget) that the agent's own scan found, never arbitrary binaries or packages. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. |
+| T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select, by GUID or category, Windows updates, Linux package upgrades or upgrades of approved, installed applications (winget) that the agent's own scan found, never arbitrary binaries or packages. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. Uninstall jobs have no payload and remove only the agent's own package. |
 | T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |
 | T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |
 | T4 | A tampered or malicious vulnerability feed | Fixed HTTPS hosts with normal certificate validation, no redirects, size limits, strict parsing (document IDs and CVE IDs are validated). Feed data only changes display order, CVE lists and, by default, whether a known-exploited update skips the rollout delay: it cannot add updates, run commands or restart computers. Super administrators can turn the downloads off. See [Vulnerability data](#vulnerability-data). |

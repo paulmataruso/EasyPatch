@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { ArrowUpCircle, Ban, Download, MessageSquare, MoreHorizontal, Pencil, Power, RefreshCw, ScanSearch, Tag as TagIcon, Trash2, WifiOff } from 'lucide-react';
+import { ArrowUpCircle, Ban, Download, MessageSquare, MoreHorizontal, PackageX, Pencil, Power, RefreshCw, ScanSearch, Tag as TagIcon, Trash2, WifiOff } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
 import { useApi, useApiMutation, useSites } from '../../api/hooks';
 import { AGENT_CAPABILITIES, ESU_OVERRIDES, type EndpointDetailDto, type EsuOverride, type UpdateEndpointRequest } from '../../api/types';
@@ -171,7 +171,8 @@ export function EndpointDetailPage() {
         onClose={() => setInstall(null)}
       />
       <RestartDialog target={restartOpen ? { kind: 'endpoint', endpoint: e } : null} onClose={() => setRestartOpen(false)} />
-      <EndpointTagsDialog open={tagsOpen} onClose={() => setTagsOpen(false)} endpointId={s.id} hostname={s.hostname} current={s.tags ?? []} />
+      <EndpointTagsDialog open={tagsOpen} onClose={() => setTagsOpen(false)} endpointId={s.id} hostname={s.hostname} current={s.tags ?? []}
+        siteName={s.siteName} organizationName={s.organizationName} />
     </>
   );
 }
@@ -226,13 +227,17 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
   const toast = useToast();
   const navigate = useNavigate();
   const [menu, setMenu] = useState(false);
-  const [dialog, setDialog] = useState<'edit' | 'revoke' | 'delete' | 'message' | 'agent-update' | null>(null);
+  const [dialog, setDialog] = useState<'edit' | 'revoke' | 'delete' | 'message' | 'agent-update' | 'uninstall' | null>(null);
   const canNotify = endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.notifyUser);
   const notifyHint = canNotify
     ? undefined
     : isLinux(s.platform)
       ? 'Linux agents have no EasyPatch tray, so they cannot show messages to users.'
       : 'This agent cannot show messages. Install EasyPatch agent 1.1.0 or later.';
+  const canUninstall = endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.uninstall);
+  const uninstallHint = canUninstall
+    ? undefined
+    : 'This agent cannot uninstall itself. Update it to 1.6.0 or later, or uninstall it on the computer.';
 
   const queueJob = useApiMutation((kind: 'scan' | 'inventory-refresh') => api.post<unknown>(`/endpoints/${s.id}/${kind}`), {
     invalidate: [`/endpoints/${s.id}`, '/jobs'],
@@ -267,6 +272,19 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
     invalidate: [`/endpoints`, '/dashboard'],
     onSuccess: () => {
       toast.success('Endpoint credentials revoked.');
+      setDialog(null);
+    },
+  });
+  const uninstall = useApiMutation(() => api.post<unknown>(`/endpoints/${s.id}/uninstall-agent`), {
+    invalidate: [`/endpoints/${s.id}`, '/jobs'],
+    onSuccess: (result) => {
+      const jobId = jobIdOf(result);
+      toast.success(
+        <span>
+          Agent uninstall queued.{' '}
+          {jobId && <Link to={`/jobs/${jobId}`} className="text-accent hover:underline">View job</Link>}
+        </span>,
+      );
       setDialog(null);
     },
   });
@@ -310,6 +328,10 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
               <MenuItem icon={<Pencil className="size-4" aria-hidden />} onClick={() => { setMenu(false); setDialog('edit'); }}>
                 Edit site, notes, ESU
               </MenuItem>
+              <MenuItem icon={<PackageX className="size-4" aria-hidden />} danger disabled={!canUninstall} hint={uninstallHint}
+                onClick={() => { setMenu(false); setDialog('uninstall'); }}>
+                Uninstall agent…
+              </MenuItem>
               <MenuItem icon={<Ban className="size-4" aria-hidden />} danger onClick={() => { setMenu(false); setDialog('revoke'); }}>
                 Revoke credentials
               </MenuItem>
@@ -323,6 +345,29 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
       <EditEndpointDialog endpoint={endpoint} open={dialog === 'edit'} onClose={() => setDialog(null)} />
       <MessageDialog target={dialog === 'message' ? { kind: 'endpoint', endpoint } : null} onClose={() => setDialog(null)} />
       <AgentUpdateDialog target={dialog === 'agent-update' ? { kind: 'endpoint', endpoint } : null} onClose={() => setDialog(null)} />
+      <ConfirmDialog
+        open={dialog === 'uninstall'}
+        onClose={() => setDialog(null)}
+        onConfirm={() => uninstall.mutate(undefined)}
+        loading={uninstall.isPending}
+        error={uninstall.error}
+        tone="danger"
+        title={`Uninstall the agent from ${s.hostname}?`}
+        confirmLabel="Uninstall agent"
+        confirmText={s.hostname}
+      >
+        <p>
+          The agent removes itself the next time it checks in, after any job it is running.{' '}
+          {isLinux(s.platform)
+            ? 'It removes the easypatch-agent package, which unenrolls it.'
+            : 'It runs its uninstaller, which restores the Windows Update settings EasyPatch changed, unenrolls it and removes the program.'}{' '}
+          The endpoint then shows as decommissioned with its history kept; delete it afterwards if you no longer need the record.
+        </p>
+        <p className="mt-2">
+          Queued jobs for this endpoint are cancelled. If the endpoint stays offline, the uninstall waits until the job expires. To manage the computer again,
+          install and enroll the agent again.
+        </p>
+      </ConfirmDialog>
       <ConfirmDialog
         open={dialog === 'revoke'}
         onClose={() => setDialog(null)}

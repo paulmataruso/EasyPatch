@@ -15,7 +15,8 @@ the same server, enrollment, policies, jobs and console as the Windows agent
 * **does not change the package manager configuration**. `unattended-upgrades` and
   `dnf-automatic` are reported in the console, never enabled or disabled;
 * cannot run commands. It executes four job types: update scan, inventory refresh, install
-  updates and restart, plus agent updates (see [Updating the agent](#updating-the-agent)).
+  updates and restart, plus agent updates (see [Updating the agent](#updating-the-agent)) and
+  removing its own package (see [Uninstalling](#uninstalling)).
   There is no tray icon, so preset messages to signed-in users are Windows only.
 
 ## Supported distributions
@@ -104,8 +105,8 @@ The proxy is used by the agent only. Proxy credentials are not supported.
 2. Install it. The service starts and waits for enrollment.
 
    ```sh
-   sudo apt-get install ./EasyPatchAgent-1.5.3-x64.deb     # Debian, Ubuntu
-   sudo dnf install ./EasyPatchAgent-1.5.3-x64.rpm         # RHEL and rebuilds, CentOS Stream, Fedora
+   sudo apt-get install ./EasyPatchAgent-1.6.0-x64.deb     # Debian, Ubuntu
+   sudo dnf install ./EasyPatchAgent-1.6.0-x64.rpm         # RHEL and rebuilds, CentOS Stream, Fedora
    ```
 
 3. Enroll with the token. The agent does not accept a token as a command-line argument, because
@@ -270,15 +271,26 @@ Package manager output sent to the server has credentials in repository URLs rem
 
 ## Uninstalling
 
-Unenroll first so that the server knows (otherwise remove the endpoint in the console):
+From the console (agent 1.6.0 or later): open the endpoint, **More → Uninstall agent…** and type
+the computer name to confirm. The agent removes its own package (`apt-get remove
+easypatch-agent` or `rpm -e easypatch-agent`, in the transient unit
+`easypatch-agent-uninstall`) the next time it checks in. The job completes when the package's
+removal script has unenrolled the agent, and the endpoint is shown as decommissioned. The
+output is in `/var/lib/easypatch/logs/uninstall.log`.
+
+On the computer:
 
 ```sh
-sudo easypatch-agent unenroll
 sudo apt-get remove easypatch-agent      # keeps /etc/easypatch and /var/lib/easypatch
 sudo apt-get purge easypatch-agent       # also deletes them
 sudo dnf remove easypatch-agent          # keeps them; delete them by hand:
 sudo rm -rf /etc/easypatch /var/lib/easypatch
 ```
+
+Since 1.6.0, removing the package (not upgrading it) stops the service and runs `unenroll`
+first, so the server marks the endpoint as decommissioned when it can be reached. With older
+packages, run `sudo easypatch-agent unenroll` before removing them, or remove the endpoint in
+the console.
 
 ## Troubleshooting
 
@@ -301,7 +313,7 @@ release key accepts only packages signed with that key, so it does not update to
 releases (see [security.md](security.md#agent-release-signing)).
 
 ```sh
-scripts/build-linux-packages.sh --version 1.5.3 --arch all
+scripts/build-linux-packages.sh --version 1.6.0 --arch all
 ```
 
 The script runs the agent tests, publishes the self-contained agent for linux-x64 and linux-arm64,

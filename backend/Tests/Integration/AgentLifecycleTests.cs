@@ -30,7 +30,10 @@ public sealed class AgentLifecycleTests(PostgresFixture postgres) : IntegrationT
             this.http = http;
             this.clock = clock;
             BootTime = new FakeBootTime(clock.GetUtcNow().AddHours(-3));
-            Platform = new AgentPlatform(WindowsUpdate, Inventory, RebootDetector, new FakeUpdateSource(), Protector, Bootstrap, BootTime);
+            Platform = new AgentPlatform(WindowsUpdate, Inventory, RebootDetector, new FakeUpdateSource(), Protector, Bootstrap, BootTime)
+            {
+                AgentUninstaller = Uninstaller,
+            };
             Runtime = Create();
         }
 
@@ -39,6 +42,7 @@ public sealed class AgentLifecycleTests(PostgresFixture postgres) : IntegrationT
         public FakeInventory Inventory { get; } = new();
         public FakeRebootDetector RebootDetector { get; } = new();
         public TestSecretProtector Protector { get; } = new();
+        public FakeAgentUninstaller Uninstaller { get; } = new();
         public InMemoryBootstrap Bootstrap { get; } = new() { ServerUrl = EasyPatchApiFactory.PublicUrl };
         public FakeBootTime BootTime { get; }
         public AgentPlatform Platform { get; }
@@ -310,6 +314,71 @@ public sealed class AgentLifecycleTests(PostgresFixture postgres) : IntegrationT
         Assert.Equal(EndpointStatus.Decommissioned, detail.Summary.Status);
         Assert.Null(agent.Runtime.State.Read(s => s.CredentialId));
         Assert.Null(await agent.Runtime.CheckInOnceAsync());
+    }
+
+    [Fact]
+    public async Task An_administrator_uninstalls_the_agent_and_the_job_completes_when_the_agent_unenrolls()
+    {
+        var admin = await SuperAdminAsync();
+        var (org, site) = await CreateOrgAsync(admin);
+        using var agent = new TestAgent(NewHttpClient(), Clock);
+        agent.Bootstrap.EnrollmentToken = await CreateTokenAsync(admin, org.Id, site.Id);
+        await agent.Runtime.EnsureEnrolledAsync();
+        var endpointId = agent.Runtime.State.Read(s => s.EndpointId)!.Value;
+        await agent.Runtime.CheckInOnceAsync();
+
+        var scan = await admin.SendAsync<JobSummaryDto>(HttpMethod.Post, $"/api/v1/endpoints/{endpointId}/scan", null, HttpStatusCode.Accepted);
+        var job = await admin.SendAsync<JobSummaryDto>(HttpMethod.Post, $"/api/v1/endpoints/{endpointId}/uninstall-agent", null, HttpStatusCode.Accepted);
+        Assert.Equal(JobType.UninstallAgent, job.Type);
+        await admin.ExpectAsync(HttpMethod.Post, $"/api/v1/endpoints/{endpointId}/uninstall-agent", null, HttpStatusCode.Conflict, "duplicate_job");
+
+        // The uninstall goes before the scan that was queued first. Starting the removal stops the service.
+        await agent.Runtime.CheckInOnceAsync();
+        using (var stopping = new CancellationTokenSource())
+        {
+            agent.Uninstaller.ServiceStopping = stopping;
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => agent.Runtime.ProcessNextJobAsync(stopping.Token));
+        }
+
+        Assert.Single(agent.Uninstaller.Started);
+        Assert.True(await agent.Runtime.FlushOutboxAsync());
+        var running = await admin.GetAsync<JobDetailDto>($"/api/v1/jobs/{job.Id}");
+        Assert.Equal(JobStatus.Running, running.Summary.Status);
+        Assert.Equal("Uninstalling", running.Summary.Phase);
+
+        // The package's uninstall step (msiexec runs "EasyPatch.Agent.exe unenroll") tells the server.
+        await agent.Runtime.UnenrollAsync("Agent uninstalled");
+
+        var done = await admin.GetAsync<JobDetailDto>($"/api/v1/jobs/{job.Id}");
+        Assert.Equal(JobStatus.Completed, done.Summary.Status);
+        Assert.Equal(100, done.Summary.ProgressPercent);
+        Assert.Equal("The agent was removed and unenrolled from the server.", done.Summary.ProgressMessage);
+        var cancelled = await admin.GetAsync<JobDetailDto>($"/api/v1/jobs/{scan.Id}");
+        Assert.Equal(JobStatus.Cancelled, cancelled.Summary.Status);
+        Assert.Equal("The agent was uninstalled.", cancelled.Summary.ErrorMessage);
+        var detail = await admin.GetAsync<EndpointDetailDto>($"/api/v1/endpoints/{endpointId}");
+        Assert.Equal(EndpointStatus.Decommissioned, detail.Summary.Status);
+        await WithDbAsync(async db =>
+        {
+            Assert.True(await db.AuditLogs.AnyAsync(a => a.Action == "job.create" && a.TargetId == job.Id.ToString()));
+            Assert.True(await db.EndpointEvents.AnyAsync(e => e.EndpointId == endpointId && e.Type == "Decommissioned" && e.Message == "Agent uninstalled."));
+        });
+
+        // A decommissioned endpoint gets no more jobs.
+        await admin.ExpectAsync(HttpMethod.Post, $"/api/v1/endpoints/{endpointId}/uninstall-agent", null, HttpStatusCode.Conflict, "endpoint_not_active");
+    }
+
+    [Fact]
+    public async Task Agents_that_cannot_remove_themselves_are_not_sent_an_uninstall()
+    {
+        var root = await SuperAdminAsync();
+        var (org, site) = await CreateOrgAsync(root);
+        using var agent = await EnrollAgentAsync(root, org.Id, site.Id, "WS-OLD");
+        await agent.CheckInAsync(new EasyPatch.Contracts.Agent.CheckInRequest { AgentVersion = "1.5.3", Capabilities = [EasyPatch.Contracts.Agent.AgentCapabilities.Restart] });
+
+        using var response = await root.SendAsync(HttpMethod.Post, $"/api/v1/endpoints/{agent.EndpointId}/uninstall-agent");
+        await AdminSession.EnsureAsync(response, HttpStatusCode.Conflict);
+        Assert.Equal("agent_upgrade_required", await AdminSession.ProblemCodeAsync(response));
     }
 
     [Fact]

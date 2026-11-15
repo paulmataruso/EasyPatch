@@ -272,7 +272,7 @@ public sealed class AlertEngine(
 
         if (rule.TagId is { } tag)
         {
-            endpoints = endpoints.Where(e => db.EndpointTags.Any(et => et.EndpointId == e.Id && et.TagId == tag));
+            endpoints = endpoints.WithTag(db, tag); // its own tag, or its site's or organization's
         }
 
         var threshold = rule.Threshold ?? AlertRuleCatalog.Threshold(rule.Type)?.Default ?? 0;

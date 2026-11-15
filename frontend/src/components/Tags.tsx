@@ -18,15 +18,25 @@ const COLOR_CLASSES: Record<string, string> = {
   pink: 'bg-pink-100 text-pink-800 dark:bg-pink-950 dark:text-pink-300',
 };
 
+/** "from its site" / "from its organization" for a tag an endpoint has through its site or organization. */
+export function inheritedLabel(tag: TagRefDto): string | null {
+  if (tag.inheritedFrom === 'Site') return 'from its site';
+  if (tag.inheritedFrom === 'Organization') return 'from its organization';
+  return null;
+}
+
 export function TagChip({ tag, className }: { tag: TagRefDto; className?: string }) {
+  const inherited = inheritedLabel(tag);
   return (
     <span
       className={cx(
         'inline-flex max-w-40 items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-xs font-medium whitespace-nowrap',
         COLOR_CLASSES[tag.color] ?? COLOR_CLASSES.gray,
+        // An inherited tag is outlined with a dashed border so it reads as "not set here".
+        inherited && 'outline-1 -outline-offset-1 outline-current/40 outline-dashed',
         className,
       )}
-      title={tag.name}
+      title={inherited ? `${tag.name} (${inherited})` : tag.name}
     >
       {tag.name}
     </span>
@@ -51,7 +61,13 @@ export function TagList({ tags, max = 3 }: { tags: TagRefDto[] | null | undefine
   );
 }
 
-function TagCheckboxes({ tags, selected, onChange }: { tags: TagDto[]; selected: Set<string>; onChange: (next: Set<string>) => void }) {
+function TagCheckboxes({ tags, selected, onChange, locked }: {
+  tags: TagDto[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  /** Tags that apply anyway (from a site or organization), with where they come from. Shown ticked and disabled. */
+  locked?: Map<string, string>;
+}) {
   return (
     <div className="flex flex-col gap-1.5">
       {tags.map((t) => (
@@ -59,7 +75,8 @@ function TagCheckboxes({ tags, selected, onChange }: { tags: TagDto[]; selected:
           <input
             type="checkbox"
             className="mt-0.5 size-4"
-            checked={selected.has(t.id)}
+            checked={selected.has(t.id) || (locked?.has(t.id) ?? false)}
+            disabled={locked?.has(t.id) && !selected.has(t.id)}
             onChange={(e) => {
               const next = new Set(selected);
               if (e.target.checked) next.add(t.id);
@@ -70,6 +87,7 @@ function TagCheckboxes({ tags, selected, onChange }: { tags: TagDto[]; selected:
           <span className="min-w-0">
             <TagChip tag={t} />
             {t.hasPolicy && <span className="ml-2 text-xs text-muted">has a policy</span>}
+            {locked?.has(t.id) && <span className="ml-2 text-xs text-muted">{locked.get(t.id)}</span>}
             {t.description && <span className="block text-xs text-muted">{t.description}</span>}
           </span>
         </label>
@@ -78,27 +96,79 @@ function TagCheckboxes({ tags, selected, onChange }: { tags: TagDto[]; selected:
   );
 }
 
-/** Edits the tags of one endpoint (replaces the whole set). */
-export function EndpointTagsDialog({ open, onClose, endpointId, hostname, current }: {
+/** Edits the tags of one endpoint (replaces its own tags; tags from its site or organization are shown but not changed here). */
+export function EndpointTagsDialog({ open, onClose, endpointId, hostname, current, siteName, organizationName }: {
   open: boolean;
   onClose: () => void;
   endpointId: string;
   hostname: string;
   current: TagRefDto[];
+  siteName?: string | null;
+  organizationName?: string | null;
+}) {
+  const inherited = new Map(
+    current
+      .filter((t) => t.inheritedFrom)
+      .map((t) => [t.id, t.inheritedFrom === 'Site' ? `from site ${siteName ?? ''}`.trim() : `from organization ${organizationName ?? ''}`.trim()]),
+  );
+  return (
+    <TagsDialog
+      open={open}
+      onClose={onClose}
+      url={`/endpoints/${endpointId}/tags`}
+      name={hostname}
+      current={current.filter((t) => !t.inheritedFrom)}
+      inherited={inherited}
+      description="Tags group endpoints across customers (for example an update ring). A tag can carry a policy. Tags of the endpoint's site and organization apply as well; change them on the organization."
+    />
+  );
+}
+
+/** Edits the tags of an organization or a site: every endpoint in it has them (for example a pilot ring). */
+export function GroupTagsDialog({ target, onClose }: {
+  target: { kind: 'organization' | 'site'; id: string; name: string; current: TagRefDto[]; organization?: { name: string; tags: TagRefDto[] } } | null;
+  onClose: () => void;
+}) {
+  const inherited = new Map((target?.organization?.tags ?? []).map((t) => [t.id, `from organization ${target?.organization?.name ?? ''}`.trim()]));
+  return (
+    <TagsDialog
+      open={target !== null}
+      onClose={onClose}
+      url={target ? `/${target.kind === 'site' ? 'sites' : 'organizations'}/${target.id}/tags` : ''}
+      name={target?.name ?? ''}
+      current={target?.current ?? []}
+      inherited={inherited}
+      description={
+        target?.kind === 'site'
+          ? 'Every endpoint in this site has these tags, and their tag policies apply to it. Tag a site "Pilot" to put its computers in your pilot ring.'
+          : 'Every endpoint of this organization, in every site, has these tags, and their tag policies apply to it. Tag a customer "Pilot" to put all its computers in your pilot ring.'
+      }
+    />
+  );
+}
+
+function TagsDialog({ open, onClose, url, name, current, inherited, description }: {
+  open: boolean;
+  onClose: () => void;
+  url: string;
+  name: string;
+  current: TagRefDto[];
+  inherited: Map<string, string>;
+  description: string;
 }) {
   const toast = useToast();
   const tags = useApi<TagDto[]>(open ? '/tags' : null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Reset only when the dialog opens: `current` is a new array on every poll of the endpoint.
+  // Reset only when the dialog opens: `current` is a new array on every poll.
   const [wasOpen, setWasOpen] = useState(false);
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) setSelected(new Set(current.map((t) => t.id)));
   }
-  const save = useApiMutation((ids: string[]) => api.put(`/endpoints/${endpointId}/tags`, { tagIds: ids }), {
-    invalidate: ['/endpoints', '/tags'],
+  const save = useApiMutation((ids: string[]) => api.put(url, { tagIds: ids }), {
+    invalidate: ['/endpoints', '/tags', '/organizations', '/sites'],
     onSuccess: () => {
-      toast.success(`Tags of ${hostname} saved.`);
+      toast.success(`Tags of ${name} saved.`);
       onClose();
     },
   });
@@ -107,8 +177,8 @@ export function EndpointTagsDialog({ open, onClose, endpointId, hostname, curren
     <Dialog
       open={open}
       onClose={onClose}
-      title={`Tags of ${hostname}`}
-      description="Tags group endpoints across customers (for example an update ring). A tag can carry a policy."
+      title={`Tags of ${name}`}
+      description={description}
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
@@ -125,7 +195,7 @@ export function EndpointTagsDialog({ open, onClose, endpointId, hostname, curren
           A super administrator creates tags under Settings → Tags.
         </EmptyState>
       ) : (
-        <TagCheckboxes tags={tags.data ?? []} selected={selected} onChange={setSelected} />
+        <TagCheckboxes tags={tags.data ?? []} selected={selected} onChange={setSelected} locked={inherited} />
       )}
       <InlineError error={tags.error ?? save.error} />
     </Dialog>

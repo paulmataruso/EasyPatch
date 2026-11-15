@@ -139,6 +139,15 @@ public sealed class JobRecord
 
     /// <summary>Set when Windows Installer was started for an agent update job.</summary>
     public AgentUpdateProgress? AgentUpdate { get; set; }
+
+    /// <summary>Set when the removal of the agent was started for an uninstall job.</summary>
+    public UninstallProgress? Uninstall { get; set; }
+}
+
+public sealed class UninstallProgress
+{
+    public required string LogPath { get; set; }
+    public DateTimeOffset LaunchedAt { get; set; }
 }
 
 public sealed class AgentUpdateProgress

@@ -311,6 +311,9 @@ public sealed record AgentPlatform(
     /// <see cref="AgentRuntimeOptions.ReleasePublicKeys"/>).</summary>
     public IAgentInstaller? AgentInstaller { get; init; }
 
+    /// <summary>Removes the agent for an administrator's uninstall job (null when the agent was not installed from its package).</summary>
+    public IAgentUninstaller? AgentUninstaller { get; init; }
+
     /// <summary>Signed-in users on a platform without a tray (Linux). Ignored when <see cref="UserInteraction"/> is set.</summary>
     public IUserSessionCounter? SessionCounter { get; init; }
 
@@ -343,6 +346,11 @@ public sealed record AgentPlatform(
             if (ApplicationUpdates is not null)
             {
                 list.Add(AgentCapabilities.ApplicationUpdates);
+            }
+
+            if (AgentUninstaller is not null)
+            {
+                list.Add(AgentCapabilities.Uninstall);
             }
 
             return list;

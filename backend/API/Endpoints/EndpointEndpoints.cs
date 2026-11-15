@@ -345,6 +345,15 @@ public static class EndpointEndpoints
             return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await JobEndpoints.LoadSummaryAsync(db, job.Id, ct));
         }).RequireAuthorization(Policies.Operator);
 
+        // Removes the EasyPatch agent package from the endpoint (nothing else). The job completes when the agent unenrolls as
+        // part of the removal; the endpoint is then decommissioned.
+        g.MapPost("/{id:guid}/uninstall-agent", async (Guid id, EasyPatchDbContext db, ITenantContext tenant, JobService jobs, CancellationToken ct) =>
+        {
+            await EnsureEndpointAccessAsync(db, tenant, id, ct);
+            var job = await jobs.CreateAsync(new CreateJobRequest(id, JobType.UninstallAgent), ct);
+            return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await JobEndpoints.LoadSummaryAsync(db, job.Id, ct));
+        }).RequireAuthorization(Policies.Operator);
+
         g.MapPost("/bulk/agent-update", (BulkAgentUpdateRequest request, EasyPatchDbContext db, ITenantContext tenant, JobService jobs, CancellationToken ct) =>
             BulkAsync(new BulkEndpointsRequest(request.EndpointIds, false), db, tenant, jobs,
                 id => new CreateJobRequest(id, JobType.AgentUpdate, AgentVersion: Validator.Clean(request.Version)), ct))
@@ -426,7 +435,7 @@ public static class EndpointEndpoints
 
         if (q.TagId is { } tagId)
         {
-            query = query.Where(e => db.EndpointTags.Any(et => et.EndpointId == e.Id && et.TagId == tagId));
+            query = query.WithTag(db, tagId);
         }
 
         if (q.KnownExploited is { } exploited)

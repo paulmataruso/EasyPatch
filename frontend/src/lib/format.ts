@@ -89,6 +89,7 @@ export function humanize(value: string | null | undefined): string {
     InventoryRefresh: 'Inventory refresh',
     NotifyUser: 'Message to users',
     AgentUpdate: 'Agent update',
+    UninstallAgent: 'Agent uninstall',
     PromptWithDeadline: 'Ask users, with a deadline',
     PromptNoDeadline: 'Ask users, no deadline',
     OnlyIfPending: 'Only if a restart is pending',

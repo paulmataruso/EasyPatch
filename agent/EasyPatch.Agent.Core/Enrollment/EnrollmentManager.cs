@@ -42,6 +42,8 @@ public static class AgentEventIds
     public static readonly EventId AgentUpdateStarted = new(1013, "AgentUpdateStarted");
     public static readonly EventId AgentUpdated = new(1014, "AgentUpdated");
     public static readonly EventId AgentUpdateFailed = new(1015, "AgentUpdateFailed");
+    public static readonly EventId AgentUninstallStarted = new(1016, "AgentUninstallStarted");
+    public static readonly EventId AgentUninstallFailed = new(1017, "AgentUninstallFailed");
 }
 
 /// <summary>
