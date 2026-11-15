@@ -46,8 +46,10 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<EasyPatchExceptionHandler>();
 
-builder.Services.AddAuthentication(SessionAuthenticationHandler.SchemeName)
+builder.Services.AddAuthentication(ConsoleAuthentication.SchemeName)
+    .AddPolicyScheme(ConsoleAuthentication.SchemeName, null, o => o.ForwardDefaultSelector = ConsoleAuthentication.Select)
     .AddScheme<SessionAuthenticationOptions, SessionAuthenticationHandler>(SessionAuthenticationHandler.SchemeName, null)
+    .AddScheme<ApiTokenAuthenticationOptions, ApiTokenAuthenticationHandler>(ApiTokenAuthenticationHandler.SchemeName, null)
     .AddScheme<AgentAuthenticationOptions, AgentAuthenticationHandler>(AgentAuthenticationHandler.SchemeName, null);
 builder.Services.AddEasyPatchAuthorization();
 builder.Services.AddEasyPatchRateLimits(builder.Configuration);
@@ -122,6 +124,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c
 app.MapAgentEndpoints();
 app.MapAuthEndpoints();
 app.MapUserEndpoints();
+app.MapApiTokenEndpoints();
 app.MapOrganizationEndpoints();
 app.MapEndpointEndpoints();
 app.MapTagEndpoints();

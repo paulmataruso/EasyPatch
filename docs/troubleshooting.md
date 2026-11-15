@@ -53,6 +53,8 @@ problem.
 | Forgotten password | A SuperAdmin creates a reset link under **Settings → Users**, or on the host: `docker compose run --rm api reset-password --username <name>` |
 | Signed out unexpectedly | Sessions end after the idle timeout (default 30 minutes) or the maximum session length (default 12 hours). Both are under **Settings → Server settings** |
 | `403` with code `csrf_failed` | The page was open across a sign-out or session change. Reload it |
+| A script with an API token gets `401` | The token is wrong, expired or revoked (see **Settings → API tokens**), or the header is not exactly `Authorization: Bearer ept_…`. A request that also sends the console's session cookie is authenticated by the session instead |
+| A script with an API token gets `403` | The token's role does not allow the route (ReadOnly tokens cannot change anything, and no token can manage users, API tokens or server settings), or the request sent a session cookie without the CSRF header |
 | All MFA users must re-enroll after a restore or migration | The Data Protection key ring (`dpkeys` volume) was not restored with the database. Restore `dpkeys.tar` from the same backup |
 
 ## Endpoints and agents

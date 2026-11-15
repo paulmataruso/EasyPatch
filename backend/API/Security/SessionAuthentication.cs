@@ -17,6 +17,8 @@ public static class EasyPatchClaims
     public const string MfaSetupRequired = "easypatch:mfa_setup";
     public const string MustChangePassword = "easypatch:pwd_change";
     public const string Organization = "easypatch:org";
+    public const string ApiTokenId = "easypatch:api_token";
+    public const string AllOrganizations = "easypatch:all_orgs";
 
     public const string CredentialId = "easypatch:credential";
     public const string CredentialDbId = "easypatch:credential_db";
@@ -26,6 +28,10 @@ public static class EasyPatchClaims
 
     public static Guid GetUserId(this ClaimsPrincipal principal) =>
         Guid.Parse(principal.FindFirstValue(UserId) ?? throw AppException.Unauthorized("unauthenticated", "Sign in to continue."));
+
+    /// <summary>The signed-in user, or null for an API token.</summary>
+    public static Guid? FindUserId(this ClaimsPrincipal principal) =>
+        Guid.TryParse(principal.FindFirstValue(UserId), out var id) ? id : null;
 
     public static Guid GetSessionId(this ClaimsPrincipal principal) =>
         Guid.Parse(principal.FindFirstValue(SessionId) ?? throw AppException.Unauthorized("unauthenticated", "Sign in to continue."));

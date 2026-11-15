@@ -10,14 +10,14 @@ The live OpenAPI document is served at `/api/openapi/v1.json`, with Swagger UI a
 
 | Topic | Rule |
 |---|---|
-| Authentication | Admin routes use the session cookie `__Host-easypatch-session`. Agent routes use signed requests ([security.md](security.md#agent-request-signing)). |
-| CSRF | Unsafe admin methods (POST, PUT, PATCH, DELETE) must send `X-XSRF-TOKEN` with the value of the `XSRF-TOKEN` cookie. `POST /auth/login` and `POST /auth/password/reset` are exempt. A missing or wrong header returns `403` with `code=csrf_failed`. |
+| Authentication | Admin routes use the session cookie `__Host-easypatch-session`, or an [API token](#api-tokens-apiv1api-tokens-superadmin) sent as `Authorization: Bearer ept_…`. A request with a session cookie is authenticated by the session and any bearer token is ignored. Agent routes use signed requests ([security.md](security.md#agent-request-signing)). |
+| CSRF | Unsafe admin methods (POST, PUT, PATCH, DELETE) must send `X-XSRF-TOKEN` with the value of the `XSRF-TOKEN` cookie. `POST /auth/login` and `POST /auth/password/reset` are exempt, as are requests authenticated with an API token (browsers never send one on their own). A missing or wrong header returns `403` with `code=csrf_failed`. |
 | Correlation | `X-Correlation-ID` is accepted (max 64 characters of `[A-Za-z0-9-_.]`) or generated. It is returned on every response and included in error bodies and logs. |
 | Pagination | Paged routes take `?page=1&pageSize=50` (maximum 200) and return `{ items, page, pageSize, totalCount }`. Organizations, sites, users, tokens, deployment codes and the per-endpoint update lists are returned as plain arrays. |
 | Sorting | `GET /endpoints` and `GET /updates` accept `?sort=<field>&dir=asc|desc`; the fields are listed below. Unknown fields fall back to the default order. |
 | Errors | RFC 9457 `application/problem+json` with the extensions `code` (machine-readable) and `correlationId`. Validation errors (`400`, `code=validation_failed`) add `errors` (field → messages). Some errors carry extra members, such as `existingJobId` on `409 duplicate_job`. |
-| Rate limits | Login and other password/MFA operations: 20/min per IP. Enrollment: 30/min per IP. Agent routes: 120/min per credential. Downloads: 60/min per IP. All other admin routes: 600/min per user. Exceeding a limit returns `429` with `code=rate_limited` and `Retry-After`. The limits can be changed with the `RateLimits:*` settings. |
-| Roles | **Viewer** = any role (ReadOnly, Admin, SuperAdmin). **Operator** = Admin or SuperAdmin. **SuperAdmin** = SuperAdmin only. Users restricted to some organizations only see those organizations; anything outside them answers `404`. |
+| Rate limits | Login and other password/MFA operations: 20/min per IP. Enrollment: 30/min per IP. Agent routes: 120/min per credential. Downloads: 60/min per IP. All other admin routes: 600/min per user or API token. Exceeding a limit returns `429` with `code=rate_limited` and `Retry-After`. The limits can be changed with the `RateLimits:*` settings. |
+| Roles | **Viewer** = any role (ReadOnly, Admin, SuperAdmin). **Operator** = Admin or SuperAdmin. **SuperAdmin** = SuperAdmin only. Users and API tokens restricted to some organizations only see those organizations; anything outside them answers `404`. API tokens are ReadOnly or Admin, never SuperAdmin, and cannot use the `/auth` routes. |
 
 ## Agent protocol (`/api/v1/agents`)
 
@@ -85,6 +85,27 @@ Until a user has completed every sign-in step, other routes answer `403` with
 `GET /{id}`, `PUT /{id}` (`email`, `role`, `isActive`), `POST /{id}/reset-link`,
 `POST /{id}/mfa/reset`, `POST /{id}/sessions/revoke`, `PUT /{id}/organizations`
 (`{organizationIds[]}`; an empty list means all organizations).
+
+### API tokens (`/api/v1/api-tokens`, SuperAdmin)
+
+Bearer credentials for scripts and integrations. Only super administrators signed in to the
+console manage them; a token cannot create, list or revoke tokens.
+
+| Method | Route | Notes |
+|---|---|---|
+| GET | `/` | Every token, active first: name, display prefix, role, organizations, expiry, last use (time and address), creator, revocation, `status` (Active, Expired, Revoked). The secret is never returned. |
+| POST | `/` | `{name, role, organizationIds[], expiresInDays}` → `201 {token, secret}`. `role` is `ReadOnly` or `Admin`; an empty `organizationIds` means every organization; `expiresInDays` is 1 to 365; `name` (up to 50 characters) must be unique among tokens that are not revoked (`409 name_taken`). The `secret` (`ept_…`) is shown once; the server keeps only its SHA-256 hash. |
+| POST | `/{id}/revoke` | Revokes the token immediately. Revoking twice is harmless. |
+
+A token acts with its role in its organizations, like a user with the same role and
+organization access: a ReadOnly token gets the Viewer routes, an Admin token also gets the
+Operator routes. SuperAdmin routes answer `403`, and the `/auth` routes (your account, MFA,
+sessions) answer `401`. A missing, unknown, expired or revoked token answers `401` with
+`code=unauthenticated`. Actions are audited with the user name `token:<name>`.
+
+```bash
+curl -H "Authorization: Bearer $EASYPATCH_TOKEN" https://patch.example.com/api/v1/endpoints
+```
 
 ### Organizations, sites and policy
 

@@ -170,12 +170,12 @@ export function UsersTab() {
   );
 }
 
-function OrgAccessPicker({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
+export function OrgAccessPicker({ value, onChange, subject = 'user' }: { value: string[]; onChange: (ids: string[]) => void; subject?: string }) {
   const orgs = useOrganizations(true);
   return (
     <fieldset className="flex flex-col gap-1">
       <legend className="mb-1 text-xs font-medium text-muted">Organization access</legend>
-      <p className="mb-1 text-xs text-muted">Leave all unchecked for access to every organization. Check organizations to restrict this user to them.</p>
+      <p className="mb-1 text-xs text-muted">Leave all unchecked for access to every organization. Check organizations to restrict this {subject} to them.</p>
       <div className="max-h-48 overflow-y-auto rounded-md border border-line p-2">
         {orgs.page.items.length === 0 && <p className="text-sm text-muted">No organizations yet.</p>}
         {orgs.page.items.map((o) => (

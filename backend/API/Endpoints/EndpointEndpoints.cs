@@ -221,7 +221,7 @@ public static class EndpointEndpoints
             var endpoint = await db.Endpoints.AsNoTracking().FirstOrDefaultAsync(e => e.Id == id, ct) ?? throw AppException.NotFound("Endpoint");
             tenant.EnsureAccess(endpoint.OrganizationId);
             var stored = await policies.UpsertAsync(PolicyScope.Endpoint, endpoint.OrganizationId, null, id, OrganizationEndpoints.FromRequest(request),
-                user.GetUserId(), ct);
+                user.FindUserId(), ct);
             audit.Record("policy.update", "Policy", stored.Id.ToString(), endpoint.OrganizationId, id, request);
             await db.SaveChangesAsync(ct);
             await compliance.RecomputeAsync([id], ct);

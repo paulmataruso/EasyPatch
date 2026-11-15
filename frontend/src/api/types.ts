@@ -381,6 +381,43 @@ export interface CreateUserResponse {
   resetLink: ResetLinkResponse | null;
 }
 
+// API tokens (scripts and integrations)
+
+export const API_TOKEN_ROLES = ['ReadOnly', 'Admin'] as const satisfies readonly UserRole[];
+export type ApiTokenRole = (typeof API_TOKEN_ROLES)[number];
+
+export interface ApiTokenDto {
+  id: Guid;
+  name: string;
+  /** The first characters of the secret, to recognize the token. */
+  prefix: string;
+  role: UserRole;
+  allOrganizations: boolean;
+  organizationIds: Guid[];
+  createdAt: Instant;
+  createdBy: string | null;
+  expiresAt: Instant;
+  lastUsedAt: Instant | null;
+  lastUsedIp: string | null;
+  revokedAt: Instant | null;
+  revokedBy: string | null;
+  status: 'Active' | 'Expired' | 'Revoked';
+}
+
+export interface CreateApiTokenRequest {
+  name: string;
+  role: ApiTokenRole;
+  /** Empty for every organization. */
+  organizationIds: Guid[];
+  expiresInDays: number;
+}
+
+export interface CreateApiTokenResponse {
+  token: ApiTokenDto;
+  /** Shown once; the server keeps only a hash. */
+  secret: string;
+}
+
 export interface UpdateUserRequest {
   email: string | null;
   role: UserRole | null;

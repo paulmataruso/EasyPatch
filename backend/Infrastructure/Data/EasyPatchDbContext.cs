@@ -16,6 +16,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<UserOrganizationAccess> UserOrganizationAccess => Set<UserOrganizationAccess>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<Site> Sites => Set<Site>();
@@ -137,6 +138,18 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.TokenHash).HasMaxLength(64);
             e.HasIndex(x => x.TokenHash).IsUnique();
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<ApiToken>(e =>
+        {
+            e.ToTable("api_tokens");
+            e.Property(x => x.Name).HasMaxLength(50);
+            e.Property(x => x.Prefix).HasMaxLength(16);
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.Property(x => x.CreatedBy).HasMaxLength(64);
+            e.Property(x => x.RevokedBy).HasMaxLength(64);
+            e.Property(x => x.LastUsedIp).HasMaxLength(64);
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.HasIndex(x => x.Name).IsUnique().HasFilter("revoked_at IS NULL");
         });
         b.Entity<AuditLog>(e =>
         {

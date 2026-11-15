@@ -47,6 +47,17 @@ changes Windows Update policy values only for settings an administrator configur
   an `X-XSRF-TOKEN` header carrying the session ID protected with ASP.NET Data Protection
   (purpose `EasyPatch.Csrf.v1`). The server unprotects it and compares it with the session of
   the request. The value is delivered in a JavaScript-readable `XSRF-TOKEN` cookie.
+* **API tokens.** For scripts and integrations (**Settings → API tokens**, super administrators
+  only). A token is 256 random bits with the prefix `ept_`, shown once; only its SHA-256 hash is
+  stored, and it is never logged. It is sent as `Authorization: Bearer`, so it needs no CSRF
+  token, and a request that also has a session cookie is treated as a session request. Each
+  token has a fixed role (ReadOnly or Admin, never SuperAdmin), optional organization
+  restrictions, and an expiry of at most 365 days. It can be revoked at any time, and the
+  console shows when and from which address it was last used. Tokens cannot manage users, API
+  tokens or anything else reserved for super administrators, and cannot use the account
+  routes (MFA, password, sessions). They are not tied to the super administrator who created
+  them: disabling that user does not revoke the token. Actions are audited as `token:<name>`.
+  A token for some organizations whose organizations are all deleted can access nothing.
 * **Bootstrap and recovery.** No first-run web page exists. The first Super Administrator is
   created with `docker compose run --rm api create-admin`. Password resets are either
   administrator-issued one-time links (valid 60 minutes) or the `reset-password` CLI command.
@@ -515,6 +526,7 @@ whether or not application updates are on (see
 | S1 | Attacker impersonates an agent | Per-device ECDSA keys, signed requests, nonce and timestamp checks, revocation |
 | S2 | Attacker impersonates the server to an agent | The agent uses the operating system's normal TLS validation of the server certificate (the Windows certificate store, or the system CA store on Linux; the public CA from Caddy's ACME). TLS validation cannot be turned off. A Windows agent installed with *Skip certificate check* also accepts certificates from the one CA recorded at installation (`SERVERCACERT`), for its EasyPatch connection only, still with name and validity checks. See [Install scripts and private CAs](#install-scripts-and-private-cas). |
 | S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory TOTP |
+| S4 | An API token leaks (a script, a log, an integration's database) | 256-bit random secrets stored only as hashes and never logged; fixed role, never SuperAdmin; organization restrictions; expiry of at most 365 days; immediate revocation; last use time and address shown; actions audited as `token:<name>`. A leaked Admin token can do what an Admin can in its organizations until it is revoked, so give integrations ReadOnly tokens where they only read. |
 | T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select, by GUID or category, Windows updates, Linux package upgrades or upgrades of approved, installed applications (winget) that the agent's own scan found, never arbitrary binaries or packages. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. Uninstall jobs have no payload and remove only the agent's own package. |
 | T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |
 | T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |
@@ -543,7 +555,8 @@ whether or not application updates are on (see
   capabilities dropped and `no-new-privileges`. Caddy keeps only `NET_BIND_SERVICE`. All
   images are pinned to exact versions.
 * PostgreSQL has no published port and sits on an internal Docker network without egress.
-* OpenAPI and Swagger UI are only available to signed-in users. Swagger UI is the one page
+* OpenAPI and Swagger UI are only available to signed-in users (the OpenAPI document also to
+  API tokens). Swagger UI is the one page
   served with a relaxed CSP (it needs inline scripts); the console itself has no inline
   scripts or styles.
 * Dependency scanning: `scripts/audit-dependencies.sh` runs `dotnet list package --vulnerable`

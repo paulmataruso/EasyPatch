@@ -29,6 +29,16 @@ public interface IActorContext
     string? CorrelationId { get; }
 }
 
+public static class ActorContextExtensions
+{
+    /// <summary>The actor name of requests made with an API token (<c>token:&lt;name&gt;</c>).</summary>
+    public const string ApiTokenPrefix = "token:";
+
+    /// <summary>True for a signed-in administrator or an API token (not the system or an agent).</summary>
+    public static bool IsAdministrator(this IActorContext actor) =>
+        actor.UserId is not null || actor.Username?.StartsWith(ApiTokenPrefix, StringComparison.Ordinal) == true;
+}
+
 public sealed class SystemTenantContext : ITenantContext
 {
     public bool IsUnrestricted => true;

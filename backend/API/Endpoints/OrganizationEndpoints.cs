@@ -129,7 +129,7 @@ public static class OrganizationEndpoints
         {
             tenant.EnsureAccess(id);
             _ = await db.Organizations.AnyAsync(o => o.Id == id, ct) ? 0 : throw AppException.NotFound("Organization");
-            var stored = await policies.UpsertAsync(PolicyScope.Organization, id, null, FromRequest(request), user.GetUserId(), ct);
+            var stored = await policies.UpsertAsync(PolicyScope.Organization, id, null, FromRequest(request), user.FindUserId(), ct);
             audit.Record("policy.update", "Policy", stored.Id.ToString(), id, details: request);
             await db.SaveChangesAsync(ct);
             await compliance.RecomputeScopeAsync(id, null, ct);
@@ -208,7 +208,7 @@ public static class OrganizationEndpoints
         {
             var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct) ?? throw AppException.NotFound("Site");
             tenant.EnsureAccess(site.OrganizationId);
-            var stored = await policies.UpsertAsync(PolicyScope.Site, site.OrganizationId, id, FromRequest(request), user.GetUserId(), ct);
+            var stored = await policies.UpsertAsync(PolicyScope.Site, site.OrganizationId, id, FromRequest(request), user.FindUserId(), ct);
             audit.Record("policy.update", "Policy", stored.Id.ToString(), site.OrganizationId, details: request);
             await db.SaveChangesAsync(ct);
             await compliance.RecomputeScopeAsync(site.OrganizationId, id, ct);
@@ -236,7 +236,7 @@ public static class OrganizationEndpoints
         global.MapPut("/global", async (PolicyRequest request, PolicyService policies, ComplianceService compliance, EasyPatchDbContext db, AuditService audit,
             ClaimsPrincipal user, CancellationToken ct) =>
         {
-            var stored = await policies.UpsertAsync(PolicyScope.Global, null, null, FromRequest(request), user.GetUserId(), ct);
+            var stored = await policies.UpsertAsync(PolicyScope.Global, null, null, FromRequest(request), user.FindUserId(), ct);
             audit.Record("policy.update", "Policy", stored.Id.ToString(), details: request);
             await db.SaveChangesAsync(ct);
             await compliance.RecomputeScopeAsync(null, null, ct);

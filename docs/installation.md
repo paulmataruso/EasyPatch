@@ -207,6 +207,7 @@ STARTTLS or TLS. Release 1.7.0 adds the `winget` volume (written by the `worker`
 `api`); see [winget for agents](#winget-for-agents). Release 1.8.0 adds a ninth default alert
 rule, *Update on hold*, and the rollout guard, which is on by default (**Settings → Server
 settings → Rollout guard**; see [architecture.md](architecture.md#update-holds-and-the-rollout-guard)).
+It also adds the `api_tokens` table; no API tokens exist until a super administrator creates one.
 
 ## Backup and restore
 

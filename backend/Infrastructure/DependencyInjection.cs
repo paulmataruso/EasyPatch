@@ -40,6 +40,7 @@ public static class DependencyInjection
         services.AddScoped<JobService>();
         services.AddScoped<UpdateRemovalService>();
         services.AddScoped<UpdateHoldService>();
+        services.AddScoped<ApiTokenService>();
         services.AddScoped<EnrollmentService>();
         services.AddScoped<CheckInService>();
 

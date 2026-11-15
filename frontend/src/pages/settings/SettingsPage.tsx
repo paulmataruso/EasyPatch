@@ -10,6 +10,7 @@ import { Alert, Badge, Button, Card, ErrorState, InlineError, Input, KeyValueLis
 import { formatDateTime, formatNumber, formatRelative } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 import { AlertRulesTab } from './AlertRulesTab';
+import { ApiTokensTab } from './ApiTokensTab';
 import { AuditTab } from './AuditTab';
 import { LifecycleTab } from './LifecycleTab';
 import { NotificationsTab } from './NotificationsTab';
@@ -33,6 +34,7 @@ export function SettingsPage() {
           { id: 'notifications', label: 'Notifications', hidden: !isSuperAdmin },
           { id: 'server', label: 'Server settings' },
           { id: 'users', label: 'Users', hidden: !isSuperAdmin },
+          { id: 'api-tokens', label: 'API tokens', hidden: !isSuperAdmin },
           { id: 'lifecycle', label: 'OS lifecycle' },
           { id: 'audit', label: 'Audit log', hidden: !canOperate },
         ]}
@@ -43,6 +45,7 @@ export function SettingsPage() {
       {tab === 'notifications' && isSuperAdmin && <NotificationsTab />}
       {tab === 'server' && <ServerSettingsTab />}
       {tab === 'users' && isSuperAdmin && <UsersTab />}
+      {tab === 'api-tokens' && isSuperAdmin && <ApiTokensTab />}
       {tab === 'lifecycle' && <LifecycleTab />}
       {tab === 'audit' && canOperate && <AuditTab />}
     </>

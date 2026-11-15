@@ -47,7 +47,7 @@ public static class RateLimits
                 return Window(credential.Length is > 0 and <= 64 ? "cred:" + credential : IpKey(ctx), agent);
             });
 
-            // Every authenticated admin request is limited per user; anonymous requests per IP.
+            // Every authenticated admin request is limited per user or API token; anonymous requests per IP.
             options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
             {
                 if (!ctx.Request.Path.StartsWithSegments("/api/v1") || ctx.Request.Path.StartsWithSegments("/" + AgentRoutes.Prefix))
@@ -56,7 +56,8 @@ public static class RateLimits
                 }
 
                 var user = ctx.User.FindFirstValue(EasyPatchClaims.UserId);
-                return Window(user is not null ? "user:" + user : IpKey(ctx), admin);
+                var token = ctx.User.FindFirstValue(EasyPatchClaims.ApiTokenId);
+                return Window(user is not null ? "user:" + user : token is not null ? "token:" + token : IpKey(ctx), admin);
             });
         });
         return services;

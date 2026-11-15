@@ -49,6 +49,38 @@ public sealed class UserOrganizationAccess
     public Guid OrganizationId { get; set; }
 }
 
+/// <summary>
+/// A long-lived credential for scripts and integrations (PSA, RMM, reporting). Only a SHA-256 hash of the secret is stored; the
+/// secret is shown once when the token is created. A token acts with a fixed role (never SuperAdmin) and organization scope.
+/// </summary>
+public sealed class ApiToken
+{
+    public Guid Id { get; set; }
+    public required string Name { get; set; }
+
+    /// <summary>The first characters of the secret (e.g. <c>ept_AbC12xYz</c>), to recognize a token without revealing it.</summary>
+    public required string Prefix { get; set; }
+
+    public required string TokenHash { get; set; }
+
+    /// <summary><see cref="UserRole.ReadOnly"/> or <see cref="UserRole.Admin"/>.</summary>
+    public UserRole Role { get; set; }
+
+    public bool AllOrganizations { get; set; }
+
+    /// <summary>The organizations a scoped token can access (ignored when <see cref="AllOrganizations"/> is set).</summary>
+    public List<Guid> OrganizationIds { get; set; } = [];
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? LastUsedAt { get; set; }
+    public string? LastUsedIp { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+    public string? RevokedBy { get; set; }
+}
+
 public sealed class PasswordResetToken
 {
     public Guid Id { get; set; }

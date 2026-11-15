@@ -234,7 +234,7 @@ public sealed class EnrollmentService(
         }
 
         EndpointEvents.Add(db, endpoint, status == EndpointStatus.Revoked ? "CredentialsRevoked" : "Decommissioned", reason, now, EventSeverity.Warning);
-        if (actor.UserId is not null)
+        if (actor.IsAdministrator())
         {
             audit.Record("endpoint.revoke", "Endpoint", endpoint.Id.ToString(), endpoint.OrganizationId, endpoint.Id, new { reason });
         }

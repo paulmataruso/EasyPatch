@@ -67,6 +67,32 @@ public sealed record CreateUserRequest(string Username, string Email, UserRole R
 /// <summary>When no password is supplied, <see cref="ResetLink"/> carries a one-time link the new user opens to set one.</summary>
 public sealed record CreateUserResponse(UserDto User, ResetLinkResponse? ResetLink);
 
+/// <summary>An API token. The secret is never returned after creation.</summary>
+/// <param name="Status">Active, Expired or Revoked.</param>
+public sealed record ApiTokenDto(
+    Guid Id,
+    string Name,
+    string Prefix,
+    UserRole Role,
+    bool AllOrganizations,
+    IReadOnlyList<Guid> OrganizationIds,
+    DateTimeOffset CreatedAt,
+    string? CreatedBy,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset? LastUsedAt,
+    string? LastUsedIp,
+    DateTimeOffset? RevokedAt,
+    string? RevokedBy,
+    string Status);
+
+/// <param name="Role">ReadOnly or Admin.</param>
+/// <param name="OrganizationIds">Organizations the token can access; empty for every organization.</param>
+/// <param name="ExpiresInDays">1 to 365.</param>
+public sealed record CreateApiTokenRequest(string Name, UserRole Role, IReadOnlyList<Guid>? OrganizationIds, int ExpiresInDays);
+
+/// <param name="Secret">The token to send as <c>Authorization: Bearer …</c>. Shown once; EasyPatch keeps only a hash.</param>
+public sealed record CreateApiTokenResponse(ApiTokenDto Token, string Secret);
+
 public sealed record UpdateUserRequest(string? Email, UserRole? Role, bool? IsActive);
 
 public sealed record ResetLinkResponse(string Url, DateTimeOffset ExpiresAt);

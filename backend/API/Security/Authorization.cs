@@ -14,13 +14,17 @@ public static class Policies
     /// <summary>Signed in and past the MFA step, but MFA enrollment or a password change may still be required.</summary>
     public const string SessionMfaPassed = "SessionMfaPassed";
 
-    /// <summary>Fully authenticated, any role (read access).</summary>
+    /// <summary>Fully signed in with a session, any role: the user's own account (MFA, recovery codes, sessions). Not API tokens.</summary>
+    public const string Account = "Account";
+
+    /// <summary>Fully authenticated session or API token, any role (read access).</summary>
     public const string Viewer = "Viewer";
 
-    /// <summary>Fully authenticated Admin or SuperAdmin (operations).</summary>
+    /// <summary>Fully authenticated Admin or SuperAdmin session, or an Admin API token (operations).</summary>
     public const string Operator = "Operator";
 
-    /// <summary>Fully authenticated SuperAdmin (users, server settings, global policy, lifecycle).</summary>
+    /// <summary>Fully authenticated SuperAdmin (users, API tokens, server settings, global policy, lifecycle). API tokens are never
+    /// SuperAdmin, so they are refused.</summary>
     public const string SuperAdmin = "SuperAdmin";
 
     /// <summary>Active agent credential.</summary>
@@ -37,12 +41,14 @@ public static class Policies
             .AddPolicy(SessionAny, p => p.AddAuthenticationSchemes(SessionAuthenticationHandler.SchemeName).RequireAuthenticatedUser())
             .AddPolicy(SessionMfaPassed, p => p.AddAuthenticationSchemes(SessionAuthenticationHandler.SchemeName).RequireAuthenticatedUser()
                 .AddRequirements(new SessionStateRequirement(requireMfaSetup: false, requirePasswordCurrent: false)))
-            .AddPolicy(Viewer, p => p.AddAuthenticationSchemes(SessionAuthenticationHandler.SchemeName).RequireAuthenticatedUser()
+            .AddPolicy(Account, p => p.AddAuthenticationSchemes(SessionAuthenticationHandler.SchemeName).RequireAuthenticatedUser()
                 .AddRequirements(new SessionStateRequirement(true, true)))
-            .AddPolicy(Operator, p => p.AddAuthenticationSchemes(SessionAuthenticationHandler.SchemeName).RequireAuthenticatedUser()
+            .AddPolicy(Viewer, p => p.AddAuthenticationSchemes(ConsoleAuthentication.SchemeName).RequireAuthenticatedUser()
+                .AddRequirements(new SessionStateRequirement(true, true)))
+            .AddPolicy(Operator, p => p.AddAuthenticationSchemes(ConsoleAuthentication.SchemeName).RequireAuthenticatedUser()
                 .AddRequirements(new SessionStateRequirement(true, true))
                 .RequireRole(nameof(UserRole.Admin), nameof(UserRole.SuperAdmin)))
-            .AddPolicy(SuperAdmin, p => p.AddAuthenticationSchemes(SessionAuthenticationHandler.SchemeName).RequireAuthenticatedUser()
+            .AddPolicy(SuperAdmin, p => p.AddAuthenticationSchemes(ConsoleAuthentication.SchemeName).RequireAuthenticatedUser()
                 .AddRequirements(new SessionStateRequirement(true, true))
                 .RequireRole(nameof(UserRole.SuperAdmin)))
             .AddPolicy(Agent, p => p.AddAuthenticationSchemes(AgentAuthenticationHandler.SchemeName).RequireAuthenticatedUser()
@@ -64,7 +70,12 @@ public sealed class SessionStateHandler : AuthorizationHandler<SessionStateRequi
     protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, SessionStateRequirement requirement)
     {
         var user = context.User;
-        if (user.FindFirstValue(EasyPatchClaims.MfaCompleted) != "true")
+        if (user.IsApiToken())
+        {
+            // API tokens have no MFA or password state; their role and organizations are checked like a user's.
+            context.Succeed(requirement);
+        }
+        else if (user.FindFirstValue(EasyPatchClaims.MfaCompleted) != "true")
         {
             context.Fail(new AuthorizationFailureReason(this, "mfa_required"));
         }
@@ -109,13 +120,14 @@ public sealed class ProblemAuthorizationResultHandler : IAuthorizationMiddleware
     }
 }
 
-/// <summary>Request-scoped tenant (organization) visibility derived from the session.</summary>
+/// <summary>Request-scoped tenant (organization) visibility derived from the session or API token.</summary>
 public sealed class HttpTenantContext : ITenantContext
 {
     public HttpTenantContext(IHttpContextAccessor accessor)
     {
         var user = accessor.HttpContext?.User;
-        if (user?.Identity?.IsAuthenticated != true || user.Identity.AuthenticationType != SessionAuthenticationHandler.SchemeName)
+        var scheme = user?.Identity?.IsAuthenticated == true ? user.Identity.AuthenticationType : null;
+        if (user is null || scheme is not (SessionAuthenticationHandler.SchemeName or ApiTokenAuthenticationHandler.SchemeName))
         {
             IsUnrestricted = false;
             AllowedOrganizationIds = new HashSet<Guid>();
@@ -123,7 +135,9 @@ public sealed class HttpTenantContext : ITenantContext
         }
 
         var orgs = user.FindAll(EasyPatchClaims.Organization).Select(c => Guid.Parse(c.Value)).ToHashSet();
-        IsUnrestricted = user.GetRole() == UserRole.SuperAdmin || orgs.Count == 0;
+        IsUnrestricted = scheme == ApiTokenAuthenticationHandler.SchemeName
+            ? user.FindFirstValue(EasyPatchClaims.AllOrganizations) == "true" // a scoped token whose organizations were deleted sees nothing
+            : user.GetRole() == UserRole.SuperAdmin || orgs.Count == 0;
         AllowedOrganizationIds = orgs;
     }
 

@@ -165,6 +165,8 @@ All screenshots show fictional demo data.
   * Argon2id password hashing and mandatory TOTP MFA with recovery codes;
   * server-side sessions, CSRF protection, lockout and rate limits;
   * three roles: SuperAdmin, Admin, ReadOnly;
+  * API tokens for scripts and integrations: read-only or operator, optionally limited to
+    some organizations, expiring and revocable, stored only as hashes;
   * an audit log of administrative actions.
 * **Per-device agent credentials.** Each agent generates its own ECDSA P-256 key pair; only the
   public key goes to the server. Every request is signed with a timestamp and nonce for replay

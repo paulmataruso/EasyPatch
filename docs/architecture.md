@@ -98,6 +98,7 @@ erDiagram
     users ||--o{ user_organization_access : "scoped to"
     users ||--o{ password_reset_tokens : has
     users ||--o{ audit_logs : performs
+    api_tokens ||--o{ audit_logs : performs
     organizations ||--o{ compliance_snapshots : tracks
 ```
 
@@ -107,6 +108,7 @@ erDiagram
 | `user_sessions` | SHA-256 of the session token, MFA-completed flag, idle and absolute expiry, `revoked_at` |
 | `user_organization_access` | When a non-SuperAdmin user has rows here, they can only see those organizations. No rows means all organizations. Managed under Settings → Users. |
 | `password_reset_tokens` | Hashed, single-use, expiring tokens issued by an administrator |
+| `api_tokens` | API tokens for scripts and integrations: SHA-256 of the secret, display prefix, `role` (ReadOnly or Admin), `all_organizations` or `organization_ids`, expiry, last use time and address, `revoked_at`. Managed under Settings → API tokens. |
 | `organizations`, `sites` | `is_active` and `archived_at`. Archiving is preferred to deleting; hard delete is only allowed when no endpoints exist. |
 | `endpoints` | Identity, OS and hardware inventory, agent version and capabilities, check-in, scan and inventory timestamps, reboot state and reasons, signed-in user and tray counts, update source, Windows Update policy status reported by the agent, OS support status, and denormalized compliance counters |
 | `agent_credentials` | Public ID `c_…`, ECDSA P-256 **public key only**, expiry, revocation, `replaced_by` |
@@ -124,7 +126,7 @@ erDiagram
 | `server_settings` | A single `jsonb` row for global limits, retention periods and credential lifetimes |
 | `os_lifecycle_entries` | Editable lifecycle table (product, edition class, build, end of servicing) used for support status |
 | `endpoint_events` | Per-endpoint activity (scans, jobs, enrollment, reboot changes, online and offline transitions) |
-| `audit_logs` | Every administrative action, with user, IP and correlation ID |
+| `audit_logs` | Every administrative action, with user (or `token:<name>` for an API token), IP and correlation ID |
 | `compliance_snapshots` | Daily per-organization counters for trend reporting |
 | `vulnerabilities`, `msrc_kb_cves`, `msrc_build_fixes`, `debian_fixes`, `vulnerability_feeds` | Downloaded vulnerability data (see [section 8](#8-vulnerability-data)) and the state of each download |
 

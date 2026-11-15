@@ -66,11 +66,11 @@ public static class AuthEndpoints
         {
             await auth.DisableMfaAsync(user.GetUserId(), request.Password ?? string.Empty, request.Code ?? string.Empty, ct);
             return TypedResults.NoContent();
-        }).RequireAuthorization(Policies.Viewer).RequireRateLimiting(RateLimits.Login);
+        }).RequireAuthorization(Policies.Account).RequireRateLimiting(RateLimits.Login);
 
         g.MapPost("/mfa/recovery-codes", async (PasswordConfirmRequest request, ClaimsPrincipal user, AuthService auth, CancellationToken ct) =>
             TypedResults.Ok(new RecoveryCodesResponse(await auth.RegenerateRecoveryCodesAsync(user.GetUserId(), request.Password ?? string.Empty, ct))))
-            .RequireAuthorization(Policies.Viewer).RequireRateLimiting(RateLimits.Login);
+            .RequireAuthorization(Policies.Account).RequireRateLimiting(RateLimits.Login);
 
         g.MapPost("/password/change", async (ChangePasswordRequest request, ClaimsPrincipal user, AuthService auth, CancellationToken ct) =>
         {
@@ -96,7 +96,7 @@ public static class AuthEndpoints
                 .Select(s => new SessionDto(s.Id, s.CreatedAt, s.LastSeenAt, s.ExpiresAt, s.IpAddress, s.UserAgent, s.Id == current))
                 .ToListAsync(ct);
             return TypedResults.Ok(sessions);
-        }).RequireAuthorization(Policies.Viewer);
+        }).RequireAuthorization(Policies.Account);
 
         g.MapDelete("/sessions/{id:guid}", async (Guid id, ClaimsPrincipal user, EasyPatchDbContext db, TimeProvider clock, AuditService audit,
             CancellationToken ct) =>
@@ -107,7 +107,7 @@ public static class AuthEndpoints
             audit.Record("auth.session_revoked", "UserSession", id.ToString());
             await db.SaveChangesAsync(ct);
             return TypedResults.NoContent();
-        }).RequireAuthorization(Policies.Viewer);
+        }).RequireAuthorization(Policies.Account);
     }
 
     internal static CurrentUserDto ToCurrentUser(User user, bool mfaCompleted, bool mfaSetupRequired) => new(
