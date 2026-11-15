@@ -46,6 +46,10 @@ public interface IAgentUninstaller
     /// <summary>Used in messages, e.g. "Windows Installer", "apt".</summary>
     string DisplayName { get; }
 
+    /// <summary>True when the installed agent package was found (Windows: the product is registered with Windows Installer,
+    /// which happens only after the installer has already started the service, so this is checked again on every check-in).</summary>
+    bool IsAvailable { get; }
+
     /// <summary>Starts removing the agent. The removal stops this service, so it normally outlives the process that started it.</summary>
     IInstallerProcess Start(string logPath);
 

@@ -42,14 +42,14 @@ public sealed class UninstallAgentHandler
         _logger = logger;
     }
 
-    public bool CanUninstall => _platform.AgentUninstaller is not null;
+    public bool CanUninstall => _platform.AgentUninstaller?.IsAvailable == true;
 
     public async Task<JobOutcome> ExecuteAsync(JobRecord record, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(record);
         var jobId = record.Job.JobId;
         var uninstaller = _platform.AgentUninstaller;
-        if (uninstaller is null)
+        if (uninstaller is null || (!uninstaller.IsAvailable && record.Uninstall is null))
         {
             return Fail(jobId, "uninstall_not_supported", "This agent was not installed from its package and cannot uninstall itself.");
         }

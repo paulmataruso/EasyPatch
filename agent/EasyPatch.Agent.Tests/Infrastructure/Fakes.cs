@@ -536,6 +536,9 @@ public sealed class FakeAgentUninstaller : IAgentUninstaller
 
     public int BusyChecks { get; set; }
 
+    /// <summary>False until the product is registered (Windows Installer starts the service before it registers the product).</summary>
+    public bool IsAvailable { get; set; } = true;
+
     public string DisplayName => "Windows Installer";
 
     public IInstallerProcess Start(string logPath)

@@ -17,22 +17,21 @@ internal sealed partial class WindowsAgentUninstaller : IAgentUninstaller
 
     private const uint ErrorSuccess = 0;
 
-    private readonly string _productCode;
-
-    private WindowsAgentUninstaller(string productCode)
-    {
-        _productCode = productCode;
-    }
+    private string? _productCode;
 
     public string DisplayName => "Windows Installer";
 
-    /// <summary>The uninstaller for the installed EasyPatch Agent, or null when no product with the agent's upgrade code is
-    /// installed (for example a development build run from a folder).</summary>
-    public static WindowsAgentUninstaller? TryCreate() => FindInstalledProduct() is { } productCode ? new WindowsAgentUninstaller(productCode) : null;
+    /// <summary>True once the installed EasyPatch Agent product is found. Windows Installer starts the service before it
+    /// registers the product (on a first install and on every upgrade), so a lookup that finds nothing is repeated later;
+    /// a development build run from a folder never finds one.</summary>
+    public bool IsAvailable => ProductCode is not null;
+
+    private string? ProductCode => _productCode ??= FindInstalledProduct();
 
     public IInstallerProcess Start(string logPath)
     {
         ArgumentException.ThrowIfNullOrEmpty(logPath);
+        var productCode = ProductCode ?? throw new InvalidOperationException("The EasyPatch Agent is not registered with Windows Installer.");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(logPath))!);
         var info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "msiexec.exe"))
         {
@@ -41,7 +40,7 @@ internal sealed partial class WindowsAgentUninstaller : IAgentUninstaller
             WorkingDirectory = Environment.SystemDirectory,
         };
 
-        foreach (var argument in (string[])["/x", _productCode, "/qn", "/norestart", "/l*v", Path.GetFullPath(logPath)])
+        foreach (var argument in (string[])["/x", productCode, "/qn", "/norestart", "/l*v", Path.GetFullPath(logPath)])
         {
             info.ArgumentList.Add(argument);
         }

@@ -3,6 +3,15 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and both agents share one version number.
 
+## [1.6.1] - 2026-11-15
+
+### Fixed
+
+- Windows agents installed or updated by the MSI did not offer *Uninstall agent* until their
+  service restarted: Windows Installer starts the service before it registers the product, and
+  the agent looked for the product only once, at startup. It now looks again at each check-in
+  until it finds it.
+
 ## [1.6.0] - 2026-11-15
 
 ### Added

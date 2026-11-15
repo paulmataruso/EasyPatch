@@ -59,7 +59,7 @@ internal static class AgentComposition
             SystemRestart = new WindowsSystemRestart(),
             PolicyRegistry = new WindowsPolicyRegistry(),
             AgentInstaller = new WindowsAgentInstaller(),
-            AgentUninstaller = WindowsAgentUninstaller.TryCreate(),
+            AgentUninstaller = new WindowsAgentUninstaller(),
             ApplicationUpdates = new WingetApplicationUpdateService(
                 new WingetProcessRunner(loggerFactory.CreateLogger<WingetProcessRunner>()),
                 loggerFactory.CreateLogger<WingetApplicationUpdateService>()),

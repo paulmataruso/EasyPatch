@@ -58,6 +58,21 @@ public sealed class UninstallAgentTests
     }
 
     [Fact]
+    public async Task The_agent_offers_to_uninstall_itself_once_Windows_Installer_has_registered_it()
+    {
+        // Windows Installer starts the service before it registers the product, so the first check-ins find nothing.
+        using var h = Harness();
+        h.Uninstaller.IsAvailable = false;
+        await h.EnrollWithTokenAsync();
+        await h.Runtime.CheckInOnceAsync(Ct);
+        Assert.DoesNotContain(AgentCapabilities.Uninstall, h.Server.CheckIns[^1].Capabilities);
+
+        h.Uninstaller.IsAvailable = true;
+        await h.Runtime.CheckInOnceAsync(Ct);
+        Assert.Contains(AgentCapabilities.Uninstall, h.Server.CheckIns[^1].Capabilities);
+    }
+
+    [Fact]
     public async Task The_agent_starts_its_removal_and_leaves_the_job_for_the_server_to_complete()
     {
         using var h = Harness();

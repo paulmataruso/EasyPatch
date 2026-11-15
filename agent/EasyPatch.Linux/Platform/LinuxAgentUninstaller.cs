@@ -40,6 +40,9 @@ public sealed class LinuxAgentUninstaller : IAgentUninstaller
 
     public string DisplayName => _family == PackageFamily.Debian ? "apt" : "rpm";
 
+    /// <summary>The agent is only distributed as the easypatch-agent package.</summary>
+    public bool IsAvailable => true;
+
     /// <summary>The command that removes the agent package (exposed for tests).</summary>
     public static (string Program, IReadOnlyList<string> Arguments) Command(PackageFamily family) => family == PackageFamily.Debian
         ? ("apt-get", ["remove", "-y", "-q", "-o", "DPkg::Lock::Timeout=1800", PackageName])
