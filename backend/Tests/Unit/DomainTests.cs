@@ -44,15 +44,42 @@ public sealed class UpdateReconcilerTests
     }
 
     [Fact]
-    public void Update_still_missing_after_reported_success_becomes_failed()
+    public void An_update_offered_again_after_a_successful_install_is_reoffered_until_a_new_revision_appears()
     {
         var existing = new Dictionary<Guid, EndpointUpdate>();
         var a = Guid.NewGuid();
-        Run(existing, [Item(a)], []);
-        existing[a].State = EndpointUpdateState.PendingVerification;
-        Run(existing, [Item(a)], []);
-        Assert.Equal(EndpointUpdateState.Failed, existing[a].State);
-        Assert.Equal(UpdateReconciler.StillMissingAfterInstall, existing[a].ErrorMessage);
+        var revision204 = new ReconcileItem(a, Guid.NewGuid(), false, []);
+        Run(existing, [revision204], []);
+        UpdateReconciler.ApplyInstallOutcome(existing[a], succeeded: true, rebootRequired: false, null, null, Guid.NewGuid(), Now);
+        Assert.Equal(EndpointUpdateState.PendingVerification, existing[a].State);
+
+        // Windows still offers the same revision: neither installed nor failed, and it stays that way.
+        Run(existing, [revision204], []);
+        Assert.Equal(EndpointUpdateState.Reoffered, existing[a].State);
+        Assert.Equal((UpdateReconciler.ReofferedCode, UpdateReconciler.ReofferedMessage, 0),
+            (existing[a].ErrorCode, existing[a].ErrorMessage, existing[a].FailedAttempts));
+        Run(existing, [revision204], []);
+        Assert.Equal(EndpointUpdateState.Reoffered, existing[a].State);
+        Assert.Equal(new UpdateCounts(0, 0, 0, 0, 0), ComplianceCalculator.Count(existing.Values));
+
+        // A new revision of the same update may install correctly: it is missing again.
+        Run(existing, [revision204 with { UpdateId = Guid.NewGuid() }], []);
+        Assert.Equal(EndpointUpdateState.Missing, existing[a].State);
+        Assert.Null(existing[a].ErrorCode);
+        Assert.Null(existing[a].ErrorMessage);
+
+        // Only a scan that lists it as installed makes it Installed.
+        existing[a].State = EndpointUpdateState.Reoffered;
+        Run(existing, [], [revision204]);
+        Assert.Equal(EndpointUpdateState.Installed, existing[a].State);
+    }
+
+    [Fact]
+    public void A_reoffered_update_still_counts_as_known_exploited()
+    {
+        var row = new EndpointUpdate { State = EndpointUpdateState.Reoffered, IsRequired = true, KnownExploited = true };
+        Assert.Equal(new UpdateCounts(0, 0, 0, 0, 0, 0, KnownExploitedMissing: 1), ComplianceCalculator.Count([row]));
+        Assert.True(VulnerabilityRules.IsOpen(EndpointUpdateState.Reoffered));
     }
 
     [Fact]

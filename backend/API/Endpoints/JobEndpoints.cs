@@ -162,6 +162,7 @@ public static class FleetUpdateEndpoints
                 PendingReboot = gr.Count(u => u.State == EndpointUpdateState.PendingReboot || u.State == EndpointUpdateState.PendingVerification),
                 Excluded = gr.Count(u => u.State == EndpointUpdateState.Excluded || u.IsExcluded),
                 KnownExploited = gr.Count(u => u.KnownExploited),
+                Reoffered = gr.Count(u => u.State == EndpointUpdateState.Reoffered),
             });
             if (q.KnownExploited is { } exploited)
             {
@@ -175,7 +176,8 @@ public static class FleetUpdateEndpoints
                 EndpointUpdateState.Installed => grouped.Where(x => x.Installed > 0),
                 EndpointUpdateState.PendingReboot or EndpointUpdateState.PendingVerification => grouped.Where(x => x.PendingReboot > 0),
                 EndpointUpdateState.Excluded => grouped.Where(x => x.Excluded > 0),
-                _ => grouped.Where(x => x.Missing > 0 || x.Failed > 0 || x.PendingReboot > 0),
+                EndpointUpdateState.Reoffered => grouped.Where(x => x.Reoffered > 0),
+                _ => grouped.Where(x => x.Missing > 0 || x.Failed > 0 || x.PendingReboot > 0 || x.Reoffered > 0),
             };
             var desc = q.Dir is null || PagingExtensions.IsDescending(q.Dir);
             grouped = (q.Sort?.ToLowerInvariant()) switch
@@ -197,7 +199,7 @@ public static class FleetUpdateEndpoints
             {
                 var u = catalog[r.UpdateGuid];
                 return new FleetUpdateDto(r.UpdateGuid, u.Title, u.PrimaryKb, u.Category, u.MsrcSeverity, u.ReleaseDate, u.MaxDownloadSizeBytes, r.Missing,
-                    r.Failed, r.Installed, r.PendingReboot, r.Excluded, Mapping.Package(u, null), u.CveIds.Count, r.KnownExploited > 0);
+                    r.Failed, r.Installed, r.PendingReboot, r.Excluded, Mapping.Package(u, null), u.CveIds.Count, r.KnownExploited > 0, r.Reoffered);
             }).ToList();
             return TypedResults.Ok(new PagedResult<FleetUpdateDto>(items, page.Page, page.PageSize, total));
         });
@@ -220,6 +222,7 @@ public static class FleetUpdateEndpoints
                     PendingReboot = gr.Count(x => x.State == EndpointUpdateState.PendingReboot || x.State == EndpointUpdateState.PendingVerification),
                     Excluded = gr.Count(x => x.State == EndpointUpdateState.Excluded || x.IsExcluded),
                     KnownExploited = gr.Count(x => x.KnownExploited),
+                    Reoffered = gr.Count(x => x.State == EndpointUpdateState.Reoffered),
                 }).FirstOrDefaultAsync(ct);
 
             // CVEs on the endpoints in scope (the catalog summary covers every organization).
@@ -237,7 +240,7 @@ public static class FleetUpdateEndpoints
                 .ToList();
             var summary = new FleetUpdateDto(updateGuid, u.Title, u.PrimaryKb, u.Category, u.MsrcSeverity, u.ReleaseDate, u.MaxDownloadSizeBytes,
                 states?.Missing ?? 0, states?.Failed ?? 0, states?.Installed ?? 0, states?.PendingReboot ?? 0, states?.Excluded ?? 0,
-                Mapping.Package(u, null), cves.Count, (states?.KnownExploited ?? 0) > 0);
+                Mapping.Package(u, null), cves.Count, (states?.KnownExploited ?? 0) > 0, states?.Reoffered ?? 0);
             return TypedResults.Ok(new FleetUpdateDetailDto(summary, u.Description, u.SupportUrl, u.KbNumbers, u.Products, u.MsClassification,
                 u.RebootBehavior is > 0, u.SupersededUpdateGuids, vulnerabilities));
         });

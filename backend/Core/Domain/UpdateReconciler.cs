@@ -17,7 +17,9 @@ public sealed record ReconcileResult(IReadOnlyList<EndpointUpdate> Added, int Ch
 /// * Installed list → Installed (the only path to Installed).
 /// * Missing with WUA RebootRequired → PendingReboot.
 /// * Missing and superseded by another reported update → Superseded.
-/// * Missing after a reported-successful install (PendingVerification) → Failed ("still missing after install").
+/// * Missing after a reported-successful install (PendingVerification) → Reoffered (Windows offers it again although the
+///   installation succeeded); it stays Reoffered while the same revision is offered, and becomes Missing again when a new
+///   revision is offered. Never Installed and never Failed by this rule.
 /// * Missing and previously Failed → stays Failed (error kept); otherwise Missing.
 /// * Excluded overrides Missing/Failed/Superseded.
 /// * Rows absent from both lists: Installed stays Installed (WUA drops old installed updates from results);
@@ -25,8 +27,12 @@ public sealed record ReconcileResult(IReadOnlyList<EndpointUpdate> Added, int Ch
 /// </summary>
 public static class UpdateReconciler
 {
-    public const string StillMissingAfterInstall =
-        "Installation was reported as successful, but Windows Update still reports the update as missing.";
+    public const string ReofferedCode = "reoffered";
+
+    public const string ReofferedMessage =
+        "Windows reported the installation as successful, but Windows Update still offers this update. This is a Windows " +
+        "Update detection problem (often seen with Windows Security platform updates such as KB5007651). EasyPatch does not " +
+        "install it again automatically; select it to install it anyway.";
 
     public static ReconcileResult Reconcile(
         Guid endpointId,
@@ -140,6 +146,7 @@ public static class UpdateReconciler
                 continue;
             }
 
+            var newRevision = existing.TryGetValue(item.UpdateGuid, out var before) && before.UpdateId != item.UpdateId;
             var row = GetOrAdd(item, EndpointUpdateState.Missing);
             var excluded = isExcluded(item.UpdateGuid);
             row.IsExcluded = excluded;
@@ -160,11 +167,12 @@ public static class UpdateReconciler
             {
                 next = EndpointUpdateState.Superseded;
             }
-            else if (row.State == EndpointUpdateState.PendingVerification)
+            else if (row.State == EndpointUpdateState.PendingVerification ||
+                     (row.State == EndpointUpdateState.Reoffered && !newRevision))
             {
-                next = EndpointUpdateState.Failed;
-                row.ErrorCode = null;
-                row.ErrorMessage = StillMissingAfterInstall;
+                next = EndpointUpdateState.Reoffered;
+                row.ErrorCode = ReofferedCode;
+                row.ErrorMessage = ReofferedMessage;
             }
             else if (row.State == EndpointUpdateState.Failed && row.FailedAttempts > 0)
             {
@@ -173,6 +181,11 @@ public static class UpdateReconciler
             else
             {
                 next = EndpointUpdateState.Missing;
+                if (row.ErrorCode == ReofferedCode)
+                {
+                    row.ErrorCode = null; // a new revision is offered: it may install correctly
+                    row.ErrorMessage = null;
+                }
             }
 
             SetState(row, next);

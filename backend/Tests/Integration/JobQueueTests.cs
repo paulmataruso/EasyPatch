@@ -85,6 +85,63 @@ public sealed class JobQueueTests(PostgresFixture postgres) : IntegrationTest(po
             new InstallUpdatesRequest(InstallMode.AllEligible, null, force), HttpStatusCode.Accepted);
 
     [Fact]
+    public async Task An_update_Windows_offers_again_after_installing_is_not_failed_and_not_installed_again_automatically()
+    {
+        var agent = await EnrollAgentAsync(root, org.Id, site.Id, "PC-REOFFER");
+        var platform = SecurityUpdate("KB5007651") with
+        {
+            Title = "Update for Windows Security platform - KB5007651 (Version 10.0.29628.1000)",
+            RevisionNumber = 204,
+            RebootBehavior = 0,
+            Categories = [new UpdateCategoryRef { Id = MicrosoftClassifications.DefinitionUpdates, Name = "Definition Updates", Type = "UpdateClassification" }],
+            MsrcSeverity = null,
+        };
+        var cumulative = SecurityUpdate("KB5046617");
+        await ReportScanAsync(agent, [platform, cumulative]);
+
+        // Windows reports the installation as successful...
+        var job = await root.SendAsync<JobSummaryDto>(HttpMethod.Post, $"/api/v1/endpoints/{agent.EndpointId}/install-updates",
+            new InstallUpdatesRequest(InstallMode.Selected, [platform.UpdateGuid], false), HttpStatusCode.Accepted);
+        Assert.Equal(job.Id, Assert.Single((await agent.CheckInAsync()).Jobs).JobId);
+        await AckAsync(agent, job.Id);
+        await ReportAsync(agent, job.Id, 1, JobStatus.Completed, items:
+        [
+            new JobItemReport { UpdateGuid = platform.UpdateGuid, RevisionNumber = 204, Title = platform.Title, Status = JobItemStatus.Succeeded, ResultCode = 2 },
+        ]);
+
+        // ...but the next scan still offers it.
+        await ReportScanAsync(agent, [platform, cumulative]);
+        var updates = await root.GetAsync<List<EndpointUpdateDto>>($"/api/v1/endpoints/{agent.EndpointId}/updates");
+        var row = updates.Single(u => u.UpdateGuid == platform.UpdateGuid);
+        Assert.Equal(EndpointUpdateState.Reoffered, row.State);
+        Assert.Contains("still offers this update", row.ErrorMessage, StringComparison.Ordinal);
+        var summary = (await root.GetAsync<EndpointDetailDto>($"/api/v1/endpoints/{agent.EndpointId}")).Summary;
+        Assert.Equal((1, 0, ComplianceStatus.MissingUpdates), (summary.MissingRequiredCount, summary.FailedCount, summary.ComplianceStatus)); // only the cumulative update
+
+        // Installing everything skips it, and tells the agent to skip it too.
+        var all = await root.GetAsync<InstallPreview>($"/api/v1/endpoints/{agent.EndpointId}/install-preview?mode=all");
+        Assert.Equal([cumulative.UpdateGuid], all.Items.Select(i => i.UpdateGuid));
+        Assert.Equal(SkipReasons.Reoffered, all.Skipped.Single(x => x.UpdateGuid == platform.UpdateGuid).Reason);
+        Assert.Contains(platform.UpdateGuid, all.Filter.ExcludedUpdateGuids);
+        var installAll = await InstallAllAsync(agent.EndpointId);
+        var payload = Assert.Single((await agent.CheckInAsync()).Jobs);
+        Assert.Equal(installAll.Id, payload.JobId);
+        Assert.Contains(platform.UpdateGuid, payload.Install!.Filter.ExcludedUpdateGuids);
+        await AckAsync(agent, installAll.Id);
+        await ReportAsync(agent, installAll.Id, 1, JobStatus.Completed);
+
+        // An administrator can still choose to install it.
+        var chosen = await root.GetAsync<InstallPreview>($"/api/v1/endpoints/{agent.EndpointId}/install-preview?mode=selected&updateGuids={platform.UpdateGuid}");
+        Assert.Equal([platform.UpdateGuid], chosen.Items.Select(i => i.UpdateGuid));
+        Assert.DoesNotContain(platform.UpdateGuid, chosen.Filter.ExcludedUpdateGuids);
+
+        // A new revision is missing again and installed normally.
+        await ReportScanAsync(agent, [platform with { RevisionNumber = 205 }, cumulative]);
+        updates = await root.GetAsync<List<EndpointUpdateDto>>($"/api/v1/endpoints/{agent.EndpointId}/updates");
+        Assert.Equal(EndpointUpdateState.Missing, updates.Single(u => u.UpdateGuid == platform.UpdateGuid).State);
+    }
+
+    [Fact]
     public async Task Duplicate_requests_return_the_existing_job_unless_forced()
     {
         var agent = await EnrollAgentAsync(root, org.Id, site.Id, "PC-1");

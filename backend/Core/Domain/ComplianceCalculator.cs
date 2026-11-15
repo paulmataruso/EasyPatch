@@ -14,7 +14,8 @@ public readonly record struct UpdateCounts(
 /// 5. RebootRequired — Windows reports a pending restart, or an installed update awaits a restart.
 /// 6. Compliant — none of the above.
 /// Excluded, superseded, not-applicable and not-required (drivers/feature/optional unless enabled) updates never count,
-/// nor do updates still inside their rollout delay (counted separately as deferred).
+/// nor do updates still inside their rollout delay (counted separately as deferred), nor updates Windows offers again
+/// after a successful installation (Reoffered; they still count as known-exploited when they are).
 /// Offline status is tracked separately and does not change compliance by itself.
 /// </summary>
 public static class ComplianceCalculator
@@ -26,7 +27,8 @@ public static class ComplianceCalculator
         foreach (var u in updates)
         {
             if (u.KnownExploited && (u.IsRequired || u.DeferredUntil is not null) &&
-                u.State is EndpointUpdateState.Missing or EndpointUpdateState.PendingVerification or EndpointUpdateState.Failed)
+                u.State is EndpointUpdateState.Missing or EndpointUpdateState.PendingVerification or EndpointUpdateState.Failed
+                    or EndpointUpdateState.Reoffered)
             {
                 knownExploited++;
             }

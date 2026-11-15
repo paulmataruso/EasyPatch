@@ -298,6 +298,9 @@ public static class SkipReasons
     public const string Cancelled = "Cancelled";
     public const string ApplicationNotApproved = "ApplicationNotApproved";
 
+    /// <summary>Server only: Windows offered the update again after a successful installation; only installed when selected.</summary>
+    public const string Reoffered = "Reoffered";
+
     public static string Describe(string? reason) => reason switch
     {
         AlreadyInstalled => "Already installed",
@@ -311,6 +314,7 @@ public static class SkipReasons
         EulaNotAccepted => "License agreement not accepted by policy",
         MaintenanceWindowClosed => "Maintenance window closed",
         ApplicationNotApproved => "Application not approved by policy",
+        Reoffered => "Offered again after a successful installation (select it to install it anyway)",
         Cancelled => "Cancelled",
         null => "",
         _ => reason,

@@ -71,12 +71,13 @@ export function UpdateDetailPage() {
           )
         }
       />
-      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className={`mb-5 grid grid-cols-2 gap-3 ${s.reofferedCount ? 'md:grid-cols-6' : 'md:grid-cols-5'}`}>
         <StatTile label="Missing" value={s.missingCount} tone={s.missingCount ? 'warn' : undefined} />
         <StatTile label="Failed" value={s.failedCount} tone={s.failedCount ? 'danger' : undefined} />
         <StatTile label="Pending restart" value={s.pendingRebootCount} tone={s.pendingRebootCount ? 'info' : undefined} />
         <StatTile label="Installed" value={s.installedCount} tone="ok" />
         <StatTile label="Excluded" value={s.excludedCount} />
+        {s.reofferedCount > 0 && <StatTile label="Offered again" value={s.reofferedCount} tone="warn" />}
       </div>
       <Card title="Details" className="mb-5">
         <KeyValueList

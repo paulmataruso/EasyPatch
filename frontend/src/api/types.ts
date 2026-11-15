@@ -26,6 +26,7 @@ export const ENDPOINT_UPDATE_STATES = [
   'Superseded',
   'NotApplicable',
   'Excluded',
+  'Reoffered',
 ] as const;
 export type EndpointUpdateState = (typeof ENDPOINT_UPDATE_STATES)[number];
 
@@ -978,6 +979,8 @@ export interface FleetUpdateDto {
   installedCount: number;
   pendingRebootCount: number;
   excludedCount: number;
+  /** Endpoints where Windows offers it again after a successful installation. */
+  reofferedCount: number;
   /** The Linux package behind the update; null for Windows updates. */
   package: PackageInfoDto | null;
   cveCount: number;

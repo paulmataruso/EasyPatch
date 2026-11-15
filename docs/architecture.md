@@ -143,6 +143,7 @@ only changed by scans and final install results:
 | `Superseded` | Replaced by another applicable update, inferred from `SupersededUpdateIDs` |
 | `NotApplicable` | Previously reported, now absent from both scan lists and not superseded |
 | `Excluded` | Excluded by an administrator (per endpoint) or by a policy KB list |
+| `Reoffered` | Windows reported a successful install (no restart needed), but the next scan still offers the same revision. Not counted for compliance; automatic install jobs list it in `excludedUpdateGuids`; a new revision makes it `Missing` again |
 
 The **job layer** (`job_updates.status`) records operational progress: `Pending`,
 `Downloading`, `Downloaded`, `Installing`, `Succeeded`, `Failed`, `Skipped` (with a reason)

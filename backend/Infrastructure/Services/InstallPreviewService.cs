@@ -35,13 +35,19 @@ public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService p
         var now = clock.GetUtcNow();
         var policy = await policies.ResolveAsync(endpoint, ct);
         var exclusions = await db.UpdateExclusions.AsNoTracking().Where(x => x.EndpointId == endpoint.Id).Select(x => x.UpdateGuid).ToListAsync(ct);
-        var filter = policy.ToFilter(exclusions);
+
+        // Updates Windows offered again after a successful installation are installed only when selected: the job tells the
+        // agent to skip them, so an automatic installation does not repeat them at every maintenance window.
+        var reoffered = await db.EndpointUpdates.AsNoTracking()
+            .Where(u => u.EndpointId == endpoint.Id && u.State == EndpointUpdateState.Reoffered).Select(u => u.UpdateGuid).ToListAsync(ct);
+        var reofferedSkipped = reoffered.Where(g => !selected.Contains(g)).ToHashSet();
+        var filter = policy.ToFilter(exclusions.Concat(reofferedSkipped).Distinct());
         var payload = new InstallUpdatesPayload { Mode = mode, SelectedUpdateGuids = selected.ToArray(), Filter = filter };
 
         var candidates = await db.EndpointUpdates.AsNoTracking().Include(u => u.Update)
             .Where(u => u.EndpointId == endpoint.Id &&
                         (u.State == EndpointUpdateState.Missing || u.State == EndpointUpdateState.Failed ||
-                         u.State == EndpointUpdateState.Excluded ||
+                         u.State == EndpointUpdateState.Excluded || u.State == EndpointUpdateState.Reoffered ||
                          (mode == InstallMode.Selected && selected.Contains(u.UpdateGuid))))
             .ToListAsync(ct);
 
@@ -58,7 +64,11 @@ public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService p
             }
             else if (mode == InstallMode.Selected ? selected.Contains(row.UpdateGuid) : decision.SkipReason != SkipReasons.NotSelected)
             {
-                skipped.Add(new PreviewSkip(row.UpdateGuid, u.Title, u.PrimaryKb, u.Category, decision.SkipReason ?? "Unknown"));
+                var reason = reofferedSkipped.Contains(row.UpdateGuid) && !exclusions.Contains(row.UpdateGuid) &&
+                             decision.SkipReason == SkipReasons.Excluded
+                    ? SkipReasons.Reoffered
+                    : decision.SkipReason ?? "Unknown";
+                skipped.Add(new PreviewSkip(row.UpdateGuid, u.Title, u.PrimaryKb, u.Category, reason));
             }
         }
 

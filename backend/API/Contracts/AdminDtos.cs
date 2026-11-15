@@ -488,7 +488,8 @@ public sealed record FleetUpdateDto(
     int ExcludedCount,
     PackageInfoDto? Package = null,
     int CveCount = 0,
-    bool KnownExploited = false);
+    bool KnownExploited = false,
+    int ReofferedCount = 0);
 
 public sealed record FleetUpdateDetailDto(FleetUpdateDto Summary, string? Description, string? SupportUrl, IReadOnlyList<string> KbNumbers,
     IReadOnlyList<string> Products, string? MsClassification, bool RebootLikely, IReadOnlyList<Guid> SupersededUpdateGuids,

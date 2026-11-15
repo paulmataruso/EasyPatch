@@ -145,13 +145,24 @@ compliance:
 * **Only a scan marks an update `Installed`.** A successful install result from the agent moves
   the update to `PendingVerification`, or to `PendingReboot` when Windows asks for a restart.
   These states still count as not installed.
-* If the next scan still reports a `PendingVerification` update as missing, it becomes `Failed`
-  with the message "Installation was reported as successful, but Windows Update still reports
-  the update as missing."
+* If the next scan still offers a `PendingVerification` update (the same revision), it becomes
+  **`Reoffered`** (*Offered again* in the console). Windows confirmed the installation, but
+  Windows Update keeps offering it: a Windows Update detection problem, often seen with the
+  Windows Security platform update KB5007651. A `Reoffered` update:
+  * is never shown as installed and is not counted as failed or missing for compliance (it still
+    counts as an open known-exploited vulnerability when its CVEs are known-exploited);
+  * is not installed again by *Install all missing updates* or scheduled installations, so it
+    does not repeat at every maintenance window. Select it on the endpoint's **Updates** tab to
+    install it anyway;
+  * becomes `Missing` again when Windows offers a new revision of it, and `Installed` when a
+    scan lists it as installed.
+
+  Updates that need a restart (such as cumulative updates) go to `PendingReboot` instead, so they
+  never become `Reoffered`.
 * After an install job, the agent scans again. If a restart is needed, it scans again after the
   computer restarts. Installing updates never restarts a computer: a user, an administrator
   (with **Restart…** in the console) or a restart schedule in policy restarts it.
-* `Superseded`, `NotApplicable` and `Excluded` updates never count.
+* `Superseded`, `NotApplicable`, `Excluded` and `Reoffered` updates never count.
 
 ## Operating system support status
 

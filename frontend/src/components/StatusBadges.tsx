@@ -87,6 +87,7 @@ const updateStateTone: Record<EndpointUpdateState, Tone> = {
   Superseded: 'neutral',
   NotApplicable: 'neutral',
   Excluded: 'neutral',
+  Reoffered: 'warn',
 };
 
 export function UpdateStateBadge({ state }: { state: EndpointUpdateState }) {
@@ -99,7 +100,9 @@ export function UpdateStateBadge({ state }: { state: EndpointUpdateState }) {
           ? 'The agent reported success; the next scan confirms it.'
           : state === 'PendingReboot'
             ? 'Installed; takes effect after the endpoint restarts.'
-            : undefined
+            : state === 'Reoffered'
+              ? 'Windows reported a successful installation but still offers this update. It is not installed again automatically and does not count against compliance.'
+              : undefined
       }
     >
       {humanize(state)}

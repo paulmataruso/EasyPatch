@@ -108,6 +108,7 @@ export function humanize(value: string | null | undefined): string {
     FailedUpdates: 'Failed updates',
     MissingUpdates: 'Missing updates',
     PendingVerification: 'Pending verification',
+    Reoffered: 'Offered again',
     NotApplicable: 'Not applicable',
     SuperAdmin: 'Super admin',
     ReadOnly: 'Read only',
@@ -130,7 +131,6 @@ export function formatDays(days: number[] | null | undefined): string {
     .join(', ');
 }
 
-/** Human description of a WUA skip reason (mirrors SkipReasons.Describe on the server). */
 /** How far along an update in a running job is: its download percentage while downloading, its install percentage
  * while installing, and null otherwise or when the agent did not report one. */
 export function jobItemPercent(item: {
@@ -142,6 +142,7 @@ export function jobItemPercent(item: {
   return value === null || value === undefined ? null : Math.max(0, Math.min(100, Math.round(value)));
 }
 
+/** Human description of a WUA skip reason (mirrors SkipReasons.Describe on the server). */
 export function describeSkipReason(reason: string | null | undefined): string {
   switch (reason) {
     case 'AlreadyInstalled':
@@ -168,6 +169,8 @@ export function describeSkipReason(reason: string | null | undefined): string {
       return 'Cancelled';
     case 'ApplicationNotApproved':
       return 'Application not approved by policy';
+    case 'Reoffered':
+      return 'Offered again after a successful installation (select it to install it anyway)';
     case null:
     case undefined:
     case '':

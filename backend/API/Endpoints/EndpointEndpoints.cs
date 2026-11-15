@@ -100,7 +100,7 @@ public static class EndpointEndpoints
                 ? query.Where(u => u.State == s)
                 : query.Where(u => u.State == EndpointUpdateState.Missing || u.State == EndpointUpdateState.Failed ||
                                    u.State == EndpointUpdateState.PendingReboot || u.State == EndpointUpdateState.PendingVerification ||
-                                   u.State == EndpointUpdateState.Excluded);
+                                   u.State == EndpointUpdateState.Reoffered || u.State == EndpointUpdateState.Excluded);
             if (category is { } c)
             {
                 query = query.Where(u => u.Update!.Category == c);
@@ -120,7 +120,8 @@ public static class EndpointEndpoints
                     EndpointUpdateState.Missing => 1,
                     EndpointUpdateState.PendingReboot => 2,
                     EndpointUpdateState.PendingVerification => 3,
-                    _ => 4,
+                    EndpointUpdateState.Reoffered => 4,
+                    _ => 5,
                 })
                 .ThenByDescending(r => r.Row.KnownExploited)
                 .ThenByDescending(r => r.Row.IsRequired)

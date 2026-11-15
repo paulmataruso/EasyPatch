@@ -25,6 +25,10 @@ public enum EndpointUpdateState
     Superseded,
     NotApplicable,
     Excluded,
+
+    /// <summary>Windows reported a successful installation (no restart needed), but the next scan still offered the same
+    /// revision: a Windows Update detection problem. Not installed again automatically; not counted for compliance.</summary>
+    Reoffered,
 }
 
 public enum ComplianceStatus

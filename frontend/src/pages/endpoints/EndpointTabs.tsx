@@ -301,16 +301,17 @@ function PackageManagerCard({ endpoint: e, lastScanItems }: { endpoint: Endpoint
 // Updates
 // ---------------------------------------------------------------------------------------------
 
-const OUTSTANDING: EndpointUpdateState[] = ['Missing', 'Failed', 'PendingVerification', 'PendingReboot', 'Excluded'];
+const OUTSTANDING: EndpointUpdateState[] = ['Missing', 'Failed', 'PendingVerification', 'PendingReboot', 'Reoffered', 'Excluded'];
 const STATE_ORDER: Record<EndpointUpdateState, number> = {
   Failed: 0,
   Missing: 1,
   PendingVerification: 2,
   PendingReboot: 3,
-  Excluded: 4,
-  Installed: 5,
-  Superseded: 6,
-  NotApplicable: 7,
+  Reoffered: 4,
+  Excluded: 5,
+  Installed: 6,
+  Superseded: 7,
+  NotApplicable: 8,
 };
 
 export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
@@ -338,7 +339,8 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
     const items = state ? list.page.items : list.page.items.filter((u) => OUTSTANDING.includes(u.state));
     return [...items].sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || Number(b.isRequired) - Number(a.isRequired) || a.title.localeCompare(b.title));
   }, [list.page.items, state]);
-  const installable = (u: EndpointUpdateDto) => (u.state === 'Missing' || u.state === 'Failed') && !u.isExcluded && !u.activeJob;
+  const installable = (u: EndpointUpdateDto) =>
+    (u.state === 'Missing' || u.state === 'Failed' || u.state === 'Reoffered') && !u.isExcluded && !u.activeJob;
   const selectable = rows.filter(installable);
   const allSelected = selectable.length > 0 && selectable.every((u) => selected.has(u.updateGuid));
 
@@ -454,6 +456,7 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
                         {u.failedAttempts > 1 && ` (${u.failedAttempts} attempts)`}
                       </p>
                     )}
+                    {u.state === 'Reoffered' && u.errorMessage && <p className="mt-1 text-xs text-warn">{u.errorMessage}</p>}
                   </td>
                   <td>
                     <CategoryBadge category={u.category} />
