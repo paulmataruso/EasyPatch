@@ -174,6 +174,8 @@ export function describeSkipReason(reason: string | null | undefined): string {
       return 'Offered again after a successful installation (select it to install it anyway)';
     case 'NotInstalled':
       return 'Not installed';
+    case 'Held':
+      return 'On hold (not installed automatically)';
     case null:
     case undefined:
     case '':

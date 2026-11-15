@@ -855,6 +855,8 @@ export interface EndpointUpdateDto {
   knownExploited: boolean;
   /** Earliest CISA remediation due date of those CVEs. */
   kevDueDate: string | null;
+  /** Set when the update is missing or failed and on hold for the endpoint's organization: why it is held. */
+  holdReason: string | null;
 }
 
 /** A Linux package update. `installedVersion` is the endpoint's current version (endpoint views only). */
@@ -988,6 +990,8 @@ export interface FleetUpdateDto {
   cveCount: number;
   /** Fixes a CISA known-exploited vulnerability on at least one endpoint in scope. */
   knownExploited: boolean;
+  /** On hold for every organization or one in scope: not installed automatically. */
+  onHold: boolean;
 }
 
 export interface FleetUpdateDetailDto {
@@ -1001,6 +1005,36 @@ export interface FleetUpdateDetailDto {
   supersededUpdateGuids: Guid[];
   /** Known-exploited first, then by CVSS. */
   vulnerabilities: VulnerabilityDto[] | null;
+  /** Active holds the administrator can see (every organization, or organizations they can access). */
+  holds: UpdateHoldDto[] | null;
+}
+
+export const UPDATE_HOLD_SOURCES = ['Automatic', 'Manual'] as const;
+export type UpdateHoldSource = (typeof UPDATE_HOLD_SOURCES)[number];
+
+/** backend/API/Contracts/AdminDtos.cs — an update EasyPatch does not install automatically. `organizationId` null: every organization. */
+export interface UpdateHoldDto {
+  id: Guid;
+  updateGuid: Guid;
+  title: string | null;
+  kbNumber: string | null;
+  organizationId: Guid | null;
+  organizationName: string | null;
+  /** Automatic: created by the rollout guard (with the failure counts that triggered it). */
+  source: UpdateHoldSource;
+  reason: string;
+  failedEndpoints: number | null;
+  attemptedEndpoints: number | null;
+  createdAt: Instant;
+  createdBy: string;
+  releasedAt: Instant | null;
+  releasedBy: string | null;
+  canRelease: boolean;
+}
+
+export interface CreateUpdateHoldRequest {
+  organizationId: Guid | null;
+  reason: string;
 }
 
 /** A CVE an update fixes. Title, severity and CVSS come from MSRC (Windows CVEs only); kev* from the CISA KEV catalog. */
@@ -1407,6 +1441,14 @@ export interface ServerSettings {
   retentionReportsMonths: number;
   /** "Prepared by" line on monthly reports; null to leave it out. */
   reportBrandName: string | null;
+  /** Hold a Windows update for every organization when it fails on too many endpoints. */
+  rolloutGuardEnabled: boolean;
+  /** At least this many endpoints whose latest installation failed (1-1000). */
+  rolloutGuardMinFailedEndpoints: number;
+  /** And at least this percentage of the endpoints that installed it (1-100). */
+  rolloutGuardFailurePercent: number;
+  /** Installations in this many days count (1-90). */
+  rolloutGuardWindowDays: number;
 }
 
 export interface ServerInfoDto {
@@ -1428,6 +1470,7 @@ export const ALERT_RULE_TYPES = [
   'EnrollmentPending',
   'OsUnsupported',
   'KnownExploitedMissing',
+  'UpdateHeld',
 ] as const;
 export type AlertRuleType = (typeof ALERT_RULE_TYPES)[number];
 
@@ -1440,6 +1483,7 @@ export const ALERT_RULE_TYPE_LABELS: Record<AlertRuleType, string> = {
   EnrollmentPending: 'Enrollment waiting for approval',
   OsUnsupported: 'Operating system unsupported',
   KnownExploitedMissing: 'Known-exploited vulnerability unpatched',
+  UpdateHeld: 'Update on hold',
 };
 
 export const ALERT_SEVERITIES = ['Critical', 'Warning', 'Info'] as const;

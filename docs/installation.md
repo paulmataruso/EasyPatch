@@ -204,7 +204,9 @@ worker then downloads vulnerability data (see the outbound row in [Requirements]
 It needs no configuration change. The release with monthly reports adds two tables; reports are
 off until you set up a schedule (**Reports → Monthly reports**), and emailing them needs SMTP with
 STARTTLS or TLS. Release 1.7.0 adds the `winget` volume (written by the `worker`, read-only in the
-`api`); see [winget for agents](#winget-for-agents).
+`api`); see [winget for agents](#winget-for-agents). Release 1.8.0 adds a ninth default alert
+rule, *Update on hold*, and the rollout guard, which is on by default (**Settings → Server
+settings → Rollout guard**; see [architecture.md](architecture.md#update-holds-and-the-rollout-guard)).
 
 ## Backup and restore
 

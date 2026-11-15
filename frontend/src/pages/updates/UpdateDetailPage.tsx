@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { Download, ExternalLink, Undo2 } from 'lucide-react';
+import { Download, ExternalLink, PauseCircle, Undo2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApi, useApiMutation, useList } from '../../api/hooks';
 import { ENDPOINT_UPDATE_STATES, type BulkResultDto, type FleetUpdateDetailDto, type FleetUpdateEndpointDto, type VulnerabilityDto } from '../../api/types';
@@ -9,6 +9,7 @@ import { Dialog } from '../../components/Dialog';
 import { EnumSelect, OrganizationSelect, SiteSelect } from '../../components/Filters';
 import { Advisories } from '../../components/PackageInfo';
 import { FleetRemoveUpdateDialog } from '../../components/RemoveUpdateDialog';
+import { HoldUpdateDialog, UpdateHoldBanner } from '../../components/UpdateHolds';
 import { CategoryBadge, KnownExploitedBadge, OnlineBadge, SeverityBadge, UpdateStateBadge } from '../../components/StatusBadges';
 import { Alert, Badge, Button, Card, EmptyState, ErrorState, InlineError, KeyValueList, PageHeader, Pagination, Spinner, StatTile, TableWrap, Toolbar } from '../../components/ui';
 import { formatBytes, formatDate, formatRelative, humanize } from '../../lib/format';
@@ -21,6 +22,7 @@ export function UpdateDetailPage() {
   const { canOperate } = useAuth();
   const [installOpen, setInstallOpen] = useState(false);
   const [removeOpen, setRemoveOpen] = useState(false);
+  const [holdOpen, setHoldOpen] = useState(false);
   const [resultTitle, setResultTitle] = useState('Installation requested');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<BulkResultDto | null>(null);
@@ -62,12 +64,16 @@ export function UpdateDetailPage() {
             <CategoryBadge category={s.category} />
             <SeverityBadge severity={s.msrcSeverity} />
             {s.knownExploited && <KnownExploitedBadge />}
+            {s.onHold && <Badge tone="warn">On hold</Badge>}
             {d.rebootLikely && <Badge tone="info">Restart likely</Badge>}
           </span>
         }
         actions={
           canOperate && (
             <>
+              <Button icon={<PauseCircle className="size-4" aria-hidden />} onClick={() => setHoldOpen(true)}>
+                Hold
+              </Button>
               {!pkg && s.category !== 'Application' && s.installedCount + s.pendingRebootCount > 0 && (
                 <Button icon={<Undo2 className="size-4" aria-hidden />} onClick={() => setRemoveOpen(true)}>
                   Remove from endpoints
@@ -82,6 +88,7 @@ export function UpdateDetailPage() {
           )
         }
       />
+      <UpdateHoldBanner holds={d.holds ?? []} />
       <div className={`mb-5 grid grid-cols-2 gap-3 ${s.reofferedCount ? 'md:grid-cols-6' : 'md:grid-cols-5'}`}>
         <StatTile label="Missing" value={s.missingCount} tone={s.missingCount ? 'warn' : undefined} />
         <StatTile label="Failed" value={s.failedCount} tone={s.failedCount ? 'danger' : undefined} />
@@ -227,6 +234,7 @@ export function UpdateDetailPage() {
         selectedIds={[...selected]}
         defaultOrganizationId={organizationId}
         defaultSiteId={siteId}
+        onHold={s.onHold}
         onDone={(r) => {
           setInstallOpen(false);
           setSelected(new Set());
@@ -247,12 +255,13 @@ export function UpdateDetailPage() {
           setResult(r);
         }}
       />
+      <HoldUpdateDialog open={holdOpen} onClose={() => setHoldOpen(false)} guid={guid} title={s.title} defaultOrganizationId={organizationId} />
       <BulkResultDialog result={result ? { title: resultTitle, data: result } : null} onClose={() => setResult(null)} />
     </>
   );
 }
 
-function FleetInstallDialog({ open, onClose, guid, title, selectedIds, defaultOrganizationId, defaultSiteId, onDone }: {
+function FleetInstallDialog({ open, onClose, guid, title, selectedIds, defaultOrganizationId, defaultSiteId, onDone, onHold }: {
   open: boolean;
   onClose: () => void;
   guid: string;
@@ -261,6 +270,7 @@ function FleetInstallDialog({ open, onClose, guid, title, selectedIds, defaultOr
   defaultOrganizationId: string;
   defaultSiteId: string;
   onDone: (result: BulkResultDto) => void;
+  onHold: boolean;
 }) {
   const [org, setOrg] = useState(defaultOrganizationId);
   const [site, setSite] = useState(defaultSiteId);
@@ -310,6 +320,11 @@ function FleetInstallDialog({ open, onClose, guid, title, selectedIds, defaultOr
             </div>
             {!org && <Alert tone="warn">No organization selected: every affected endpoint you can access is included.</Alert>}
           </>
+        )}
+        {onHold && (
+          <Alert tone="warn" title="This update is on hold">
+            Installing it here overrides the hold on these endpoints. Scheduled installations keep skipping it until the hold is released.
+          </Alert>
         )}
         <Alert tone="info" title="No automatic restarts">
           Installing does not restart endpoints (use Restart… or a restart schedule). Endpoints where this update is excluded are skipped. Because you are choosing this update explicitly, it installs even if its category is not in the policy’s automatic-install categories.

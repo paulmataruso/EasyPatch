@@ -424,7 +424,8 @@ public sealed record EndpointUpdateDto(
     DateTimeOffset? DeferredUntil = null,
     IReadOnlyList<string>? CveIds = null,
     bool KnownExploited = false,
-    DateOnly? KevDueDate = null);
+    DateOnly? KevDueDate = null,
+    string? HoldReason = null);
 
 /// <summary>Linux package behind an update. <c>InstalledVersion</c> is the endpoint's version (endpoint views only).</summary>
 public sealed record PackageInfoDto(string Name, string? Architecture, string? Version, string? InstalledVersion, string? Repository,
@@ -493,11 +494,22 @@ public sealed record FleetUpdateDto(
     PackageInfoDto? Package = null,
     int CveCount = 0,
     bool KnownExploited = false,
-    int ReofferedCount = 0);
+    int ReofferedCount = 0,
+    bool OnHold = false);
 
+/// <param name="Holds">Active holds of the update the administrator can see (for every organization or one they can access).</param>
 public sealed record FleetUpdateDetailDto(FleetUpdateDto Summary, string? Description, string? SupportUrl, IReadOnlyList<string> KbNumbers,
     IReadOnlyList<string> Products, string? MsClassification, bool RebootLikely, IReadOnlyList<Guid> SupersededUpdateGuids,
-    IReadOnlyList<VulnerabilityDto>? Vulnerabilities = null);
+    IReadOnlyList<VulnerabilityDto>? Vulnerabilities = null, IReadOnlyList<UpdateHoldDto>? Holds = null);
+
+/// <summary>An update EasyPatch does not install automatically. <c>OrganizationId</c> null: for every organization. Automatic holds
+/// come from the rollout guard and carry the failure counts that triggered them.</summary>
+public sealed record UpdateHoldDto(Guid Id, Guid UpdateGuid, string? Title, string? KbNumber, Guid? OrganizationId, string? OrganizationName,
+    UpdateHoldSource Source, string Reason, int? FailedEndpoints, int? AttemptedEndpoints, DateTimeOffset CreatedAt, string CreatedBy,
+    DateTimeOffset? ReleasedAt, string? ReleasedBy, bool CanRelease);
+
+/// <param name="OrganizationId">The organization to hold the update for; null holds it for every organization (super administrators).</param>
+public sealed record CreateUpdateHoldRequest(Guid? OrganizationId, string? Reason);
 
 /// <summary>A CVE an update fixes. <c>Kev</c>: in the CISA Known Exploited Vulnerabilities catalog; <c>KevDueDate</c> is the
 /// remediation date CISA sets for US federal agencies. Title, severity and CVSS come from MSRC (Windows CVEs only).</summary>
@@ -525,7 +537,10 @@ public sealed record FleetUpdateEndpointDto(
 public sealed record FleetInstallRequest(Guid? OrganizationId, Guid? SiteId, IReadOnlyList<Guid>? EndpointIds);
 
 /// <param name="Block">Also exclude the update on each endpoint so EasyPatch does not install it again.</param>
-public sealed record FleetUninstallRequest(Guid? OrganizationId, Guid? SiteId, IReadOnlyList<Guid>? EndpointIds, bool Block = true, string? Reason = null);
+/// <param name="Hold">Also put the update on hold so EasyPatch does not install it automatically on other endpoints: for the organization,
+/// or for every organization when none is given (super administrators).</param>
+public sealed record FleetUninstallRequest(Guid? OrganizationId, Guid? SiteId, IReadOnlyList<Guid>? EndpointIds, bool Block = true, string? Reason = null,
+    bool Hold = false);
 
 // ---------------------------------------------------------------------------------------------
 // Jobs

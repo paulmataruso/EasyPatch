@@ -26,7 +26,8 @@ public sealed record InstallPreview(
 
 /// <summary>Computes what an install job would do, using the same <see cref="InstallFilter"/> the agent applies
 /// to its fresh scan, so the confirmation dialog matches agent behavior.</summary>
-public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService policies, SettingsService settings, TimeProvider clock)
+public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService policies, SettingsService settings, UpdateHoldService holds,
+    TimeProvider clock)
 {
     public async Task<InstallPreview> BuildAsync(Endpoint endpoint, InstallMode mode, IReadOnlyCollection<Guid> selected, CancellationToken ct = default)
     {
@@ -41,7 +42,11 @@ public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService p
         var reoffered = await db.EndpointUpdates.AsNoTracking()
             .Where(u => u.EndpointId == endpoint.Id && u.State == EndpointUpdateState.Reoffered).Select(u => u.UpdateGuid).ToListAsync(ct);
         var reofferedSkipped = reoffered.Where(g => !selected.Contains(g)).ToHashSet();
-        var filter = policy.ToFilter(exclusions.Concat(reofferedSkipped).Distinct());
+
+        // Updates on hold (rollout guard or an administrator) are installed only when selected, like offered-again updates.
+        var held = await holds.ActiveForAsync(endpoint.OrganizationId, ct);
+        var heldSkipped = held.Keys.Where(g => !selected.Contains(g)).ToHashSet();
+        var filter = policy.ToFilter(exclusions.Concat(reofferedSkipped).Concat(heldSkipped).Distinct());
         var payload = new InstallUpdatesPayload { Mode = mode, SelectedUpdateGuids = selected.ToArray(), Filter = filter };
 
         var candidates = await db.EndpointUpdates.AsNoTracking().Include(u => u.Update)
@@ -64,9 +69,10 @@ public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService p
             }
             else if (mode == InstallMode.Selected ? selected.Contains(row.UpdateGuid) : decision.SkipReason != SkipReasons.NotSelected)
             {
-                var reason = reofferedSkipped.Contains(row.UpdateGuid) && !exclusions.Contains(row.UpdateGuid) &&
-                             decision.SkipReason == SkipReasons.Excluded
-                    ? SkipReasons.Reoffered
+                var reason = decision.SkipReason == SkipReasons.Excluded && !exclusions.Contains(row.UpdateGuid)
+                    ? heldSkipped.Contains(row.UpdateGuid) ? SkipReasons.Held
+                    : reofferedSkipped.Contains(row.UpdateGuid) ? SkipReasons.Reoffered
+                    : SkipReasons.Excluded
                     : decision.SkipReason ?? "Unknown";
                 skipped.Add(new PreviewSkip(row.UpdateGuid, u.Title, u.PrimaryKb, u.Category, reason));
             }
@@ -89,6 +95,13 @@ public sealed class InstallPreviewService(EasyPatchDbContext db, PolicyService p
         {
             warnings.Add($"{deferred.Count} of these update(s) are still in their rollout delay (the last one until " +
                          $"{deferred.Max(d => d.DeferredUntil)!.Value.UtcDateTime:yyyy-MM-dd} UTC). Installing now overrides the delay.");
+        }
+
+        var heldIncluded = items.Where(i => held.ContainsKey(i.UpdateGuid)).ToList();
+        if (heldIncluded.Count > 0)
+        {
+            var reason = heldIncluded.Count == 1 ? $" ({held[heldIncluded[0].UpdateGuid].Reason})" : string.Empty;
+            warnings.Add($"{heldIncluded.Count} of these update(s) are on hold{reason}. Installing them now overrides the hold for this endpoint only.");
         }
 
         return new InstallPreview(

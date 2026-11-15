@@ -128,6 +128,7 @@ app.MapTagEndpoints();
 app.MapNotificationEndpoints();
 app.MapJobEndpoints();
 app.MapFleetUpdateEndpoints();
+app.MapUpdateHoldEndpoints();
 app.MapAgentManagementEndpoints();
 app.MapDownloadEndpoints();
 app.MapReportingEndpoints();

@@ -473,6 +473,11 @@ export function UpdatesTab({ endpoint, onInstallSelected, onInstallAll }: {
                   <td>
                     <div className="flex flex-col items-start gap-1">
                       {u.isExcluded ? <Badge icon={<EyeOff className="size-3" aria-hidden />}>Excluded</Badge> : <UpdateStateBadge state={u.state} />}
+                      {u.holdReason && (
+                        <Link to={`/updates/${u.updateGuid}`} className="hover:opacity-80" title={`On hold: ${u.holdReason} Not installed automatically; installing it here still works.`}>
+                          <Badge tone="warn">On hold</Badge>
+                        </Link>
+                      )}
                       {u.activeJob && (
                         <Link to={`/jobs/${u.activeJob.jobId}`} className="hover:opacity-80" title="Part of an active job">
                           <JobItemStatusBadge

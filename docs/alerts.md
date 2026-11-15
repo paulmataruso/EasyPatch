@@ -45,6 +45,7 @@ so they show alerts in the console only until you add channels.
 | Enrollment waiting for approval | Computers enrolled with a deployment code wait for approval. One alert per organization. | Info | — |
 | Operating system unsupported | The OS no longer receives security updates, or its support ends within the threshold. 0 alerts only after the end. | Warning | 30 days (0-365) |
 | Known-exploited vulnerability unpatched | An endpoint is missing an allowed update that fixes a vulnerability in the CISA Known Exploited Vulnerabilities catalog (required, or still inside its rollout delay). See [compliance.md](compliance.md#vulnerabilities-and-known-exploited-updates). | Critical | — |
+| Update on hold | An update that endpoints of the organization still miss (or failed to install) is on hold, by the rollout guard or an administrator, so EasyPatch does not install it automatically. One alert per organization. See [architecture.md](architecture.md#update-holds-and-the-rollout-guard). | Warning | — |
 
 You can edit, disable or delete these rules, and add more. A rule can be limited to one
 organization and to endpoints with a tag (for example a stricter *Security update missing*

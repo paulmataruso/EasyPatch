@@ -131,6 +131,7 @@ public sealed class EasyPatchApiFactory(string connectionString, TimeProvider cl
             services.AddScoped<VulnerabilityFeedTask>();
             services.AddScoped<MonthlyReportTask>();
             services.AddScoped<WingetMirrorTask>();
+            services.AddScoped<RolloutGuardTask>();
             services.AddSingleton<INotificationTransport>(Transport);
             configureServices?.Invoke(services);
         });

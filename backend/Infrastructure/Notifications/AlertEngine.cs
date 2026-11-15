@@ -263,6 +263,11 @@ public sealed class AlertEngine(
                 "Approve or reject the requests under Pending Approvals.")).ToList();
         }
 
+        if (rule.Type == AlertRuleType.UpdateHeld)
+        {
+            return await UpdateHeldAsync(rule.OrganizationId, ct);
+        }
+
         var endpoints = db.Endpoints.AsNoTracking()
             .Where(e => e.Status == EndpointStatus.Active && db.Organizations.Any(o => o.Id == e.OrganizationId && o.IsActive));
         if (rule.OrganizationId is { } organization)
@@ -388,6 +393,58 @@ public sealed class AlertEngine(
             var titles = string.Join("; ", overdue.Take(3).Select(r => r.Title)) + (overdue.Count > 3 ? $"; and {overdue.Count - 3} more" : string.Empty);
             result.Add(new AlertMatch(first.OrganizationId, first.Id,
                 $"{first.Hostname}: {Plural(overdue.Count, "security update")} missing for over {Plural(days, "day")}", titles, !first.IsOnline));
+        }
+
+        return result;
+    }
+
+    /// <summary>One alert per organization that has active endpoints still needing an update on hold for it (a hold for
+    /// every organization or its own).</summary>
+    private async Task<List<AlertMatch>> UpdateHeldAsync(Guid? organizationId, CancellationToken ct)
+    {
+        var holds = await db.UpdateHolds.AsNoTracking().Where(h => h.ReleasedAt == null)
+            .Where(h => organizationId == null || h.OrganizationId == null || h.OrganizationId == organizationId)
+            .ToListAsync(ct);
+        if (holds.Count == 0)
+        {
+            return [];
+        }
+
+        var guids = holds.Select(h => h.UpdateGuid).Distinct().ToList();
+        var needed = (from u in db.EndpointUpdates.AsNoTracking()
+                      join e in db.Endpoints.AsNoTracking() on u.EndpointId equals e.Id
+                      where guids.Contains(u.UpdateGuid) && e.Status == EndpointStatus.Active &&
+                            (u.State == EndpointUpdateState.Missing || u.State == EndpointUpdateState.Failed) &&
+                            db.Organizations.Any(o => o.Id == e.OrganizationId && o.IsActive)
+                      select new { e.OrganizationId, u.UpdateGuid, Title = u.Update!.Title });
+        if (organizationId is { } org)
+        {
+            needed = needed.Where(r => r.OrganizationId == org);
+        }
+
+        var rows = await needed.Distinct().ToListAsync(ct);
+        var names = await db.Organizations.AsNoTracking().Where(o => rows.Select(r => r.OrganizationId).Contains(o.Id))
+            .ToDictionaryAsync(o => o.Id, o => o.Name, ct);
+        var result = new List<AlertMatch>();
+        foreach (var g in rows.GroupBy(r => r.OrganizationId))
+        {
+            var held = g.Where(r => holds.Exists(h => h.UpdateGuid == r.UpdateGuid && (h.OrganizationId is null || h.OrganizationId == g.Key)))
+                .GroupBy(r => r.UpdateGuid).Select(u => u.First()).OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase).ToList();
+            if (held.Count == 0)
+            {
+                continue;
+            }
+
+            var name = names.GetValueOrDefault(g.Key, "Organization");
+            var title = held.Count == 1 ? $"{name}: {held[0].Title} is on hold" : $"{name}: {Plural(held.Count, "update")} on hold";
+            var details = string.Join("; ", held.Take(3).Select(r =>
+            {
+                var hold = holds.Where(h => h.UpdateGuid == r.UpdateGuid && (h.OrganizationId is null || h.OrganizationId == g.Key))
+                    .OrderBy(h => h.OrganizationId is null).First();
+                return held.Count == 1 ? $"{hold.CreatedBy}: {hold.Reason}" : $"{r.Title} ({hold.CreatedBy}: {hold.Reason})";
+            })) + (held.Count > 3 ? $"; and {held.Count - 3} more" : string.Empty) +
+                ". EasyPatch does not install it automatically until the hold is released on the update's page.";
+            result.Add(new AlertMatch(g.Key, null, title, details));
         }
 
         return result;

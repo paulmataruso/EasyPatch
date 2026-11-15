@@ -4,6 +4,7 @@ import { Undo2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useApiMutation } from '../api/hooks';
 import type { BulkResultDto } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
 import { Dialog } from './Dialog';
 import { OrganizationSelect, SiteSelect } from './Filters';
 import { jobIdOf } from './InstallDialog';
@@ -133,7 +134,9 @@ export function FleetRemoveUpdateDialog({ open, onClose, guid, title, defaultOrg
 }) {
   const [org, setOrg] = useState(defaultOrganizationId);
   const [site, setSite] = useState(defaultSiteId);
+  const { isSuperAdmin } = useAuth();
   const [block, setBlock] = useState(true);
+  const [hold, setHold] = useState(false);
   const [reason, setReason] = useState('');
   const remove = useApiMutation(
     () =>
@@ -141,9 +144,10 @@ export function FleetRemoveUpdateDialog({ open, onClose, guid, title, defaultOrg
         organizationId: org || null,
         siteId: site || null,
         block,
-        reason: block ? reason.trim() || null : null,
+        reason: block || hold ? reason.trim() || null : null,
+        hold: hold && (!!org || isSuperAdmin),
       }),
-    { invalidate: ['/updates', '/jobs', '/endpoints', '/dashboard'], onSuccess: onDone },
+    { invalidate: ['/updates', '/update-holds', '/jobs', '/endpoints', '/dashboard'], onSuccess: onDone },
   );
   const reset = remove.reset;
   useEffect(() => {
@@ -151,10 +155,12 @@ export function FleetRemoveUpdateDialog({ open, onClose, guid, title, defaultOrg
       setOrg(defaultOrganizationId);
       setSite(defaultSiteId);
       setBlock(true);
+      setHold(false);
       setReason('');
       reset();
     }
   }, [open, defaultOrganizationId, defaultSiteId, reset]);
+  const holdAllowed = !!org || isSuperAdmin;
 
   return (
     <Dialog
@@ -180,6 +186,20 @@ export function FleetRemoveUpdateDialog({ open, onClose, guid, title, defaultOrg
         {!org && <Alert tone="warn">No organization selected: every endpoint you can access that has this update is included.</Alert>}
         <RemovalExplanation />
         <BlockFields block={block} onBlock={setBlock} reason={reason} onReason={setReason} fleet />
+        <Checkbox
+          label={org ? 'Also put it on hold for this organization' : 'Also put it on hold for every organization'}
+          hint={
+            holdAllowed
+              ? 'Other endpoints then do not install it automatically either, until the hold is released on this page.'
+              : 'Choose an organization: only super administrators can hold an update for every organization.'
+          }
+          checked={hold && holdAllowed}
+          disabled={!holdAllowed}
+          onChange={(e) => setHold(e.target.checked)}
+        />
+        {hold && holdAllowed && !block && (
+          <TextField label="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} placeholder="e.g. breaks printing" />
+        )}
         <InlineError error={remove.error} />
       </div>
     </Dialog>

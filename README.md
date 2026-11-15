@@ -105,6 +105,10 @@ All screenshots show fictional demo data.
 * **Roll back a bad update** (Windows agent 1.8.0 and later): remove an installed update from one
   endpoint, or from every endpoint in an organization or site, and exclude it so EasyPatch does not
   install it again. The agent uses Windows Update's own uninstall or DISM, and never restarts.
+* **Rollout guard and update holds**: when a Windows update fails on too many endpoints (by
+  default at least 3 endpoints and 20% of those that tried it in 7 days), EasyPatch puts it on hold
+  for every organization. Scheduled installs and *Install all missing* then skip it, and an alert
+  opens. Administrators can also hold an update themselves and release holds on the update's page.
 * **Optional scheduled installs** inside a per-policy maintenance window (off by default),
   limited per site and globally. Updates still inside their rollout delay are skipped.
 * **Restarts** of one endpoint or many selected endpoints, now or at a chosen time, or on a

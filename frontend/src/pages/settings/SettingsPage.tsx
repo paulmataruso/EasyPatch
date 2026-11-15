@@ -194,6 +194,49 @@ function ServerSettingsTab() {
         </label>
         <FeedStatus />
       </Card>
+      <Card title="Rollout guard">
+        <label className="flex items-start gap-2.5">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4"
+            checked={form.rolloutGuardEnabled}
+            disabled={readOnly}
+            onChange={(e) => setForm({ ...form, rolloutGuardEnabled: e.target.checked })}
+          />
+          <span>
+            <span className="text-sm font-medium">Hold Windows updates that fail on too many endpoints</span>
+            <span className="block text-xs text-muted">
+              Every 5 minutes the worker looks at each endpoint's latest installation result per update. When an update failed on at least the number and
+              percentage of endpoints below, it is put on hold for every organization: maintenance windows and Install all missing skip it, including jobs already
+              queued, and the Update on hold alert opens. Selecting it on an endpoint still installs it. A super administrator releases the hold on the update's
+              page; failures from before the release are not counted again. With a shorter rollout delay for a pilot group, failures there stop the update before
+              the other endpoints are due.
+            </span>
+          </span>
+        </label>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {(
+            [
+              { key: 'rolloutGuardMinFailedEndpoints', label: 'Failed on at least', unit: 'endpoints', min: 1, max: 1000 },
+              { key: 'rolloutGuardFailurePercent', label: 'And at least', unit: '% of endpoints that tried to install it', min: 1, max: 100 },
+              { key: 'rolloutGuardWindowDays', label: 'Counting installations of the last', unit: 'days', min: 1, max: 90 },
+            ] as const
+          ).map((f) => (
+            <TextField
+              key={f.key}
+              label={f.label}
+              hint={f.unit}
+              type="number"
+              min={f.min}
+              max={f.max}
+              required
+              disabled={readOnly || !form.rolloutGuardEnabled}
+              value={form[f.key]}
+              onChange={(e) => setForm({ ...form, [f.key]: Number(e.target.value) })}
+            />
+          ))}
+        </div>
+      </Card>
       <Card title="Monthly reports">
         <TextField
           label="Prepared by"

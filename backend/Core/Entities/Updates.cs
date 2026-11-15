@@ -114,6 +114,40 @@ public sealed class UpdateExclusion
     public Guid? CreatedByUserId { get; set; }
 }
 
+public enum UpdateHoldSource
+{
+    /// <summary>The rollout guard held it because installations failed on too many endpoints.</summary>
+    Automatic,
+
+    /// <summary>An administrator held it.</summary>
+    Manual,
+}
+
+/// <summary>
+/// An update held back from automatic installation: scheduled installs and "install all" skip it, and jobs queued before the hold
+/// skip it when they are delivered. Installing it explicitly is still possible. A hold applies to one organization, or to every
+/// organization when <see cref="OrganizationId"/> is null, until it is released.
+/// </summary>
+public sealed class UpdateHold
+{
+    public Guid Id { get; set; }
+    public Guid UpdateGuid { get; set; }
+    public Guid? OrganizationId { get; set; }
+    public UpdateHoldSource Source { get; set; }
+    public required string Reason { get; set; }
+
+    /// <summary>Automatic holds: endpoints where the latest installation of the update failed, and endpoints that tried it.</summary>
+    public int? FailedEndpoints { get; set; }
+    public int? AttemptedEndpoints { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public required string CreatedBy { get; set; }
+    public DateTimeOffset? ReleasedAt { get; set; }
+    public Guid? ReleasedByUserId { get; set; }
+    public string? ReleasedBy { get; set; }
+}
+
 public sealed class UpdateScan
 {
     public Guid Id { get; set; }

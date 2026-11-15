@@ -92,9 +92,11 @@ public static class EndpointEndpoints
         }).RequireAuthorization(Policies.Operator);
 
         g.MapGet("/{id:guid}/updates", async (Guid id, EndpointUpdateState? state, UpdateCategory? category, bool? requiredOnly, EasyPatchDbContext db,
-            ITenantContext tenant, CancellationToken ct) =>
+            ITenantContext tenant, UpdateHoldService holdService, CancellationToken ct) =>
         {
             await EnsureEndpointAccessAsync(db, tenant, id, ct);
+            var orgId = await db.Endpoints.AsNoTracking().Where(e => e.Id == id).Select(e => e.OrganizationId).FirstAsync(ct);
+            var holds = await holdService.ActiveForAsync(orgId, ct);
             var query = db.EndpointUpdates.AsNoTracking().Where(u => u.EndpointId == id);
             query = state is { } s
                 ? query.Where(u => u.State == s)
@@ -126,7 +128,12 @@ public static class EndpointEndpoints
                 .ThenByDescending(r => r.Row.KnownExploited)
                 .ThenByDescending(r => r.Row.IsRequired)
                 .ThenByDescending(r => r.Update!.ReleaseDate)
-                .Select(r => ToUpdateDto(r.Row, r.Update!, overlay.GetValueOrDefault(r.Row.UpdateGuid)))
+                .Select(r => ToUpdateDto(r.Row, r.Update!, overlay.GetValueOrDefault(r.Row.UpdateGuid)) with
+                {
+                    HoldReason = r.Row.State is EndpointUpdateState.Missing or EndpointUpdateState.Failed && holds.TryGetValue(r.Row.UpdateGuid, out var hold)
+                        ? hold.Reason
+                        : null,
+                })
                 .ToList();
             return TypedResults.Ok(result);
         });

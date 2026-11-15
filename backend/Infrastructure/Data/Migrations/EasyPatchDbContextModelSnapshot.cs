@@ -3258,6 +3258,85 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                     b.ToTable("update_history_entries", (string)null);
                 });
 
+            modelBuilder.Entity("EasyPatch.Core.Entities.UpdateHold", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int?>("AttemptedEndpoints")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempted_endpoints");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<int?>("FailedEndpoints")
+                        .HasColumnType("integer")
+                        .HasColumnName("failed_endpoints");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<DateTimeOffset?>("ReleasedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("released_at");
+
+                    b.Property<string>("ReleasedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("released_by");
+
+                    b.Property<Guid?>("ReleasedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("released_by_user_id");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("source");
+
+                    b.Property<Guid>("UpdateGuid")
+                        .HasColumnType("uuid")
+                        .HasColumnName("update_guid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ReleasedAt");
+
+                    b.HasIndex("UpdateGuid")
+                        .IsUnique()
+                        .HasFilter("organization_id IS NULL AND released_at IS NULL");
+
+                    b.HasIndex("UpdateGuid", "OrganizationId")
+                        .IsUnique()
+                        .HasFilter("organization_id IS NOT NULL AND released_at IS NULL");
+
+                    b.ToTable("update_holds", (string)null);
+                });
+
             modelBuilder.Entity("EasyPatch.Core.Entities.UpdateScan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3887,6 +3966,14 @@ namespace EasyPatch.Infrastructure.Data.Migrations
                         .HasForeignKey("EndpointId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("EasyPatch.Core.Entities.UpdateHold", b =>
+                {
+                    b.HasOne("EasyPatch.Core.Entities.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("EasyPatch.Core.Entities.UpdateScan", b =>

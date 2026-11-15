@@ -5,7 +5,7 @@ import { ENDPOINT_UPDATE_STATES, UPDATE_CATEGORIES, type FleetUpdateDto } from '
 import { EnumSelect, OrganizationSelect, SearchInput, SiteSelect } from '../../components/Filters';
 import { PackageFacts } from '../../components/PackageInfo';
 import { CategoryBadge, CveCount, KnownExploitedBadge, SeverityBadge } from '../../components/StatusBadges';
-import { EmptyState, ErrorState, PageHeader, Pagination, SortHeader, Spinner, TableWrap, Toolbar } from '../../components/ui';
+import { Badge, EmptyState, ErrorState, PageHeader, Pagination, SortHeader, Spinner, TableWrap, Toolbar } from '../../components/ui';
 import { formatBytes, formatDate, formatNumber, humanize } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 
@@ -104,6 +104,11 @@ export function UpdatesPage() {
                         <div className="flex flex-col items-start gap-1">
                           <SeverityBadge severity={u.msrcSeverity} />
                           {u.knownExploited && <KnownExploitedBadge />}
+                          {u.onHold && (
+                            <Badge tone="warn" title="Not installed automatically until the hold is released on the update's page">
+                              On hold
+                            </Badge>
+                          )}
                         </div>
                       </td>
                       <td className="whitespace-nowrap text-muted">{formatDate(u.releaseDate)}</td>

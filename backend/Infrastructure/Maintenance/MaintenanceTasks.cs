@@ -155,6 +155,7 @@ public sealed class ScheduledInstallTask(
     PolicyService policies,
     JobService jobs,
     SettingsService settingsService,
+    UpdateHoldService holds,
     TimeProvider clock,
     ILogger<ScheduledInstallTask> logger) : IMaintenanceTask
 {
@@ -173,6 +174,7 @@ public sealed class ScheduledInstallTask(
             .ToListAsync(ct);
 
         var created = 0;
+        var heldByOrg = new Dictionary<Guid, IReadOnlyCollection<Guid>>();
         foreach (var e in candidates)
         {
             var policy = resolver(e.OrganizationId, e.SiteId, e.Id);
@@ -195,16 +197,28 @@ public sealed class ScheduledInstallTask(
             }
 
             // Without a rollout delay the agent installs everything policy allows (as before). With a delay only the
-            // server knows which updates are due, so the job lists them explicitly.
+            // server knows which updates are due, so the job lists them explicitly. Updates on hold are never due; an
+            // endpoint that only misses held updates gets no job.
+            if (!heldByOrg.TryGetValue(e.OrganizationId, out var held))
+            {
+                held = (await holds.ActiveForAsync(e.OrganizationId, ct)).Keys.ToHashSet();
+                heldByOrg[e.OrganizationId] = held;
+            }
+
             var mode = InstallMode.AllEligible;
             IReadOnlyList<Guid>? selected = null;
-            if (policy.HasInstallDelay)
+            if (policy.HasInstallDelay || held.Count > 0)
             {
-                mode = InstallMode.Selected;
-                selected = await DueUpdatesAsync(e.Id, ct);
-                if (selected.Count == 0)
+                var due = await DueUpdatesAsync(e.Id, held, ct);
+                if (due.Count == 0)
                 {
                     continue;
+                }
+
+                if (policy.HasInstallDelay)
+                {
+                    mode = InstallMode.Selected;
+                    selected = due;
                 }
             }
 
@@ -232,8 +246,8 @@ public sealed class ScheduledInstallTask(
         }
     }
 
-    /// <summary>Required (and therefore due) updates still outstanding on the endpoint, security first, at most 500.</summary>
-    private async Task<IReadOnlyList<Guid>> DueUpdatesAsync(Guid endpointId, CancellationToken ct)
+    /// <summary>Required (and therefore due) updates still outstanding on the endpoint and not on hold, security first, at most 500.</summary>
+    private async Task<IReadOnlyList<Guid>> DueUpdatesAsync(Guid endpointId, IReadOnlyCollection<Guid> held, CancellationToken ct)
     {
         var rows = await db.EndpointUpdates.AsNoTracking()
             .Where(u => u.EndpointId == endpointId && u.IsRequired && !u.IsExcluded &&
@@ -241,6 +255,7 @@ public sealed class ScheduledInstallTask(
             .Select(u => new { u.UpdateGuid, u.Update!.Category, u.Update.MsClassification, u.FirstDetectedAt })
             .ToListAsync(ct);
         return rows
+            .Where(r => !held.Contains(r.UpdateGuid))
             .OrderByDescending(r => r.Category == UpdateCategory.Security ||
                                     string.Equals(r.MsClassification, UpdateRequirement.SecurityClassification, StringComparison.OrdinalIgnoreCase))
             .ThenBy(r => r.FirstDetectedAt)

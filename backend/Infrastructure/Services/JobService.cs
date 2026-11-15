@@ -35,6 +35,7 @@ public sealed class JobService(
     SettingsService settingsService,
     PolicyService policies,
     InstallPreviewService previews,
+    UpdateHoldService holds,
     AgentPackageService packages,
     AuditService audit,
     IActorContext actor,
@@ -584,6 +585,13 @@ public sealed class JobService(
                 continue;
             }
 
+            if (candidate.Type == JobType.InstallUpdates && !await ApplyHoldsAsync(candidate, endpoint, now, ct))
+            {
+                await db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+                continue;
+            }
+
             if (candidate.Type == JobType.InstallUpdates)
             {
                 await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock({InstallSlotsLockKey})", ct);
@@ -615,6 +623,81 @@ public sealed class JobService(
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Leaves updates put on hold after an install job was queued out of it when the endpoint picks it up: scheduled jobs and
+    /// "install all" jobs no longer install them. Updates an administrator selected by hand are installed as selected (the
+    /// install preview warned about the hold). Returns false when nothing is left to install; the job is then cancelled.
+    /// </summary>
+    private async Task<bool> ApplyHoldsAsync(Job job, Endpoint endpoint, DateTimeOffset now, CancellationToken ct)
+    {
+        var payload = Payload<InstallUpdatesPayload>(job);
+        if (payload is null || (job.Trigger == JobTrigger.Manual && payload.Mode == InstallMode.Selected))
+        {
+            return true;
+        }
+
+        var held = await holds.ActiveForAsync(endpoint.OrganizationId, ct);
+        if (held.Count == 0)
+        {
+            return true;
+        }
+
+        InstallUpdatesPayload updated;
+        IReadOnlyList<Guid> left;
+        if (payload.Mode == InstallMode.Selected)
+        {
+            left = payload.SelectedUpdateGuids.Where(g => !held.ContainsKey(g)).ToList();
+            if (left.Count == payload.SelectedUpdateGuids.Count)
+            {
+                return true;
+            }
+
+            updated = payload with { SelectedUpdateGuids = left };
+        }
+        else
+        {
+            var add = held.Keys.Where(g => !payload.Filter.ExcludedUpdateGuids.Contains(g)).ToList();
+            if (add.Count == 0)
+            {
+                return true;
+            }
+
+            left = [];
+            updated = payload with { Filter = payload.Filter with { ExcludedUpdateGuids = [.. payload.Filter.ExcludedUpdateGuids, .. add] } };
+        }
+
+        job.Payload = JsonSerializer.Serialize(updated, ContractJson.Options);
+        job.UpdatedAt = now;
+        var heldGuids = held.Keys.ToList();
+        var items = await db.JobUpdates.Where(i => i.JobId == job.Id && i.Status == JobItemStatus.Pending && heldGuids.Contains(i.UpdateGuid)).ToListAsync(ct);
+        foreach (var item in items)
+        {
+            item.Status = JobItemStatus.Skipped;
+            item.SkipReason = SkipReasons.Held;
+            item.CompletedAt = now;
+            item.UpdatedAt = now;
+        }
+
+        var nothingLeft = payload.Mode == InstallMode.Selected && left.Count == 0;
+        if (items.Count > 0 || nothingLeft)
+        {
+            var count = items.Count == 1 ? "1 update" : $"{items.Count} updates";
+            EndpointEvents.Add(db, endpoint, "JobUpdatesHeld",
+                nothingLeft
+                    ? "Every update in this job was put on hold after it was queued. The job was cancelled."
+                    : $"{count} put on hold after the job was queued will not be installed by it.",
+                now, EventSeverity.Warning, job.Id);
+        }
+
+        if (nothingLeft)
+        {
+            Finish(job, JobStatus.Cancelled, now, "Every update in this job was put on hold before the endpoint picked it up.");
+            return false;
+        }
+
+        return true;
     }
 
     public static AgentJob ToAgentJob(Job job)
@@ -789,6 +872,19 @@ public sealed class JobService(
 
         var changedInventory = false;
         var byGuid = job.Updates.ToDictionary(u => u.UpdateGuid);
+
+        // The agent reports updates on hold as excluded (the job's filter lists them): show why.
+        IReadOnlySet<Guid> heldOnly = new HashSet<Guid>();
+        if (items.Any(i => i.Status == JobItemStatus.Skipped && i.SkipReason == SkipReasons.Excluded))
+        {
+            var held = await holds.ActiveForAsync(endpoint.OrganizationId, ct);
+            if (held.Count > 0)
+            {
+                var excluded = await db.UpdateExclusions.AsNoTracking().Where(x => x.EndpointId == endpoint.Id).Select(x => x.UpdateGuid).ToListAsync(ct);
+                heldOnly = held.Keys.Except(excluded).ToHashSet();
+            }
+        }
+
         var finalGuids = new List<(JobItemReport Report, bool WasFinal)>();
         foreach (var report in items.GroupBy(i => i.UpdateGuid).Select(g => g.Last()))
         {
@@ -811,7 +907,9 @@ public sealed class JobService(
             item.KbNumber = KbNumber.Normalize(report.KbNumber) ?? item.KbNumber;
             item.Category = report.Category;
             item.Status = report.Status;
-            item.SkipReason = ScanIngestionService.Truncate(report.SkipReason, 64);
+            item.SkipReason = report.SkipReason == SkipReasons.Excluded && heldOnly.Contains(report.UpdateGuid)
+                ? SkipReasons.Held
+                : ScanIngestionService.Truncate(report.SkipReason, 64);
             item.ResultCode = report.ResultCode;
             item.ErrorCode = ScanIngestionService.Truncate(report.ErrorCode, 32);
             item.ErrorMessage = ScanIngestionService.Truncate(

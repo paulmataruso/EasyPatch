@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using EasyPatch.Api.Contracts;
 using EasyPatch.Api.Security;
@@ -195,17 +196,19 @@ public static class FleetUpdateEndpoints
             var pageRows = await grouped.Skip(page.Skip).Take(page.PageSize).ToListAsync(ct);
             var guids = pageRows.Select(r => r.UpdateGuid).ToList();
             var catalog = await LatestCatalogAsync(db, guids, ct);
+            var held = await HeldAsync(db, tenant, q.OrganizationId, guids, ct);
             var items = pageRows.Where(r => catalog.ContainsKey(r.UpdateGuid)).Select(r =>
             {
                 var u = catalog[r.UpdateGuid];
                 return new FleetUpdateDto(r.UpdateGuid, u.Title, u.PrimaryKb, u.Category, u.MsrcSeverity, u.ReleaseDate, u.MaxDownloadSizeBytes, r.Missing,
-                    r.Failed, r.Installed, r.PendingReboot, r.Excluded, Mapping.Package(u, null), u.CveIds.Count, r.KnownExploited > 0, r.Reoffered);
+                    r.Failed, r.Installed, r.PendingReboot, r.Excluded, Mapping.Package(u, null), u.CveIds.Count, r.KnownExploited > 0, r.Reoffered,
+                    held.Contains(r.UpdateGuid));
             }).ToList();
             return TypedResults.Ok(new PagedResult<FleetUpdateDto>(items, page.Page, page.PageSize, total));
         });
 
         g.MapGet("/{updateGuid:guid}", async (Guid updateGuid, Guid? organizationId, Guid? siteId, EasyPatchDbContext db, ITenantContext tenant,
-            CancellationToken ct) =>
+            ClaimsPrincipal user, CancellationToken ct) =>
         {
             var catalog = await LatestCatalogAsync(db, [updateGuid], ct);
             if (!catalog.TryGetValue(updateGuid, out var u))
@@ -238,11 +241,15 @@ public static class FleetUpdateEndpoints
                     : new VulnerabilityDto(id, null, null, null, false, false, null, null, false, null))
                 .OrderByDescending(v => v.Kev).ThenByDescending(v => v.MsrcExploited).ThenByDescending(v => v.CvssBase ?? 0).ThenBy(v => v.CveId, StringComparer.Ordinal)
                 .ToList();
+            var holds = await UpdateHoldEndpoints.Visible(db, tenant).Where(h => h.UpdateGuid == updateGuid && h.ReleasedAt == null)
+                .OrderBy(h => h.OrganizationId != null).ThenBy(h => h.CreatedAt).ToListAsync(ct);
+            var holdDtos = await UpdateHoldEndpoints.ToDtosAsync(db, holds, user, tenant, ct);
+            var onHold = holds.Exists(h => h.OrganizationId is null || organizationId is null || h.OrganizationId == organizationId);
             var summary = new FleetUpdateDto(updateGuid, u.Title, u.PrimaryKb, u.Category, u.MsrcSeverity, u.ReleaseDate, u.MaxDownloadSizeBytes,
                 states?.Missing ?? 0, states?.Failed ?? 0, states?.Installed ?? 0, states?.PendingReboot ?? 0, states?.Excluded ?? 0,
-                Mapping.Package(u, null), cves.Count, (states?.KnownExploited ?? 0) > 0, states?.Reoffered ?? 0);
+                Mapping.Package(u, null), cves.Count, (states?.KnownExploited ?? 0) > 0, states?.Reoffered ?? 0, onHold);
             return TypedResults.Ok(new FleetUpdateDetailDto(summary, u.Description, u.SupportUrl, u.KbNumbers, u.Products, u.MsClassification,
-                u.RebootBehavior is > 0, u.SupersededUpdateGuids, vulnerabilities));
+                u.RebootBehavior is > 0, u.SupersededUpdateGuids, vulnerabilities, holdDtos));
         });
 
         g.MapGet("/{updateGuid:guid}/endpoints", async (Guid updateGuid, EndpointUpdateState? state, Guid? organizationId, Guid? siteId, int? page,
@@ -294,9 +301,14 @@ public static class FleetUpdateEndpoints
 
         // Rolling back an update across endpoints: one uninstall-update job per endpoint that reports it installed.
         g.MapPost("/{updateGuid:guid}/uninstall", async (Guid updateGuid, FleetUninstallRequest request, EasyPatchDbContext db, ITenantContext tenant,
-            UpdateRemovalService removals, CancellationToken ct) =>
+            ClaimsPrincipal user, UpdateRemovalService removals, UpdateHoldService holdService, CancellationToken ct) =>
         {
             new Validator().Optional("reason", request.Reason, 500).ThrowIfInvalid();
+            if (request.Hold)
+            {
+                await UpdateHoldEndpoints.EnsureCanHoldAsync(db, tenant, user, request.OrganizationId, ct);
+            }
+
             var query = Scope(db, tenant, request.OrganizationId, request.SiteId)
                 .Where(x => x.UpdateGuid == updateGuid && (x.State == EndpointUpdateState.Installed || x.State == EndpointUpdateState.PendingReboot));
             if (request.EndpointIds is { Count: > 0 } ids)
@@ -322,8 +334,35 @@ public static class FleetUpdateEndpoints
                 }
             }
 
+            // Held even when no endpoint had it installed: the point is that the others do not install it.
+            if (request.Hold && !await holdService.IsHeldAsync(updateGuid, request.OrganizationId, ct))
+            {
+                try
+                {
+                    await holdService.HoldAsync(updateGuid, request.OrganizationId, reason ?? "Removed with EasyPatch", ct);
+                }
+                catch (AppException ex) when (ex.Code == "already_held")
+                {
+                    // Held concurrently: nothing to do.
+                }
+            }
+
             return TypedResults.Ok(new BulkResultDto(results.Count(r => r.Success), results.Count(r => !r.Success), results));
         }).RequireAuthorization(Policies.Operator);
+    }
+
+    /// <summary>Updates with an active hold for every organization, or for the organization in scope (any organization the
+    /// administrator can access when none is selected).</summary>
+    private static async Task<HashSet<Guid>> HeldAsync(EasyPatchDbContext db, ITenantContext tenant, Guid? organizationId, IReadOnlyList<Guid> guids,
+        CancellationToken ct)
+    {
+        var holds = UpdateHoldEndpoints.Visible(db, tenant).Where(h => h.ReleasedAt == null && guids.Contains(h.UpdateGuid));
+        if (organizationId is { } org)
+        {
+            holds = holds.Where(h => h.OrganizationId == null || h.OrganizationId == org);
+        }
+
+        return (await holds.Select(h => h.UpdateGuid).Distinct().ToListAsync(ct)).ToHashSet();
     }
 
     private static IQueryable<EndpointUpdate> Scope(EasyPatchDbContext db, ITenantContext tenant, Guid? organizationId, Guid? siteId)

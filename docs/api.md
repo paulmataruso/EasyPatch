@@ -141,7 +141,7 @@ Invalid values return `400 validation_failed`.
 | GET | `/alerts/summary` | Viewer. `{open, acknowledged, critical, warning, info}` over unresolved alerts the user can see (`open` excludes acknowledged ones). |
 | POST | `/alerts/acknowledge` | Operator. `{alertIds[]}` (1-500) → `{acknowledged}`. Only open alerts the user can see are acknowledged; acknowledged alerts get no reminders. |
 | GET | `/alert-rules/types` | SuperAdmin. Per rule type: threshold unit, minimum, maximum, default, and whether a tag filter is allowed. |
-| GET/POST | `/alert-rules` | SuperAdmin. `{name, type, enabled, severity, threshold?, organizationId?, tagId?, channelIds[]?, notifyOnResolve, renotifyHours (0-720)}`. Types and thresholds: `EndpointOffline` (hours, 1-720), `InstallFailed`, `SecurityUpdateMissing` (days after the update became required, 0-365), `ScanStale`, `RestartPending` (days, 1-90), `EnrollmentPending` (no tag), `OsUnsupported` (days before end of support, 0-365). At most 20 channels. GET items add `thresholdUnit` and `unresolvedAlerts`. |
+| GET/POST | `/alert-rules` | SuperAdmin. `{name, type, enabled, severity, threshold?, organizationId?, tagId?, channelIds[]?, notifyOnResolve, renotifyHours (0-720)}`. Types and thresholds: `EndpointOffline` (hours, 1-720), `InstallFailed`, `SecurityUpdateMissing` (days after the update became required, 0-365), `ScanStale`, `RestartPending` (days, 1-90), `EnrollmentPending` (no tag), `OsUnsupported` (days before end of support, 0-365), `KnownExploitedMissing`, `UpdateHeld` (no tag; one alert per organization). At most 20 channels. GET items add `thresholdUnit` and `unresolvedAlerts`. |
 | PUT/DELETE | `/alert-rules/{id}` | SuperAdmin. Changing the type, threshold, organization or tag, disabling the rule or deleting it closes its unresolved alerts without notifications. |
 | GET/PUT | `/notifications/settings` | SuperAdmin. `{smtpHost, smtpPort, smtpSecurity (StartTls, SslOnConnect, None), smtpSkipCertificateValidation, smtpUsername, smtpPassword, fromAddress, fromName, allowPrivateNetworkWebhooks}`. `smtpSkipCertificateValidation` (default `false`) accepts any certificate from the SMTP server; it is stored as `false` when `smtpSecurity` is `None`. `smtpPassword`: `null` keeps the stored password, `""` removes it. GET never returns the password, only `smtpPasswordConfigured`. |
 | GET/POST | `/notifications/channels` | SuperAdmin. `{name, type (Email, Webhook), enabled, emailRecipients[] (1-20 plain addresses), webhookFormat (Generic, Slack, Teams), webhookUrl (https)}`. Responses are `{channel, signingSecret}`; `signingSecret` is set only when a generic webhook is created (shown once). Channels show `webhookHost` and `hasSigningSecret`, never the URL or the secret, plus the last delivery. |
@@ -157,7 +157,7 @@ Invalid values return `400 validation_failed`.
 | GET | `/endpoints` | Filters: `organizationId, siteId, search, compliance, online, os, rebootPending, outdatedAgent, status, tagId, knownExploited`. Each item includes `tags` (with `inheritedFrom`: `null` for the endpoint's own tags, `Site` or `Organization` for tags it has through its site or organization; `tagId` matches all three), `missingDeferredCount` (updates inside their rollout delay) and `knownExploitedMissingCount` (outstanding allowed updates that fix a CISA known-exploited vulnerability). Sort: `hostname` (default), `organization, site, os, missing, knownExploited, lastCheckIn, compliance, agentVersion`. |
 | GET/PUT/DELETE | `/endpoints/{id}` | GET includes `platform` (`Windows` or `Linux`) and, for Linux, `linux`: `osId`, `osVersion`, `kernelVersion`, `packageManager`, `keyProtection`. For Windows, `applications` describes application updates: `enabled` (effective policy), `supported` (agent 1.4.0 or newer), `approvedApps` (count), `wingetVersion`, `lastCheckAt`, `lastError`, `wingetSetupError` (why the agent could not install winget, 1.7.0 and later) and `serverCopyError` (why the server could not download its own copy, shown with a setup error). PUT: `siteId`, `notes`, `esuOverride`. DELETE revokes the credentials and removes the record. |
 | POST | `/endpoints/{id}/revoke` | `{reason?}`. Revokes all credentials; the agent can no longer call the server. |
-| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification, reoffered and excluded updates, with the live state of an active job overlaid (`activeJob`; its `jobType` is `InstallUpdates` or `UninstallUpdate`). `deferredUntil` is set while an update is inside its rollout delay. `cveIds`, `knownExploited` and `kevDueDate` (the earliest CISA due date) describe the vulnerabilities the update fixes on this endpoint; known-exploited updates are listed first within each state. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). Application updates (category `Application`) include `package` with the winget package ID as the name, the target and installed versions and `winget` as the repository. |
+| GET | `/endpoints/{id}/updates` | `?state=&category=&requiredOnly=`. Missing, failed, pending-reboot, pending-verification, reoffered and excluded updates, with the live state of an active job overlaid (`activeJob`; its `jobType` is `InstallUpdates` or `UninstallUpdate`). `deferredUntil` is set while an update is inside its rollout delay; `holdReason` while a missing or failed update is on hold. `cveIds`, `knownExploited` and `kevDueDate` (the earliest CISA due date) describe the vulnerabilities the update fixes on this endpoint; known-exploited updates are listed first within each state. Linux updates include `package` (name, architecture, version, the endpoint's installed version, repository, advisories). Application updates (category `Application`) include `package` with the winget package ID as the name, the target and installed versions and `winget` as the repository. |
 | GET | `/endpoints/{id}/installed-updates` | Updates confirmed installed by a scan, with an active removal job overlaid (`activeJob`) |
 | GET | `/endpoints/{id}/update-history` | Windows Update history (`?search=&page=&pageSize=`). Always empty for Linux endpoints |
 | GET | `/endpoints/{id}/events` | Agent and server activity (`?severity=&page=&pageSize=`) |
@@ -197,9 +197,27 @@ MSRC title, severity and CVSS where available and the CISA KEV fields `kev`, `ke
 (`?state=&organizationId=&siteId=&page=&pageSize=`) and
 `POST /updates/{updateGuid}/install` (Operator; `{organizationId?, siteId?, endpointIds?}`
 creates a `Selected` install job on each affected endpoint, at most 1000).
-`POST /updates/{updateGuid}/uninstall` (Operator; `{organizationId?, siteId?, endpointIds?, block, reason?}`)
+`POST /updates/{updateGuid}/uninstall` (Operator; `{organizationId?, siteId?, endpointIds?, block, reason?, hold}`)
 creates an `UninstallUpdate` job on each endpoint in scope that reports the update `Installed` or
 `PendingReboot` (at most 1000), with the same per-endpoint outcome and error codes as the endpoint route.
+`hold: true` also puts the update on hold for `organizationId`, or for every organization when it is
+omitted (SuperAdmin only, otherwise `403`), even when no endpoint had it installed.
+
+### Update holds
+
+An update on hold is not installed automatically (see
+[architecture.md](architecture.md#update-holds-and-the-rollout-guard)). `GET /updates` items and
+`GET /updates/{updateGuid}` add `onHold` (a hold for every organization, or for the organization in
+scope or any organization you can access); `GET /updates/{updateGuid}` adds `holds`, the active
+holds you can see. `GET /endpoints/{id}/updates` adds `holdReason` to missing and failed updates
+on hold for the endpoint's organization. The install preview skips held updates with reason `Held`
+unless they are selected, and then adds a warning.
+
+| Method | Route | Notes |
+|---|---|---|
+| GET | `/update-holds` | Viewer. `?updateGuid=&active=` (`active` defaults to `true`; `false` includes released holds). Holds for every organization and for organizations you can access, newest first, at most 500: `{id, updateGuid, title, kbNumber, organizationId, organizationName, source (Automatic, Manual), reason, failedEndpoints, attemptedEndpoints, createdAt, createdBy, releasedAt, releasedBy, canRelease}`. `organizationId` is `null` for a hold for every organization. Automatic holds come from the rollout guard and carry the failure counts. |
+| POST | `/updates/{updateGuid}/holds` | Operator. `{organizationId?, reason}` (reason 1-500 characters) → `201` with the hold. Without `organizationId` the update is held for every organization (SuperAdmin only, otherwise `403`). `404` for an unknown update or an organization you cannot access, `409 already_held`. |
+| POST | `/update-holds/{id}/release` | Operator with access to the hold's organization; SuperAdmin for a hold for every organization (otherwise `403`). Returns the released hold. |
 
 ### Jobs
 
@@ -237,7 +255,7 @@ creates an `UninstallUpdate` job on each endpoint in scope that reports the upda
 | GET | `/reports/compliance/trend` (`organizationId, from, to`) | Viewer |
 | GET | `/reports/installations` (`from, to, organizationId, siteId, endpointId, category, result, page, pageSize`) and `/reports/installations.csv` | Viewer |
 | GET | `/audit-logs` (`userId, organizationId, action` (prefix), `from, to, page, pageSize`) | Operator. Users restricted to some organizations only see entries for those organizations. |
-| GET/PUT | `/settings` | GET Viewer, PUT SuperAdmin |
+| GET/PUT | `/settings` | GET Viewer, PUT SuperAdmin. Includes the rollout guard: `rolloutGuardEnabled` (default `true`), `rolloutGuardMinFailedEndpoints` (1-1000, default 3), `rolloutGuardFailurePercent` (1-100, default 20) and `rolloutGuardWindowDays` (1-90, default 7). |
 | GET | `/server-info` (version, public URL, server time) | Viewer |
 | GET | `/vulnerability-feeds` (state of the `kev`, `msrc` and `debian` downloads: last attempt and success, sanitized error, version, entries) | Viewer |
 | GET/POST, PUT/DELETE | `/lifecycle`, `/lifecycle/{id}` (OS lifecycle table) | GET Viewer, writes SuperAdmin |

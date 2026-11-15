@@ -26,6 +26,10 @@ public enum AlertRuleType
 
     /// <summary>An endpoint is missing an update that fixes a CVE in the CISA Known Exploited Vulnerabilities catalog.</summary>
     KnownExploitedMissing,
+
+    /// <summary>An update that endpoints of the organization still need is on hold (by the rollout guard or an
+    /// administrator), so EasyPatch does not install it automatically.</summary>
+    UpdateHeld,
 }
 
 public enum AlertSeverity

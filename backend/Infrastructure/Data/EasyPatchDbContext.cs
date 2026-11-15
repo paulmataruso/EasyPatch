@@ -36,6 +36,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
     public DbSet<Update> Updates => Set<Update>();
     public DbSet<EndpointUpdate> EndpointUpdates => Set<EndpointUpdate>();
     public DbSet<UpdateExclusion> UpdateExclusions => Set<UpdateExclusion>();
+    public DbSet<UpdateHold> UpdateHolds => Set<UpdateHold>();
     public DbSet<UpdateScan> UpdateScans => Set<UpdateScan>();
     public DbSet<UpdateHistoryEntry> UpdateHistoryEntries => Set<UpdateHistoryEntry>();
     public DbSet<Job> Jobs => Set<Job>();
@@ -85,6 +86,7 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
         configurationBuilder.Properties<SmtpSecurity>().HaveConversion<string>().HaveMaxLength(32);
         configurationBuilder.Properties<NotificationKind>().HaveConversion<string>().HaveMaxLength(32);
         configurationBuilder.Properties<DeliveryStatus>().HaveConversion<string>().HaveMaxLength(32);
+        configurationBuilder.Properties<UpdateHoldSource>().HaveConversion<string>().HaveMaxLength(32);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -398,6 +400,18 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.Property(x => x.Reason).HasMaxLength(500);
             e.HasIndex(x => new { x.EndpointId, x.UpdateGuid }).IsUnique();
             e.HasOne<Endpoint>().WithMany().HasForeignKey(x => x.EndpointId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<UpdateHold>(e =>
+        {
+            e.ToTable("update_holds");
+            e.Property(x => x.Reason).HasMaxLength(500);
+            e.Property(x => x.CreatedBy).HasMaxLength(100);
+            e.Property(x => x.ReleasedBy).HasMaxLength(100);
+            // At most one active hold per update for all organizations, and one per update and organization.
+            e.HasIndex(x => x.UpdateGuid).IsUnique().HasFilter("organization_id IS NULL AND released_at IS NULL");
+            e.HasIndex(x => new { x.UpdateGuid, x.OrganizationId }).IsUnique().HasFilter("organization_id IS NOT NULL AND released_at IS NULL");
+            e.HasIndex(x => x.ReleasedAt);
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<UpdateScan>(e =>
         {

@@ -68,7 +68,7 @@ public sealed class AlertTests(PostgresFixture postgres) : IntegrationTest(postg
     {
         var rules = await root.GetAsync<List<AlertRuleDto>>("/api/v1/alert-rules");
         Assert.Equal(AlertRuleCatalog.Defaults(DateTimeOffset.UnixEpoch).Count, rules.Count);
-        Assert.Equal(8, rules.Count);
+        Assert.Equal(9, rules.Count);
         Assert.Equal(AlertSeverity.Critical, rules.Single(r => r.Type == AlertRuleType.KnownExploitedMissing).Severity);
         Assert.All(rules, r => Assert.True(r.Enabled));
         Assert.All(rules, r => Assert.Empty(r.ChannelIds));

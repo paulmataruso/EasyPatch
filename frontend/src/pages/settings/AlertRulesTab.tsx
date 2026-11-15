@@ -32,6 +32,8 @@ const RULE_HELP: Record<AlertRuleType, string> = {
   OsUnsupported: 'The operating system no longer receives security updates, or support ends within the threshold.',
   KnownExploitedMissing:
     'An endpoint is missing an allowed update that fixes a vulnerability in the CISA Known Exploited Vulnerabilities catalog (attackers are using it).',
+  UpdateHeld:
+    'An update that endpoints still need is on hold (by the rollout guard or an administrator), so it is not installed automatically (one alert per organization).',
 };
 
 function thresholdText(rule: AlertRuleDto): string {
@@ -315,7 +317,7 @@ function RuleDialog({ rule, channels, tags, onClose }: {
               label="Tag"
               value={form.tagId ?? ''}
               disabled={spec?.supportsTag === false}
-              hint={spec?.supportsTag === false ? 'Enrollment requests have no tags.' : 'Only endpoints with this tag.'}
+              hint={spec?.supportsTag === false ? 'This rule raises one alert per organization, not per endpoint.' : 'Only endpoints with this tag.'}
               onChange={(e) => setForm({ ...form, tagId: e.target.value || null })}
             >
               <option value="">Any tag</option>

@@ -32,6 +32,15 @@ public sealed record ServerSettings
     /// <summary>Optional "Prepared by" line on monthly reports (your company name).</summary>
     public string? ReportBrandName { get; init; }
 
+    /// <summary>The rollout guard holds a Windows update for every organization when its latest installation failed on at least
+    /// <see cref="RolloutGuardMinFailedEndpoints"/> endpoints and <see cref="RolloutGuardFailurePercent"/> percent of the endpoints that
+    /// tried to install it in the last <see cref="RolloutGuardWindowDays"/> days.</summary>
+    public bool RolloutGuardEnabled { get; init; } = true;
+
+    public int RolloutGuardMinFailedEndpoints { get; init; } = 3;
+    public int RolloutGuardFailurePercent { get; init; } = 20;
+    public int RolloutGuardWindowDays { get; init; } = 7;
+
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
@@ -61,6 +70,9 @@ public sealed record ServerSettings
         Range(nameof(RetentionScansDays), RetentionScansDays, 7, 3650);
         Range(nameof(RetentionHistoryDays), RetentionHistoryDays, 30, 3650);
         Range(nameof(RetentionReportsMonths), RetentionReportsMonths, 1, 120);
+        Range(nameof(RolloutGuardMinFailedEndpoints), RolloutGuardMinFailedEndpoints, 1, 1000);
+        Range(nameof(RolloutGuardFailurePercent), RolloutGuardFailurePercent, 1, 100);
+        Range(nameof(RolloutGuardWindowDays), RolloutGuardWindowDays, 1, 90);
         if (ReportBrandName is { } brand && (brand.Length > 100 || brand.Any(char.IsControl)))
         {
             errors.Add("ReportBrandName must be at most 100 characters, without control characters.");

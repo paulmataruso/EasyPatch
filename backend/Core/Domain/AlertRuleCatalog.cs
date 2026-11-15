@@ -17,8 +17,9 @@ public static class AlertRuleCatalog
         _ => null,
     };
 
-    /// <summary>Rules that look at one endpoint (all except <see cref="AlertRuleType.EnrollmentPending"/>).</summary>
-    public static bool IsEndpointRule(AlertRuleType type) => type != AlertRuleType.EnrollmentPending;
+    /// <summary>Rules that look at one endpoint (all except <see cref="AlertRuleType.EnrollmentPending"/> and
+    /// <see cref="AlertRuleType.UpdateHeld"/>, which raise one alert per organization).</summary>
+    public static bool IsEndpointRule(AlertRuleType type) => type is not (AlertRuleType.EnrollmentPending or AlertRuleType.UpdateHeld);
 
     public static IReadOnlyList<string> Validate(AlertRule rule)
     {
@@ -75,6 +76,7 @@ public static class AlertRuleCatalog
         Rule("7c3e1a52-6f0e-4d7b-9a01-000000000007", "Operating system unsupported", AlertRuleType.OsUnsupported, AlertSeverity.Warning, at),
         Rule("7c3e1a52-6f0e-4d7b-9a01-000000000008", "Known-exploited vulnerability unpatched", AlertRuleType.KnownExploitedMissing,
             AlertSeverity.Critical, at),
+        Rule("7c3e1a52-6f0e-4d7b-9a01-000000000009", "Update on hold", AlertRuleType.UpdateHeld, AlertSeverity.Warning, at),
     ];
 
     private static AlertRule Rule(string id, string name, AlertRuleType type, AlertSeverity severity, DateTimeOffset at) => new()

@@ -429,6 +429,40 @@ An `UninstallUpdate` job rolls back one installed Windows update on one endpoint
   that follow do: until the endpoint restarts, Windows usually still lists the update as
   installed. DISM writes its log to `C:\ProgramData\EasyPatch\logs\update-removal.log`.
 
+### Update holds and the rollout guard
+
+An update on hold is not installed automatically. A hold applies to one organization or to every
+organization (`update_holds`, at most one active hold per update and scope).
+
+* **What a hold does.**
+  * The install preview leaves held updates out of "install all" jobs (skip reason `Held`) by
+    adding them to the job's excluded updates, and maintenance-window jobs do not list them. An
+    endpoint that only misses held updates gets no scheduled job.
+  * When an endpoint picks up a queued job, held updates are left out of it if the job is
+    scheduled or an "install all" job, even when the hold was created after the job was queued.
+    Their planned items are skipped with `Held`, and a scheduled job with nothing else left is
+    cancelled.
+  * An update an administrator selected by hand is still installed. The install preview warns
+    that it is on hold.
+  * The endpoint's *Updates* tab, the update list and the update's page show *On hold*. The
+    *Update on hold* alert (one per organization) opens while endpoints of the organization still
+    miss a held update.
+* **The rollout guard** (worker task `rollout-guard`, every 5 minutes; **Settings → Server
+  settings → Rollout guard**, on by default). It looks at install jobs on Windows endpoints in the
+  last 7 days (application updates are not counted). For each update it takes every endpoint's
+  latest result. When the update failed on at least 3 endpoints and at least 20% of the endpoints
+  that tried to install it, the guard holds it for every organization. The reason states the counts.
+  The three numbers are server settings. Results from before an administrator released a hold
+  for every organization are not counted again.
+* **Pilot groups.** The guard works best with a rollout delay: give a pilot site or tag a shorter
+  delay than the others. The pilot endpoints install an update first, and if it fails there, it
+  is held before the other endpoints are due.
+* **Who holds and releases.** Operators hold and release updates for organizations they can
+  access, on the update's page, or when they remove an update from endpoints (*Also put it on
+  hold*). Only super administrators hold an update for every organization or release such a hold,
+  including the guard's. Holding and releasing are audited (`update.hold`,
+  `update.hold_released`).
+
 ## 5. Agent lifecycle
 
 ```

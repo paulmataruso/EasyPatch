@@ -327,6 +327,9 @@ public static class SkipReasons
     /// <summary>An uninstall job found the update not installed (already removed).</summary>
     public const string NotInstalled = "NotInstalled";
 
+    /// <summary>Server only: the update is on hold (rollout guard or an administrator); only installed when selected.</summary>
+    public const string Held = "Held";
+
     public static string Describe(string? reason) => reason switch
     {
         AlreadyInstalled => "Already installed",
@@ -342,6 +345,7 @@ public static class SkipReasons
         ApplicationNotApproved => "Application not approved by policy",
         Reoffered => "Offered again after a successful installation (select it to install it anyway)",
         NotInstalled => "Not installed",
+        Held => "On hold (not installed automatically)",
         Cancelled => "Cancelled",
         null => "",
         _ => reason,

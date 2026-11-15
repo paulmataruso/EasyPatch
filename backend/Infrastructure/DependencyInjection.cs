@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.AddScoped<InstallPreviewService>();
         services.AddScoped<JobService>();
         services.AddScoped<UpdateRemovalService>();
+        services.AddScoped<UpdateHoldService>();
         services.AddScoped<EnrollmentService>();
         services.AddScoped<CheckInService>();
 
@@ -133,6 +134,7 @@ public static class DependencyInjection
         services.AddScoped<VulnerabilityFeedTask>();
         services.AddScoped<MonthlyReportTask>();
         services.AddScoped<WingetMirrorTask>();
+        services.AddScoped<RolloutGuardTask>();
         services.AddSingleton<MaintenanceHeartbeat>();
         services.AddHostedService<MaintenanceLoop<JobMaintenanceTask>>();
         services.AddHostedService<MaintenanceLoop<PresenceMonitorTask>>();
@@ -147,6 +149,7 @@ public static class DependencyInjection
         services.AddHostedService<MaintenanceLoop<VulnerabilityFeedTask>>();
         services.AddHostedService<MaintenanceLoop<MonthlyReportTask>>();
         services.AddHostedService<MaintenanceLoop<WingetMirrorTask>>();
+        services.AddHostedService<MaintenanceLoop<RolloutGuardTask>>();
         return services;
     }
 }
