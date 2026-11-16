@@ -215,8 +215,9 @@ STARTTLS or TLS. Release 1.7.0 adds the `winget` volume (written by the `worker`
 rule, *Update on hold*, and the rollout guard, which is on by default (**Settings → Server
 settings → Rollout guard**; see [architecture.md](architecture.md#update-holds-and-the-rollout-guard)).
 It also adds the `api_tokens` table; no API tokens exist until a super administrator creates one.
-Release 1.9.0 adds the experimental macOS agent and no database changes; nothing changes for
-Windows and Linux agents unless you copy macOS packages to `data/agent-packages/`.
+Release 1.9.0 adds the experimental macOS agent and no database changes. For Windows and Linux
+agents, 1.9.0 only fixes when the agent log is rotated (see the [changelog](../CHANGELOG.md)). The
+console's macOS install script needs the macOS packages in `data/agent-packages/`.
 
 ## Backup and restore
 

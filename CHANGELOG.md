@@ -42,6 +42,11 @@ the web console and the agents share one version number.
 - The server only offers an agent update in the package format of the endpoint's own platform
   (MSI for Windows, `.deb` or `.rpm` for Linux, `.pkg` for macOS).
 
+### Fixed
+
+- Agents (all platforms) rotate their log before writing to it instead of after, so `agent.log`
+  always holds the newest lines; right after a rotation it could be missing until the next line.
+
 ## [1.8.0] - 2026-11-15
 
 Items marked *Needs Windows agent 1.8.0* are not offered to older agents: removing an update from

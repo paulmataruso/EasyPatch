@@ -69,6 +69,13 @@ public sealed class RollingFileLoggerProvider : ILoggerProvider
         {
             try
             {
+                // Rotate before writing, not after: the newest lines are then always in the current file.
+                var current = new FileInfo(_path);
+                if (current.Exists && current.Length >= _options.MaxFileBytes)
+                {
+                    Rotate();
+                }
+
                 using var stream = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
                 using var writer = new StreamWriter(stream, new UTF8Encoding(false));
                 while (reader.TryRead(out var line))
@@ -81,11 +88,6 @@ public sealed class RollingFileLoggerProvider : ILoggerProvider
                 }
 
                 await writer.FlushAsync().ConfigureAwait(false);
-                if (stream.Length >= _options.MaxFileBytes)
-                {
-                    await writer.DisposeAsync().ConfigureAwait(false);
-                    Rotate();
-                }
             }
             catch (IOException)
             {
