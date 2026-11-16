@@ -5,11 +5,12 @@ using EasyPatch.Contracts.Json;
 
 // easypatch-release: the release key for agent self-update.
 //
-//   generate-key [--out <private.pem>]          create a key pair (refuses to overwrite)
-//   sign --key <private.pem> <msi>...            write <msi>.sig next to each package
-//   verify --public-key <public.pem> <msi>...    check packages and their .sig files
-//   public-key --key <private.pem>               print the public key (PEM)
+//   generate-key [--out <private.pem>]              create a key pair (refuses to overwrite)
+//   sign --key <private.pem> <package>...            write <package>.sig next to each package
+//   verify --public-key <public.pem> <package>...    check packages and their .sig files
+//   public-key --key <private.pem>                   print the public key (PEM)
 //
+// Packages are agent packages: EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm|pkg>.
 // The private key must stay on the build machine. Set EASYPATCH_RELEASE_KEY_PASSWORD to encrypt it (generate-key) and
 // to read an encrypted key (sign, public-key).
 
@@ -88,7 +89,7 @@ int Sign(string privatePath, IReadOnlyList<string> packages)
 {
     if (packages.Count == 0)
     {
-        throw new UsageException("sign needs at least one MSI");
+        throw new UsageException("sign needs at least one agent package");
     }
 
     using var key = LoadPrivateKey(privatePath);
@@ -109,7 +110,7 @@ int Verify(string publicPath, IReadOnlyList<string> packages)
 {
     if (packages.Count == 0)
     {
-        throw new UsageException("verify needs at least one MSI");
+        throw new UsageException("verify needs at least one agent package");
     }
 
     var keys = AgentRelease.ParsePublicKeys(File.ReadAllText(publicPath));
@@ -263,10 +264,11 @@ static int Usage(string? error = null)
 
     Console.Error.WriteLine("""
         usage: easypatch-release <command>
-          generate-key [--out <private.pem>]          create the release key (default ~/.easypatch/easypatch-release-key.pem)
-          sign [--key <private.pem>] <msi>...         write <msi>.sig for each agent package
-          verify [--public-key <public.pem>] <msi>... check packages against their .sig files
-          public-key [--key <private.pem>]            print the public key
+          generate-key [--out <private.pem>]              create the release key (default ~/.easypatch/easypatch-release-key.pem)
+          sign [--key <private.pem>] <package>...         write <package>.sig for each agent package
+          verify [--public-key <public.pem>] <package>... check packages against their .sig files
+          public-key [--key <private.pem>]                print the public key
+        Agent packages: EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm|pkg>.
         EASYPATCH_RELEASE_KEY_PASSWORD encrypts a new key and unlocks an encrypted one.
         """);
     return error is null ? 0 : 2;

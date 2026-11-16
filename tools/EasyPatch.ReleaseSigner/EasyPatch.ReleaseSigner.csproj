@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>EasyPatch.ReleaseSigner</RootNamespace>
     <AssemblyName>easypatch-release</AssemblyName>
-    <Description>Creates the EasyPatch release key and signs agent MSIs for agent self-update. Runs on the build machine, never on the server.</Description>
+    <Description>Creates the EasyPatch release key and signs agent packages (MSI, deb, rpm, pkg) for agent self-update. Runs on the build machine, never on the server.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\shared\EasyPatch.Contracts\EasyPatch.Contracts.csproj" />
