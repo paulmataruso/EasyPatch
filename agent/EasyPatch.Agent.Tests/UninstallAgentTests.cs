@@ -5,6 +5,7 @@ using EasyPatch.Contracts;
 using EasyPatch.Contracts.Agent;
 using EasyPatch.Linux.Packages;
 using EasyPatch.Linux.Platform;
+using EasyPatch.Unix;
 using Xunit;
 
 namespace EasyPatch.Agent.Tests;

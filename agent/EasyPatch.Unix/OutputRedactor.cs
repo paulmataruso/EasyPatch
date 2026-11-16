@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace EasyPatch.Linux.Platform;
+namespace EasyPatch.Unix;
 
 /// <summary>Removes credentials from package-manager output before it is logged or sent to the server: repository URLs
 /// may carry a user name and password or token (<c>https://user:secret@host/…</c>).</summary>

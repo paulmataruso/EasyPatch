@@ -30,12 +30,15 @@ public static class AgentPlatforms
     public const string Windows = "Windows";
     public const string Linux = "Linux";
 
+    /// <summary>The macOS agent (1.9.0 and later). Experimental: in development and not for production use.</summary>
+    public const string MacOS = "macOS";
+
     /// <summary>The platform an agent reported: <see cref="Windows"/> when it did not say (agents before 1.3.0 only ran on
     /// Windows), null for an unknown value.</summary>
     public static string? Normalize(string? platform) => platform switch
     {
         null => Windows,
-        Windows or Linux => platform,
+        Windows or Linux or MacOS => platform,
         _ => null,
     };
 }
@@ -55,10 +58,10 @@ public sealed record DeviceIdentity
     /// <summary><see cref="AgentPlatforms"/> value; absent from Windows agents before 1.3.0.</summary>
     public string? Platform { get; init; }
 
-    /// <summary>Linux: os-release <c>ID</c>, e.g. <c>ubuntu</c>, <c>debian</c>, <c>rhel</c>, <c>rocky</c>.</summary>
+    /// <summary>Linux: os-release <c>ID</c>, e.g. <c>ubuntu</c>, <c>debian</c>, <c>rhel</c>, <c>rocky</c>; <c>macos</c> on macOS.</summary>
     public string? OsId { get; init; }
 
-    /// <summary>Linux: os-release <c>VERSION_ID</c>, e.g. <c>24.04</c>, <c>12</c>, <c>9.4</c>.</summary>
+    /// <summary>Linux: os-release <c>VERSION_ID</c>, e.g. <c>24.04</c>, <c>12</c>, <c>9.4</c>; macOS: <c>sw_vers</c> ProductVersion, e.g. <c>15.7.2</c>.</summary>
     public string? OsVersion { get; init; }
 }
 
@@ -585,16 +588,19 @@ public sealed record InventoryReport
     /// <summary><see cref="AgentPlatforms"/> value; absent from Windows agents before 1.3.0.</summary>
     public string? Platform { get; init; }
 
-    /// <summary>Linux: os-release <c>ID</c> (<c>ubuntu</c>, <c>debian</c>, <c>rhel</c>, <c>rocky</c>, <c>almalinux</c>, <c>ol</c>).</summary>
+    /// <summary>Linux: os-release <c>ID</c> (<c>ubuntu</c>, <c>debian</c>, <c>rhel</c>, <c>rocky</c>, <c>almalinux</c>, <c>ol</c>); <c>macos</c> on macOS.</summary>
     public string? OsId { get; init; }
 
-    /// <summary>Linux: os-release <c>VERSION_ID</c>.</summary>
+    /// <summary>Linux: os-release <c>VERSION_ID</c>; macOS: <c>sw_vers</c> ProductVersion (<c>15.7.2</c>).</summary>
     public string? OsVersion { get; init; }
 
-    /// <summary>Linux: running kernel release (<c>uname -r</c>).</summary>
+    /// <summary>macOS: the build (<c>sw_vers</c> BuildVersion, e.g. <c>24G325</c>).</summary>
+    public string? OsBuildVersion { get; init; }
+
+    /// <summary>Linux: running kernel release (<c>uname -r</c>); macOS: the Darwin kernel release.</summary>
     public string? KernelVersion { get; init; }
 
-    /// <summary>Linux: <c>apt</c> or <c>dnf</c>.</summary>
+    /// <summary>Linux: <c>apt</c> or <c>dnf</c>; macOS: <c>softwareupdate</c>.</summary>
     public string? PackageManager { get; init; }
 
     /// <summary>How the agent's private key is protected at rest: <c>dpapi</c>, <c>systemd-creds-tpm2</c>,

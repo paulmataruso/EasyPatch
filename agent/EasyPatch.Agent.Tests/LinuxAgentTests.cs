@@ -6,6 +6,8 @@ using EasyPatch.Contracts.Updates;
 using EasyPatch.Linux.Packages;
 using EasyPatch.Linux.Platform;
 using EasyPatch.Linux.Processes;
+using EasyPatch.Unix;
+using EasyPatch.Unix.Processes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 

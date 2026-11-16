@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 
-namespace EasyPatch.Linux.Processes;
+namespace EasyPatch.Unix.Processes;
 
 /// <summary>Output of a finished command.</summary>
 public sealed record CommandResult(int ExitCode, string StandardOutput, string StandardError)

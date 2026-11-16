@@ -28,5 +28,10 @@
     <ProjectReference Include="..\EasyPatch.Agent.Core\EasyPatch.Agent.Core.csproj" />
     <ProjectReference Include="..\EasyPatch.Communication\EasyPatch.Communication.csproj" />
     <ProjectReference Include="..\EasyPatch.Linux\EasyPatch.Linux.csproj" />
+    <ProjectReference Include="..\EasyPatch.Unix\EasyPatch.Unix.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="EasyPatch.Unix" />
+    <Using Include="EasyPatch.Unix.Processes" />
   </ItemGroup>
 </Project>

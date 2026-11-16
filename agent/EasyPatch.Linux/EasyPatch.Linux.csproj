@@ -10,6 +10,11 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\EasyPatch.Agent.Core\EasyPatch.Agent.Core.csproj" />
+    <ProjectReference Include="..\EasyPatch.Unix\EasyPatch.Unix.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="EasyPatch.Unix" />
+    <Using Include="EasyPatch.Unix.Processes" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="EasyPatch.Agent.Tests" />

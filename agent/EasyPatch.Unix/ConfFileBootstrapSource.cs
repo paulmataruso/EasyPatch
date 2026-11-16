@@ -3,15 +3,17 @@ using EasyPatch.Agent.Core.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace EasyPatch.Linux.Platform;
+namespace EasyPatch.Unix;
 
 /// <summary>
-/// Bootstrap settings in <c>/etc/easypatch/agent.conf</c> (<c>Key=value</c> lines; root-only, mode 0600). The installer or
+/// Bootstrap settings in <c>agent.conf</c> (<c>/etc/easypatch/agent.conf</c> on Linux, <c>/Library/EasyPatch/agent.conf</c> on macOS;
+/// <c>Key=value</c> lines; root-only, mode 0600). The installer or
 /// <c>easypatch-agent enroll</c> writes it; the enrollment token and deployment code are removed from it as soon as they
 /// have been used. Values are never logged.
 /// </summary>
 public sealed class ConfFileBootstrapSource : IBootstrapConfigSource
 {
+    /// <summary>The Linux location.</summary>
     public const string DefaultPath = "/etc/easypatch/agent.conf";
 
     private const UnixFileMode FileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;

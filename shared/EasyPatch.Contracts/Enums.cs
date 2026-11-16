@@ -143,6 +143,9 @@ public enum UpdateSourceType
 
     /// <summary>Linux: the repositories configured for apt or dnf.</summary>
     PackageRepositories,
+
+    /// <summary>macOS: Apple's software update service, through <c>softwareupdate</c> (experimental macOS agent).</summary>
+    AppleSoftwareUpdate,
 }
 
 public enum EnrollmentState

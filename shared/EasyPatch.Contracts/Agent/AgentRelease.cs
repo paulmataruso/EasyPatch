@@ -6,11 +6,11 @@ using System.Text.RegularExpressions;
 
 namespace EasyPatch.Contracts.Agent;
 
-/// <summary>What a release signature covers: one agent package (MSI, deb or rpm), identified by file name, version,
+/// <summary>What a release signature covers: one agent package (MSI, deb, rpm or pkg), identified by file name, version,
 /// architecture, size and SHA-256. Changing any of them (or the file) invalidates the signature.</summary>
 public sealed record AgentReleaseManifest
 {
-    /// <summary><c>EasyPatchAgent-&lt;version&gt;-&lt;architecture&gt;.&lt;msi|deb|rpm&gt;</c>; the extension is the
+    /// <summary><c>EasyPatchAgent-&lt;version&gt;-&lt;architecture&gt;.&lt;msi|deb|rpm|pkg&gt;</c>; the extension is the
     /// package format.</summary>
     public required string FileName { get; init; }
 
@@ -75,11 +75,14 @@ public static partial class AgentRelease
     /// <summary>RPM package (Red Hat Enterprise Linux and rebuilds).</summary>
     public const string FormatRpm = "rpm";
 
-    public static IReadOnlyList<string> PackageFormats { get; } = [FormatMsi, FormatDeb, FormatRpm];
+    /// <summary>macOS installer package (the experimental macOS agent, 1.9.0 and later).</summary>
+    public const string FormatPkg = "pkg";
+
+    public static IReadOnlyList<string> PackageFormats { get; } = [FormatMsi, FormatDeb, FormatRpm, FormatPkg];
 
     private const string Domain = "easypatch-agent-release-v1";
 
-    [GeneratedRegex(@"^EasyPatchAgent-(?<version>\d{1,5}\.\d{1,5}\.\d{1,5})-(?<arch>x64|arm64)\.(?<format>msi|deb|rpm)$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^EasyPatchAgent-(?<version>\d{1,5}\.\d{1,5}\.\d{1,5})-(?<arch>x64|arm64)\.(?<format>msi|deb|rpm|pkg)$", RegexOptions.CultureInvariant)]
     private static partial Regex FileNameRegex();
 
     [GeneratedRegex("^[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
@@ -188,7 +191,7 @@ public static partial class AgentRelease
         var match = FileNameRegex().Match(name);
         if (!match.Success)
         {
-            throw new ArgumentException($"'{name}' is not an agent package name (EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm>).", nameof(path));
+            throw new ArgumentException($"'{name}' is not an agent package name (EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm|pkg>).", nameof(path));
         }
 
         using var stream = File.OpenRead(path);
@@ -214,7 +217,7 @@ public static partial class AgentRelease
         var match = FileNameRegex().Match(manifest.FileName ?? string.Empty);
         if (!match.Success)
         {
-            errors.Add("The package file name is not EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm>.");
+            errors.Add("The package file name is not EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm|pkg>.");
         }
         else if (match.Groups["version"].Value != manifest.Version || match.Groups["arch"].Value != manifest.Architecture)
         {
@@ -234,7 +237,7 @@ public static partial class AgentRelease
         return errors;
     }
 
-    /// <summary>Package format (<see cref="FormatMsi"/>, <see cref="FormatDeb"/> or <see cref="FormatRpm"/>) of an agent
+    /// <summary>Package format (<see cref="FormatMsi"/>, <see cref="FormatDeb"/>, <see cref="FormatRpm"/> or <see cref="FormatPkg"/>) of an agent
     /// package file name, or null when it is not one.</summary>
     public static string? FormatOf(string? fileName)
     {
