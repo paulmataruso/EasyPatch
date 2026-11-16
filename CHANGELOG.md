@@ -1,7 +1,46 @@
 # Changelog
 
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
-the web console and both agents share one version number.
+the web console and the agents share one version number.
+
+## [1.9.0] - 2026-11-16
+
+> **The macOS agent added in this release is experimental: it is in development and not for
+> production use.** It has not yet been used to patch a real Mac. Use it only on test Macs you
+> can wipe. Nothing changes for Windows and Linux agents unless you copy the macOS packages to
+> `data/agent-packages/`.
+
+### Added
+
+- **macOS agent (experimental, not for production use)** for macOS 14 and later on Intel and
+  Apple silicon, as an unsigned `.pkg` (x64, arm64) built on Linux. It runs as the launchd
+  daemon `com.dhitechnical.easypatch.agent`, reports the updates Apple's `softwareupdate` offers
+  and the Mac's inventory, installs approved updates with `softwareupdate --install <label>`
+  (never `--restart`), restarts only for administrator restart jobs, updates itself from
+  release-signed `.pkg` packages and can be removed from the console or with
+  `sudo /Library/EasyPatch/uninstall.sh`. An update counts as installed only when a new listing
+  no longer shows it, or when `softwareupdate` says it is completed by a restart (then it is
+  shown as waiting for the restart); updates that disappear without a matching
+  `softwareupdate --history` entry are not reported installed, and an unreadable listing fails
+  the scan instead of reporting no updates. See [docs/macos-agent.md](docs/macos-agent.md).
+- Known limitations of the macOS agent: on Apple silicon it cannot install updates that need a
+  restart (every macOS update), because Apple allows only a volume owner or MDM to; those fail
+  at once with `macos_owner_required`. It gives no on-screen warning before a restart, the
+  package is not signed with an Apple Developer ID or notarized, its private key is protected by
+  file permissions only, and Macs have no CVE or end-of-support data.
+- Console: macOS endpoints are labelled *macOS (experimental)* and show a warning banner. The
+  deploy page has a **macOS (experimental)** tab with a `curl … | sudo sh` install script for
+  deployment codes, an enroll command for tokens, and a warning that lists the limitations.
+  Messages to users, update removal and downloads before the maintenance window are refused for
+  Macs (`409 not_supported_on_macos`).
+- `scripts/build-macos-packages.sh` builds and release-signs the `.pkg` packages on Linux
+  (Docker, no Mac needed); the release workflow publishes them, and the agent workflow installs,
+  runs and removes them on GitHub's macOS runners.
+
+### Changed
+
+- The server only offers an agent update in the package format of the endpoint's own platform
+  (MSI for Windows, `.deb` or `.rpm` for Linux, `.pkg` for macOS).
 
 ## [1.8.0] - 2026-11-15
 

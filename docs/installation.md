@@ -25,7 +25,7 @@ ARM64). You need the repository for `docker-compose.yml`, the Caddy configuratio
 scripts. Check out the release tag you want to run:
 
 ```bash
-git clone --branch v1.8.0 https://github.com/paulmataruso/EasyPatch.git easypatch
+git clone --branch v1.9.0 https://github.com/paulmataruso/EasyPatch.git easypatch
 cd easypatch
 ```
 
@@ -51,7 +51,7 @@ Edit `.env`:
 |---|---|---|
 | `EASYPATCH_DOMAIN` | yes | The public DNS name. Browsers and agents connect to `https://<EASYPATCH_DOMAIN>` |
 | `ACME_EMAIL` | yes | Contact address given to the certificate authority |
-| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.8.0`). Images you build yourself get this tag too |
+| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.9.0`). Images you build yourself get this tag too |
 | `EASYPATCH_PUBLIC_URL` | no | Overrides the URL used in install commands, reset links and scripts. Defaults to `https://<EASYPATCH_DOMAIN>` |
 | `EASYPATCH_EDGE_SUBNET` | no | Subnet of the network between Caddy and the API (default `172.30.0.0/24`). Change it only if it collides with an existing network. The API trusts `X-Forwarded-For` only from this subnet |
 
@@ -113,24 +113,29 @@ Download the agent packages of the same release from
 each with its `.sig` release signature, to `data/agent-packages/`:
 
 ```bash
-mkdir -p /tmp/easypatch-v1.8.0
-gh release download v1.8.0 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.8.0 \
+mkdir -p /tmp/easypatch-v1.9.0
+gh release download v1.9.0 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.9.0 \
   --pattern 'EasyPatchAgent-*' --pattern SHA256SUMS
 # or download the same files from the release page in a browser
-(cd /tmp/easypatch-v1.8.0 && sha256sum --check --ignore-missing SHA256SUMS)
-cp /tmp/easypatch-v1.8.0/EasyPatchAgent-1.8.0-* data/agent-packages/
+(cd /tmp/easypatch-v1.9.0 && sha256sum --check --ignore-missing SHA256SUMS)
+# Windows and Linux; the macOS .pkg files are experimental (see below)
+cp /tmp/easypatch-v1.9.0/EasyPatchAgent-1.9.0-*.{msi,deb,rpm}* data/agent-packages/
 chmod 644 data/agent-packages/*
 ```
 
-Each release has MSIs (x64, ARM64) for Windows and `.deb` and `.rpm` packages (x64, ARM64) for
-Linux, each with a `.sig` file. Copy only the packages you need. The `.sig` files are what let
+Each release has MSIs (x64, ARM64) for Windows, `.deb` and `.rpm` packages (x64, ARM64) for
+Linux and, from 1.9.0, `.pkg` packages (x64, ARM64) for macOS, each with a `.sig` file. Copy only
+the packages you need. **The macOS agent is experimental: it is in development and not for
+production use** ([macos-agent.md](macos-agent.md)). Copy the `.pkg` files only to a server you
+use to test it: once they are there, the console offers the macOS install commands. The `.sig` files are what let
 agents update themselves; agents verify them against the release public key built into them, so
 `SHA256SUMS` is only a check of the download. The MSIs are not Authenticode-signed, so Windows
 SmartScreen may warn when an MSI is opened by hand. To build the packages yourself, see
-[agent-installation.md](agent-installation.md#building-from-source) and
-[linux-agent.md](linux-agent.md#building-from-source).
+[agent-installation.md](agent-installation.md#building-from-source),
+[linux-agent.md](linux-agent.md#building-from-source) and
+[macos-agent.md](macos-agent.md#building-from-source).
 
-* File names must match `EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm>` (version
+* File names must match `EasyPatchAgent-<version>-<x64|arm64>.<msi|deb|rpm|pkg>` (version
   `MAJOR.MINOR.BUILD`, optionally with a fourth part). Other files starting with `EasyPatchAgent-`
   are ignored and a warning is logged; `.sig` and `.sha256` files are not packages.
 * The API runs as uid 1654 and mounts the directory read-only, so the files must be
@@ -141,8 +146,9 @@ SmartScreen may warn when an MSI is opened by hand. To build the packages yourse
   build `msiexec` commands and the PowerShell install script for deployment codes. That script
   verifies the package's SHA-256, and optionally its Authenticode signature, before installing.
   The Linux install script offers the newest `.deb` and `.rpm` for each architecture and
-  verifies the SHA-256 of the one it downloads.
-* Agents (Windows 1.2.0 and later, all Linux agents) update themselves to the newest **signed**
+  verifies the SHA-256 of the one it downloads; the macOS install script does the same with the
+  newest `.pkg`.
+* Agents (Windows 1.2.0 and later, all Linux and macOS agents) update themselves to the newest **signed**
   package in their own format and architecture (one with a valid `.sig` file): automatically when the *Agent updates* policy is Automatic (the default), or when
   an Operator chooses *Update agent…*. Copying a newer signed package here therefore starts a
   rollout. Set the policy to Manual first if you want to choose when. Agents check the release
@@ -173,7 +179,8 @@ The server serves a file only when its size and SHA-256 match the values built i
 and agents check them again.
 
 Agent installation and enrollment are described in [agent-installation.md](agent-installation.md)
-(Windows) and [linux-agent.md](linux-agent.md) (Linux).
+(Windows), [linux-agent.md](linux-agent.md) (Linux) and [macos-agent.md](macos-agent.md) (macOS,
+experimental).
 
 ## Upgrading
 
@@ -208,6 +215,8 @@ STARTTLS or TLS. Release 1.7.0 adds the `winget` volume (written by the `worker`
 rule, *Update on hold*, and the rollout guard, which is on by default (**Settings → Server
 settings → Rollout guard**; see [architecture.md](architecture.md#update-holds-and-the-rollout-guard)).
 It also adds the `api_tokens` table; no API tokens exist until a super administrator creates one.
+Release 1.9.0 adds the experimental macOS agent and no database changes; nothing changes for
+Windows and Linux agents unless you copy macOS packages to `data/agent-packages/`.
 
 ## Backup and restore
 
@@ -321,7 +330,7 @@ docker compose build        # tags the images with EASYPATCH_VERSION from .env
 docker compose up -d
 ```
 
-Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.8.0-local`) so that
+Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.9.0-local`) so that
 `docker compose pull` never replaces your images with the release images.
 
 ## Building and testing from source

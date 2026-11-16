@@ -598,6 +598,27 @@ outbox, restarts, self-update) with Linux implementations of the platform servic
 There is no tray, no user messages and no Windows Update policy. See
 [linux-agent.md](linux-agent.md).
 
+### macOS agent (experimental)
+
+The macOS agent (experimental: in development and not for production use) runs the same
+runtime with these platform services:
+
+| Service | Implementation |
+|---|---|
+| Updates | `SoftwareUpdateService`: `softwareupdate --list` for scans; `--download <label>`, `--install <label>` (never `--restart`), then a new listing to confirm. Updates are identified by product and version (a UUIDv8 of `easypatch-macos-update|product|version`). On Apple silicon, updates that need a restart fail with `macos_owner_required` without being attempted |
+| Installed updates | A ledger (`/Library/EasyPatch/data/softwareupdate-ledger.json`) of listed updates, kept for 30 days: an update that disappears from the list is installed only when `softwareupdate --history` records its version; an older version of a product is superseded by a newer listed one |
+| Reboot detection | Updates the agent installed that are completed by a restart, recorded with the boot time; cleared by the next boot |
+| Restart | `shutdown -r now` or `shutdown -r +N <message>`; cancelled by stopping the waiting `shutdown`; signed-in users from `who` |
+| Inventory | `sw_vers`, `sysctl`, `scutil`, `system_profiler SPHardwareDataType`, `profiles status -type enrollment` |
+| Key protection | File permissions |
+| Bootstrap | `/Library/EasyPatch/agent.conf` |
+| Agent update | `installer -pkg <package> -target /` in the one-shot launchd job `com.dhitechnical.easypatch.agent-update` |
+| Uninstall | `/Library/EasyPatch/uninstall.sh` in the one-shot launchd job `com.dhitechnical.easypatch.agent-uninstall` |
+
+There is no menu bar icon, no user messages, no update removal and no downloads before the
+maintenance window (the agent does not advertise the `download-updates` capability). See
+[macos-agent.md](macos-agent.md).
+
 ### Tray
 
 The tray is the same executable started as `EasyPatch.Agent.exe tray` in each signed-in

@@ -34,7 +34,9 @@ public sealed class PostgresFixture : IAsyncLifetime
 {
     public const string Image = "postgres:18.6-alpine3.24";
     private const string TemplateDb = "easypatch_template";
-    private readonly PostgreSqlContainer container = new PostgreSqlBuilder(Image).Build();
+    // Test classes run in parallel, each test with its own database and connection pool (up to 20 connections): the default
+    // max_connections (100) is too few for the whole suite.
+    private readonly PostgreSqlContainer container = new PostgreSqlBuilder(Image).WithCommand("-c", "max_connections=400").Build();
     private readonly SemaphoreSlim createLock = new(1, 1);
 
     public async ValueTask InitializeAsync()

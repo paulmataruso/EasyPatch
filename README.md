@@ -177,6 +177,11 @@ All screenshots show fictional demo data.
   classifies security updates from the distribution's security repositories and advisories, and
   uses the same policies, jobs, restarts and compliance reporting. See
   [docs/linux-agent.md](docs/linux-agent.md).
+* **macOS agent (experimental: in development and not for production use)**, as a `.pkg` for
+  macOS 14 and later (Intel and Apple silicon). It reports the updates Apple's `softwareupdate`
+  offers and installs the approved ones. On Apple silicon it cannot install macOS updates
+  (Apple allows only a volume owner or MDM to), and it has not yet been used on a real Mac. See
+  [docs/macos-agent.md](docs/macos-agent.md).
 * **Agent self-update** (Windows agent 1.2.0 and later, all Linux agents), automatic or on
   demand, set per organization, site or endpoint. Agents install only packages signed with your
   own release key, whose public half is built into the agent; the server only relays packages
@@ -198,7 +203,8 @@ Admin browsers ─────HTTPS───┘                                 
 | Reverse proxy | Caddy 2 with automatic certificates |
 | Windows agent | .NET 10 Windows service using the Windows Update Agent COM API, plus a tray icon (Windows Forms) in each user session |
 | Linux agent | .NET 10 self-contained systemd service driving apt or dnf |
-| Installers | WiX Toolset v5 MSI; `.deb` and `.rpm` packages (x64 and ARM64) |
+| macOS agent (experimental) | .NET 10 self-contained launchd daemon driving `softwareupdate` |
+| Installers | WiX Toolset v5 MSI; `.deb` and `.rpm` packages; macOS `.pkg` (x64 and ARM64) |
 | Deployment | Docker Compose: `caddy`, `api`, `worker`, `postgres`, plus a one-shot `migrate` |
 
 See [docs/architecture.md](docs/architecture.md) for the full design.
@@ -208,7 +214,7 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 On a Linux host (x64 or ARM64) with Docker, a DNS name pointing at it, and ports 80 and 443 open:
 
 ```bash
-git clone --branch v1.8.0 https://github.com/paulmataruso/EasyPatch.git easypatch && cd easypatch
+git clone --branch v1.9.0 https://github.com/paulmataruso/EasyPatch.git easypatch && cd easypatch
 ./scripts/init-secrets.sh                 # database password secret, data directories, .env
 $EDITOR .env                              # set EASYPATCH_DOMAIN and ACME_EMAIL
 docker compose pull                       # ghcr.io/paulmataruso/easypatch-server and -proxy
@@ -237,6 +243,7 @@ The full guides are [docs/installation.md](docs/installation.md),
 | [installation.md](docs/installation.md) | Server installation, first sign-in, agent packages, upgrades, backup and restore, CLI commands |
 | [agent-installation.md](docs/agent-installation.md) | Windows agent requirements, MSI properties, RMM deployment, command line, logs, building the MSI |
 | [linux-agent.md](docs/linux-agent.md) | Linux agent: supported distributions, install script and token enrollment, how packages are scanned and installed, self-update, building the packages |
+| [macos-agent.md](docs/macos-agent.md) | macOS agent (experimental, not for production use): known limitations, installing, how updates are scanned and installed, uninstalling, building the package |
 | [architecture.md](docs/architecture.md) | Components, data model, update state model, policy, job system, agent lifecycle, deployment design |
 | [application-updates.md](docs/application-updates.md) | Third-party application updates with winget: requirements, approval, what the agent runs, restarts, limitations and trust model |
 | [compliance.md](docs/compliance.md) | Compliance statuses and rules, required updates, CVE and known-exploited data, OS support status, reports and monthly PDF reports |
@@ -267,14 +274,14 @@ The agent builds and tests on Linux with `scripts/build-agent.sh`. The MSIs can 
 Linux with Docker (`scripts/build-msi-linux.sh`, which runs WiX under Wine) or on Windows with
 `scripts/build-agent.ps1`, which can also sign them. The `agent` GitHub Actions workflow builds
 them on Windows. `scripts/build-linux-packages.sh` builds the signed `.deb` and `.rpm`
-packages of the Linux agent (Docker). Pushing a version tag (`v1.8.0`) runs the `release`
+packages of the Linux agent (Docker). Pushing a version tag (`v1.9.0`) runs the `release`
 workflow, which tests everything, builds and release-signs the agent packages, publishes the x64
 and ARM64 images to GitHub Container Registry and creates the GitHub Release.
 
 ```
 shared/      Contracts shared by agent and server (DTOs, request signing, update classification)
 backend/     Core (domain), Infrastructure (EF Core, services), API, Worker, Tests
-agent/       Agent core, communication, Windows Update, inventory, Windows and Linux hosts, apt/dnf, tests, installers
+agent/       Agent core, communication, Windows Update, inventory, Windows, Linux and macOS hosts, apt/dnf, softwareupdate, tests, installers
 frontend/    Web console
 deployment/  Dockerfiles and Caddy configuration
 scripts/     init-secrets, backup, restore, agent and MSI builds, agent icon, dependency audit
@@ -285,7 +292,7 @@ docs/        Documentation
 
 ## Project status
 
-Version 1.8.0 (1.4.0 was the first public release). Server, console and agent logic are covered
+Version 1.9.0 (1.4.0 was the first public release). Server, console and agent logic are covered
 by automated tests on Linux, including an end-to-end test that drives the real agent runtime
 against the real API and PostgreSQL. Release builds are made and signed by GitHub Actions.
 
@@ -296,6 +303,8 @@ Checked by hand so far:
 * the Linux agent on Debian 12 and 13, Ubuntu 22.04, 24.04, 26.04 and 26.10, Rocky Linux 8 and 9,
   AlmaLinux 10.2 and Fedora 45 containers: enrollment through the install script, scans, package
   installation and self-update.
+
+The macOS agent is experimental and has not been run on a real Mac by the project.
 
 Not yet validated on real systems: installing updates across Windows versions and Windows
 Server, the MSI with Windows Installer ICE validation, the PowerShell install script, winget

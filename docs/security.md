@@ -302,6 +302,33 @@ The Linux agent follows the same model with these platform specifics
 * **Output.** Package manager output sent to the server (error summaries) has credentials in
   repository URLs (`user:password@`, `token=` and similar query parameters) replaced with `***`.
 
+## macOS agent (experimental)
+
+The macOS agent is experimental: in development and not for production use
+([macos-agent.md](macos-agent.md)). It follows the Linux model, with these differences:
+
+* **It runs as root** from the launchd daemon `com.dhitechnical.easypatch.agent`, with umask
+  0077. `/Library/EasyPatch/agent.conf` (0600) and `/Library/EasyPatch/data` (0700) are readable
+  by root only.
+* **Private key.** Protected by file permissions only; the keychain and the Secure Enclave are
+  not used. Root can read it, and so can anything that reads a copy of `/Library/EasyPatch/data`
+  (for example a Time Machine backup).
+* **Enrollment token and install script.** As on Linux: the token is never a command-line
+  argument and is removed from `agent.conf` after enrollment; the script holds only the server
+  URL, the deployment code and the package's SHA-256.
+* **Updates.** The server sends update GUIDs; the agent installs only updates its own
+  `softwareupdate --list` found, by the label it listed, passed as a separate argument (no
+  shell). It never runs `softwareupdate --restart`, `--all` or `--schedule`, and never changes
+  software update settings. It does not ask for, store or send an administrator password, so on
+  Apple silicon it cannot install updates that need a restart (they need a volume owner or MDM).
+* **Unsigned packages.** The `.pkg` is not signed with an Apple Developer ID and not notarized.
+  Agent updates are still verified with the release key built into the agent before
+  `installer` runs (see [Agent release signing](#agent-release-signing)); the first
+  installation relies on the TLS connection to the server, like the Linux install script.
+* **Launchd jobs.** Agent updates and removal run as one-shot launchd jobs whose property lists
+  the agent writes into its own root-only data directory. Their arguments are fixed scripts and
+  validated paths; nothing in them comes from the server.
+
 ## Agent release signing
 
 Windows agents 1.2.0 and newer and all Linux agents can update themselves. The EasyPatch server is not trusted to decide

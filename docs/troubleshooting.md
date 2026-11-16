@@ -1,9 +1,10 @@
 # Troubleshooting
 
 For agent-side problems (enrollment, connectivity, Windows Update errors on the endpoint), see
-[agent-installation.md](agent-installation.md#troubleshooting) for Windows and
-[linux-agent.md](linux-agent.md#troubleshooting) for Linux. This page covers the server and the
-console.
+[agent-installation.md](agent-installation.md#troubleshooting) for Windows,
+[linux-agent.md](linux-agent.md#troubleshooting) for Linux and
+[macos-agent.md](macos-agent.md#troubleshooting) for the experimental macOS agent. This page
+covers the server and the console.
 
 ## First checks
 

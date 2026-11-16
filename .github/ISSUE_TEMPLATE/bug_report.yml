@@ -28,7 +28,7 @@ body:
     attributes:
       label: Server version
       description: The release you run (EASYPATCH_VERSION in .env), or the commit if you build from source.
-      placeholder: "1.8.0"
+      placeholder: "1.9.0"
     validations:
       required: true
   - type: input
@@ -36,7 +36,7 @@ body:
     attributes:
       label: Agent version and endpoint OS
       description: If the problem involves an endpoint.
-      placeholder: "1.8.0 on Windows 11 24H2 / Ubuntu 24.04"
+      placeholder: "1.9.0 on Windows 11 24H2 / Ubuntu 24.04"
   - type: dropdown
     id: area
     attributes:
@@ -46,6 +46,7 @@ body:
         - Server (API, worker, database)
         - Windows agent or MSI
         - Linux agent or packages
+        - macOS agent (experimental)
         - Install scripts
         - Docker deployment
         - Documentation
@@ -56,5 +57,5 @@ body:
     id: logs
     attributes:
       label: Relevant log lines
-      description: "Server: docker compose logs api worker. Windows agent: C:\\ProgramData\\EasyPatch\\logs\\agent.log. Linux agent: journalctl -u easypatch-agent."
+      description: "Server: docker compose logs api worker. Windows agent: C:\\ProgramData\\EasyPatch\\logs\\agent.log. Linux agent: journalctl -u easypatch-agent. macOS agent: /Library/EasyPatch/data/logs/agent.log."
       render: text
