@@ -68,6 +68,7 @@ internal static class Cli
             return ExitNotElevated;
         }
 
+        Console.Error.WriteLine(MacComposition.ExperimentalWarning);
         var token = code is null ? ReadToken(tokenFile) : null;
         if (token is null && code is null)
         {
@@ -220,6 +221,7 @@ internal static class Cli
             var payload = new
             {
                 agentVersion = MacComposition.AgentVersion,
+                experimental = true,
                 service,
                 status = state?.Status.ToString() ?? (error is null ? "NotEnrolled" : "Unknown"),
                 error,
@@ -240,7 +242,8 @@ internal static class Cli
             return error is null ? ExitSuccess : ExitFailure;
         }
 
-        Console.WriteLine($"EasyPatch Agent {MacComposition.AgentVersion}");
+        Console.WriteLine($"EasyPatch Agent {MacComposition.AgentVersion} for macOS");
+        Console.WriteLine(MacComposition.ExperimentalWarning);
         Line("Service", service);
         if (error is not null)
         {
@@ -394,6 +397,7 @@ internal static class Cli
     public static int Version()
     {
         Console.WriteLine(MacComposition.AgentVersion);
+        Console.Error.WriteLine(MacComposition.ExperimentalWarning);
         return ExitSuccess;
     }
 
@@ -401,7 +405,7 @@ internal static class Cli
     {
         Console.WriteLine($"""
             EasyPatch Agent {MacComposition.AgentVersion} for macOS
-            Experimental: the macOS agent is in development and not for production use.
+            {MacComposition.ExperimentalWarning}
 
             Usage: easypatch-agent <command> [options]
 

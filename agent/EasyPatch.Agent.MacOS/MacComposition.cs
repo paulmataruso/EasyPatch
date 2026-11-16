@@ -67,8 +67,12 @@ internal static class MacComposition
         };
     }
 
+    /// <summary>Shown by the command line and logged when the daemon starts.</summary>
+    public const string ExperimentalWarning = "Experimental: the macOS agent is in development and not for production use.";
+
     public static AgentRuntime CreateRuntime(ILoggerFactory loggerFactory)
     {
+        loggerFactory.CreateLogger("EasyPatch.Agent.MacOS").LogWarning("EasyPatch Agent {Version} for macOS. {Warning}", AgentVersion, ExperimentalWarning);
         var bootstrap = new ConfFileBootstrapSource(ConfigPath, loggerFactory.CreateLogger<ConfFileBootstrapSource>());
         return new AgentRuntime(CreateOptions(), CreatePlatform(loggerFactory, bootstrap), new MacHttpClientFactory(bootstrap), loggerFactory);
     }

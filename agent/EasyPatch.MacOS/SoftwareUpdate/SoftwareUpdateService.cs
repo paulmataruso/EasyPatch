@@ -57,7 +57,8 @@ public sealed class SoftwareUpdateService : IUpdateService, IDisposable
 
     public string Name => "softwareupdate";
 
-    /// <summary>Downloads ahead of a maintenance window are a Windows Update feature only.</summary>
+    /// <summary>Downloads ahead of a maintenance window are a Windows Update feature only: whether macOS keeps what
+    /// <c>softwareupdate --download</c> fetched until a later <c>--install</c> has not been validated.</summary>
     public bool KeepsDownloads => false;
 
     public void Dispose() => _ledgerLock.Dispose();
