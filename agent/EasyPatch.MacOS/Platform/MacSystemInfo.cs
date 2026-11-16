@@ -64,6 +64,18 @@ public sealed partial record MacSystemInfo(string ProductVersion, string? BuildV
             : null;
     }
 
+    /// <summary>The processor's name: <c>sysctl -n machdep.cpu.brand_string</c> (Intel and Apple silicon), else
+    /// <c>system_profiler</c>'s chip or CPU type, which can be "Unknown" (seen on an Intel virtual machine).</summary>
+    public static string? ProcessorName(string? brandString, string? chip)
+    {
+        if (!string.IsNullOrWhiteSpace(brandString))
+        {
+            return brandString.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(chip) || chip.Trim().Equals("Unknown", StringComparison.OrdinalIgnoreCase) ? null : chip.Trim();
+    }
+
     /// <summary>The fields EasyPatch uses from <c>system_profiler -json SPHardwareDataType</c>.</summary>
     public sealed record Hardware(string? ModelName, string? ModelIdentifier, string? Chip, string? SerialNumber, string? HardwareUuid);
 

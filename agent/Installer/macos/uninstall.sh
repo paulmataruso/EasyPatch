@@ -34,10 +34,11 @@ main() {
     done
 
     if [ -x "$agent" ]; then
+        # unenroll succeeds whether or not the server could be told (it is told when the agent is enrolled and it is reachable).
         if "$agent" unenroll --reason "Agent uninstalled" >/dev/null 2>&1; then
-            echo "  unenrolled from the EasyPatch server"
+            echo "  unenrolled (the server marks the endpoint decommissioned if it could be reached)"
         else
-            echo "  could not unenroll (not enrolled, or the server is unreachable); continuing"
+            echo "  could not unenroll; continuing"
         fi
     fi
 

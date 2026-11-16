@@ -61,7 +61,7 @@ public sealed class MacInventoryCollector : IInventoryCollector
             Model = model,
             SerialNumber = hardware?.SerialNumber,
             SmbiosUuid = hardware?.HardwareUuid,
-            ProcessorName = hardware?.Chip ?? Sysctl("machdep.cpu.brand_string"),
+            ProcessorName = MacSystemInfo.ProcessorName(Sysctl("machdep.cpu.brand_string"), hardware?.Chip),
             TotalMemoryBytes = long.TryParse(Sysctl("hw.memsize"), out var memory) ? memory : null,
             SystemDriveTotalBytes = Safe(() => root?.TotalSize),
             SystemDriveFreeBytes = Safe(() => root?.AvailableFreeSpace),

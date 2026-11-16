@@ -132,6 +132,9 @@ public sealed class MacAgentTests : IDisposable
             """);
         Assert.Equal(new MacSystemInfo.Hardware("MacBook Air", "Mac14,2", "Apple M2", "C02ABCDEF123", "3F2504E0-4F89-11D3-9A0C-0305E82C3301"), hardware);
         Assert.Null(MacSystemInfo.ParseHardware("not json"));
+        Assert.Equal("Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz", MacSystemInfo.ProcessorName("Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz\n", "Unknown"));
+        Assert.Equal("Apple M2", MacSystemInfo.ProcessorName(null, "Apple M2"));
+        Assert.Null(MacSystemInfo.ProcessorName("", "Unknown"));
 
         Assert.True(MacUpdateSourceDetector.IsMdmEnrolled("Enrolled via DEP: No\nMDM enrollment: Yes (User Approved)\n"));
         Assert.False(MacUpdateSourceDetector.IsMdmEnrolled("Enrolled via DEP: No\nMDM enrollment: No\n"));
