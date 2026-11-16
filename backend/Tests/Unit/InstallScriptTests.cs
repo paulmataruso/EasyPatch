@@ -197,3 +197,120 @@ public sealed class LinuxInstallScriptTests
         Assert.DoesNotContain("--token ", command, StringComparison.Ordinal);
     }
 }
+
+public sealed class MacInstallScriptTests
+{
+    private static AgentPackage Package(string version, string architecture, string format = "pkg", char hash = 'a') =>
+        new($"EasyPatchAgent-{version}-{architecture}.{format}", version, architecture, 40_000_000, new string(hash, 64), DateTimeOffset.UnixEpoch, Format: format);
+
+    private static string Script(string label = "Rollout") =>
+        MacInstallScriptBuilder.Build("https://patch.example.com/", [Package("1.9.0", "x64", hash: 'b'), Package("1.9.0", "arm64", hash: 'c')],
+            "EPD-ABCDEFGHJKMNPQRS", label, DateTimeOffset.UnixEpoch);
+
+    [Fact]
+    public void Only_the_newest_pkg_package_of_each_architecture_is_offered()
+    {
+        var newest = MacInstallScriptBuilder.Newest(
+        [
+            Package("1.9.0", "x64"), Package("1.9.1", "x64"), Package("1.9.0", "arm64"), Package("1.9.2", "arm64", "deb"), Package("1.9.2", "x64", "msi"),
+        ]);
+
+        Assert.Equal(["EasyPatchAgent-1.9.0-arm64.pkg", "EasyPatchAgent-1.9.1-x64.pkg"], newest.Select(p => p.FileName));
+        Assert.Throws<InvalidOperationException>(() =>
+            MacInstallScriptBuilder.Build("https://patch.example.com", [Package("1.9.0", "x64", "deb")], "EPD-ABC", "x", DateTimeOffset.UnixEpoch));
+    }
+
+    [Fact]
+    public void The_script_verifies_each_package_hash_and_carries_no_secret()
+    {
+        var script = Script("it's a 'test'\nid -u");
+
+        Assert.Contains("SERVER_URL='https://patch.example.com'", script, StringComparison.Ordinal);
+        Assert.Contains("DEPLOYMENT_CODE='EPD-ABCDEFGHJKMNPQRS'", script, StringComparison.Ordinal);
+        Assert.Contains("  x64) file='EasyPatchAgent-1.9.0-x64.pkg'; sha256='" + new string('b', 64) + "' ;;", script, StringComparison.Ordinal);
+        Assert.Contains("  arm64) file='EasyPatchAgent-1.9.0-arm64.pkg'; sha256='" + new string('c', 64) + "' ;;", script, StringComparison.Ordinal);
+        Assert.Contains("shasum -a 256 \"$pkg\"", script, StringComparison.Ordinal);
+        Assert.Contains("--proto '=https'", script, StringComparison.Ordinal);
+        Assert.Contains(MacInstallScriptBuilder.ExperimentalNotice, script, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnrollmentToken", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("--token", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("reboot", script, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("shutdown", script, StringComparison.OrdinalIgnoreCase);
+        // The label only appears in the header comment and cannot start a new line of shell.
+        var labelLines = script.Split('\n').Where(l => l.Contains("'test'", StringComparison.Ordinal)).ToList();
+        Assert.StartsWith("# EasyPatch macOS agent installer", Assert.Single(labelLines), StringComparison.Ordinal);
+        Assert.DoesNotContain("\nid -u", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_script_refuses_other_systems_and_old_macos_and_detects_apple_silicon_under_rosetta()
+    {
+        var script = Script();
+
+        Assert.Contains("[ \"$(uname -s)\" = Darwin ] || fail", script, StringComparison.Ordinal);
+        Assert.Contains("[ \"$(id -u)\" -eq 0 ] || fail", script, StringComparison.Ordinal);
+        Assert.Contains("sw_vers -productVersion", script, StringComparison.Ordinal);
+        Assert.Contains("[ \"$os_major\" -ge 14 ] || fail", script, StringComparison.Ordinal);
+        Assert.Contains("sysctl -n hw.optional.arm64", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("uname -m", script, StringComparison.Ordinal);
+        // Darwin is checked before anything macOS-specific runs.
+        Assert.True(script.IndexOf("uname -s", StringComparison.Ordinal) < script.IndexOf("sw_vers", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_settings_are_written_root_only_before_the_package_is_installed()
+    {
+        var script = Script();
+
+        Assert.Contains("CONF='/Library/EasyPatch/agent.conf'", script, StringComparison.Ordinal);
+        Assert.Contains("umask 077", script, StringComparison.Ordinal);
+        Assert.Contains("chown root:wheel \"$CONF_DIR\"", script, StringComparison.Ordinal);
+        Assert.Contains("chmod 755 \"$CONF_DIR\"", script, StringComparison.Ordinal);
+        Assert.Contains("chmod 600 \"$CONF.new\"", script, StringComparison.Ordinal);
+        Assert.Contains("printf 'DeploymentCode=%s\\n' \"$DEPLOYMENT_CODE\"", script, StringComparison.Ordinal);
+        var written = script.IndexOf("mv -f \"$CONF.new\" \"$CONF\"", StringComparison.Ordinal);
+        var installed = script.IndexOf("installer -pkg \"$pkg\" -target /", StringComparison.Ordinal);
+        Assert.True(written > 0 && installed > written, "agent.conf must be in place before installer runs the postinstall script.");
+        // An enrolled agent keeps its enrollment; one that never enrolled is restarted to pick up the settings.
+        Assert.Contains("grep -Eq \"^Status: +(PendingApproval|Active)\"", script, StringComparison.Ordinal);
+        Assert.Contains($"launchctl kickstart -k system/{MacInstallScriptBuilder.DaemonLabel}", script, StringComparison.Ordinal);
+        Assert.Contains("trap 'rm -rf \"$work\"' EXIT", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_script_is_valid_posix_shell()
+    {
+        if (!File.Exists("/bin/sh"))
+        {
+            return;
+        }
+
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, Script());
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("/bin/sh", ["-n", path])
+            {
+                RedirectStandardError = true,
+            })!;
+            var error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            Assert.True(process.ExitCode == 0, error);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void The_one_liner_and_token_command_point_at_the_macos_script_and_agent()
+    {
+        Assert.Equal("curl -fsSL https://patch.example.com/downloads/install/macos/EPD-ABC.sh | sudo sh",
+            MacInstallScriptBuilder.OneLiner("https://patch.example.com/", "EPD-ABC"));
+
+        var command = MacInstallScriptBuilder.TokenEnrollCommand("https://patch.example.com/", "ept_abc");
+        Assert.Equal("printf '%s' 'ept_abc' | sudo /usr/local/bin/easypatch-agent enroll --server https://patch.example.com --token-file -", command);
+        Assert.DoesNotContain("--token ", command, StringComparison.Ordinal);
+    }
+}

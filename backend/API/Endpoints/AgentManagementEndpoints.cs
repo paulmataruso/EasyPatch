@@ -48,9 +48,12 @@ public static class AgentManagementEndpoints
             var now = clock.GetUtcNow();
             var dtos = await TokenQuery(db, db.EnrollmentTokens.AsNoTracking().Where(t => ids.Contains(t.Id))).ToDictionaryAsync(t => t.Id, ct);
             var fileName = packages.GetLatest()?.FileName;
+            // The experimental macOS agent is only offered once the server has a macOS package.
+            var mac = MacInstallScriptBuilder.Newest(packages.List()).Count > 0;
             return TypedResults.Ok(created.Select(c => new CreatedTokenDto(dtos[c.Token.Id] with { State = TokenState(dtos[c.Token.Id], now) },
                 c.PlaintextToken, InstallScriptBuilder.MsiExecCommand(options.Value.PublicUrl, c.PlaintextToken, fileName),
-                LinuxInstallScriptBuilder.TokenEnrollCommand(options.Value.PublicUrl, c.PlaintextToken))).ToList());
+                LinuxInstallScriptBuilder.TokenEnrollCommand(options.Value.PublicUrl, c.PlaintextToken),
+                mac ? MacInstallScriptBuilder.TokenEnrollCommand(options.Value.PublicUrl, c.PlaintextToken) : null)).ToList());
         });
 
         tokens.MapPost("/{id:guid}/revoke", async (Guid id, EnrollmentService enrollment, EasyPatchDbContext db, ITenantContext tenant, CancellationToken ct) =>
@@ -66,7 +69,7 @@ public static class AgentManagementEndpoints
         var codes = app.MapGroup("/api/v1/deployment-codes").WithTags("Agent management").RequireAuthorization(Policies.Operator);
 
         codes.MapGet("/", async (Guid? organizationId, bool? includeInactive, EasyPatchDbContext db, ITenantContext tenant, IOptions<EasyPatchOptions> options,
-            TimeProvider clock, CancellationToken ct) =>
+            AgentPackageService packages, TimeProvider clock, CancellationToken ct) =>
         {
             var now = clock.GetUtcNow();
             var query = db.DeploymentCodes.AsNoTracking().ForTenant(tenant, c => c.OrganizationId);
@@ -80,17 +83,18 @@ public static class AgentManagementEndpoints
                 query = query.Where(c => c.RevokedAt == null && (c.ExpiresAt == null || c.ExpiresAt > now));
             }
 
-            return TypedResults.Ok(await LoadCodesAsync(db, query, options.Value.PublicUrl, now, ct));
+            return TypedResults.Ok(await LoadCodesAsync(db, query, options.Value.PublicUrl, packages, now, ct));
         });
 
         codes.MapPost("/", async (CreateDeploymentCodeRequest request, EnrollmentService enrollment, EasyPatchDbContext db, ITenantContext tenant,
-            IOptions<EasyPatchOptions> options, TimeProvider clock, CancellationToken ct) =>
+            IOptions<EasyPatchOptions> options, AgentPackageService packages, TimeProvider clock, CancellationToken ct) =>
         {
             tenant.EnsureAccess(request.OrganizationId);
             new Validator().Required("name", request.Name, 200).ThrowIfInvalid();
             var code = await enrollment.CreateDeploymentCodeAsync(request.OrganizationId, request.SiteId, request.Name.Trim(), request.ExpiresInDays,
                 request.AllowedSourceCidrs ?? [], request.MaxPendingRequests ?? 500, ct);
-            var dto = (await LoadCodesAsync(db, db.DeploymentCodes.AsNoTracking().Where(c => c.Id == code.Id), options.Value.PublicUrl, clock.GetUtcNow(), ct))[0];
+            var dto = (await LoadCodesAsync(db, db.DeploymentCodes.AsNoTracking().Where(c => c.Id == code.Id), options.Value.PublicUrl, packages,
+                clock.GetUtcNow(), ct))[0];
             return TypedResults.Created($"/api/v1/deployment-codes/{code.Id}", dto);
         });
 
@@ -122,6 +126,22 @@ public static class AgentManagementEndpoints
                 return TypedResults.Ok(new InstallScriptResponse(linuxScript, LinuxInstallScriptBuilder.OneLiner(serverUrl, code.Code),
                     $"{serverUrl}/downloads/install/{code.Code}.sh", string.Join(", ", linux.Select(p => p.FileName)), linux[0].Version,
                     string.Join(", ", linux.Select(p => p.Sha256)), false, AgentPlatforms.Linux));
+            }
+
+            if (string.Equals(platform, AgentPlatforms.MacOS, StringComparison.OrdinalIgnoreCase))
+            {
+                var mac = MacInstallScriptBuilder.Newest(packages.List());
+                if (mac.Count == 0)
+                {
+                    throw AppException.Conflict("No macOS agent package is available. Copy the EasyPatchAgent .pkg packages into the agent packages directory.",
+                        "no_agent_package");
+                }
+
+                var serverUrl = options.Value.PublicUrl.TrimEnd('/');
+                var macScript = MacInstallScriptBuilder.Build(serverUrl, mac, code.Code, code.Name, clock.GetUtcNow());
+                return TypedResults.Ok(new InstallScriptResponse(macScript, MacInstallScriptBuilder.OneLiner(serverUrl, code.Code),
+                    MacInstallScriptBuilder.ScriptUrl(serverUrl, code.Code), string.Join(", ", mac.Select(p => p.FileName)), mac[0].Version,
+                    string.Join(", ", mac.Select(p => p.Sha256)), false, AgentPlatforms.MacOS));
             }
 
             var pkg = (package is null ? packages.GetLatest() : packages.Find(package) is { Format: AgentRelease.FormatMsi } chosen ? chosen : null)
@@ -242,7 +262,7 @@ public static class AgentManagementEndpoints
         t.RevokedAt is not null ? "Revoked" : t.ExpiresAt <= now ? "Expired" : t.UseCount >= t.MaxUses ? "Exhausted" : "Active";
 
     private static async Task<List<DeploymentCodeDto>> LoadCodesAsync(EasyPatchDbContext db, IQueryable<DeploymentCode> query, string publicUrl,
-        DateTimeOffset now, CancellationToken ct)
+        AgentPackageService packages, DateTimeOffset now, CancellationToken ct)
     {
         var rows = await query.OrderByDescending(c => c.CreatedAt)
             .Select(c => new
@@ -254,11 +274,14 @@ public static class AgentManagementEndpoints
                 Approved = db.EnrollmentRequests.Count(r => r.DeploymentCodeId == c.Id && r.Status == EnrollmentRequestStatus.Approved),
             }).Take(1000).ToListAsync(ct);
         var url = publicUrl.TrimEnd('/');
+        // The experimental macOS agent is only offered once the server has a macOS package.
+        var mac = MacInstallScriptBuilder.Newest(packages.List()).Count > 0;
         return rows.Select(r => new DeploymentCodeDto(r.Code.Id, r.Code.Code, r.Code.Name, r.Code.OrganizationId, r.OrgName, r.Code.SiteId, r.SiteName,
             r.Code.MaxPendingRequests, r.Code.AllowedSourceCidrs, r.Code.CreatedAt, r.Code.ExpiresAt, r.Code.RevokedAt, r.Pending, r.Approved,
             r.Code.RevokedAt is not null ? "Revoked" : r.Code.ExpiresAt is { } exp && exp <= now ? "Expired" : "Active",
             InstallScriptBuilder.OneLiner(url, r.Code.Code), InstallScriptBuilder.ScriptUrl(url, r.Code.Code),
-            LinuxInstallScriptBuilder.OneLiner(url, r.Code.Code), $"{url}/downloads/install/{r.Code.Code}.sh")).ToList();
+            LinuxInstallScriptBuilder.OneLiner(url, r.Code.Code), $"{url}/downloads/install/{r.Code.Code}.sh",
+            mac ? MacInstallScriptBuilder.OneLiner(url, r.Code.Code) : null, mac ? MacInstallScriptBuilder.ScriptUrl(url, r.Code.Code) : null)).ToList();
     }
 
     private static async Task EnsureRequestAccessAsync(EasyPatchDbContext db, ITenantContext tenant, Guid id, CancellationToken ct)
@@ -301,7 +324,7 @@ public static class AgentManagementEndpoints
     }
 }
 
-/// <summary>Anonymous downloads used by installers: agent packages and the tokenless PowerShell and shell install scripts.</summary>
+/// <summary>Anonymous downloads used by installers: agent packages and the tokenless PowerShell and shell (Linux and macOS) install scripts.</summary>
 public static class DownloadEndpoints
 {
     public static void MapDownloadEndpoints(this IEndpointRouteBuilder app)
@@ -315,6 +338,7 @@ public static class DownloadEndpoints
             {
                 AgentRelease.FormatDeb => "application/vnd.debian.binary-package",
                 AgentRelease.FormatRpm => "application/x-rpm",
+                AgentRelease.FormatPkg => "application/octet-stream",
                 _ => "application/x-msi",
             };
             return path is null
@@ -371,6 +395,36 @@ public static class DownloadEndpoints
 
             http.Response.Headers.CacheControl = "no-store";
             return Results.Text(LinuxInstallScriptBuilder.Build(options.Value.PublicUrl, linux, deployment.Code, deployment.Name, now),
+                "text/plain; charset=utf-8");
+        });
+
+        // The experimental macOS agent: same rules as the Linux script above.
+        g.MapGet("/install/macos/{code}.sh", async (string code, EasyPatchDbContext db, AgentPackageService packages, IOptions<EasyPatchOptions> options,
+            TimeProvider clock, HttpContext http, CancellationToken ct) =>
+        {
+            var now = clock.GetUtcNow();
+            if (code.Length > 64)
+            {
+                return Results.NotFound();
+            }
+
+            var deployment = await db.DeploymentCodes.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Code == code && c.RevokedAt == null && (c.ExpiresAt == null || c.ExpiresAt > now), ct);
+            if (deployment is null)
+            {
+                return Results.Text("echo 'easypatch: this deployment code is unknown, revoked or expired.' >&2; exit 1\n", "text/plain; charset=utf-8",
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+
+            var mac = MacInstallScriptBuilder.Newest(packages.List());
+            if (mac.Count == 0)
+            {
+                return Results.Text("echo 'easypatch: no macOS agent package is available on the server.' >&2; exit 1\n", "text/plain; charset=utf-8",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            http.Response.Headers.CacheControl = "no-store";
+            return Results.Text(MacInstallScriptBuilder.Build(options.Value.PublicUrl, mac, deployment.Code, deployment.Name, now),
                 "text/plain; charset=utf-8");
         });
 

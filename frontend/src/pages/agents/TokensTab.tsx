@@ -12,6 +12,7 @@ import { useToast } from '../../components/Toast';
 import { Alert, Button, Checkbox, EmptyState, ErrorState, InlineError, Pagination, Spinner, TableWrap, TextField, Toolbar } from '../../components/ui';
 import { formatDateTime, formatRelative } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
+import { MacOSExperimentalNotice } from './DeploymentCodesTab';
 
 export function TokensTab() {
   const { canOperate } = useAuth();
@@ -42,7 +43,8 @@ export function TokensTab() {
   return (
     <>
       <Alert tone="info" className="mb-4">
-        Enrollment tokens are secrets for <code>msiexec</code> or Group Policy installs on Windows, and for <code>easypatch-agent enroll</code> on Linux. Endpoints
+        Enrollment tokens are secrets for <code>msiexec</code> or Group Policy installs on Windows, and for <code>easypatch-agent enroll</code> on Linux (and on
+        macOS, where the agent is experimental). Endpoints
         enrolled with a token are active immediately. Tokens are stored hashed, expire, and are limited to a number of uses. For RMM scripts without a secret, use
         a deployment code instead.
       </Alert>
@@ -212,7 +214,10 @@ function CreatedTokensDialog({ tokens, onClose }: { tokens: CreatedTokenDto[] | 
   useEffect(() => {
     if (tokens) setSaved(false);
   }, [tokens]);
-  const text = (tokens ?? []).map((t) => `${t.plaintextToken}\t${t.msiExecCommand}\t${t.linuxEnrollCommand ?? ''}`).join('\n');
+  const mac = (tokens ?? []).some((t) => t.macEnrollCommand);
+  const text = (tokens ?? [])
+    .map((t) => [t.plaintextToken, t.msiExecCommand, t.linuxEnrollCommand ?? '', ...(mac ? [t.macEnrollCommand ?? ''] : [])].join('\t'))
+    .join('\n');
   return (
     <Dialog
       open={tokens !== null}
@@ -235,10 +240,11 @@ function CreatedTokensDialog({ tokens, onClose }: { tokens: CreatedTokenDto[] | 
             Tokens are shown only now. Treat them like passwords: anyone holding a token can enroll a device into this organization until it expires or its uses run
             out.
           </OneTimeNotice>
+          {mac && <MacOSExperimentalNotice />}
           {tokens.length > 1 && (
             <div className="flex gap-2">
               <CopyButton text={tokens.map((t) => t.plaintextToken).join('\n')} label="Copy all tokens" />
-              <DownloadButton fileName="easypatch-enrollment-tokens.tsv" text={`token\tmsiexec\tlinux\n${text}\n`} label="Download (TSV)" mime="text/tab-separated-values" />
+              <DownloadButton fileName="easypatch-enrollment-tokens.tsv" text={`token\tmsiexec\tlinux${mac ? '\tmacos' : ''}\n${text}\n`} label="Download (TSV)" mime="text/tab-separated-values" />
             </div>
           )}
           {tokens.map((t, i) => (
@@ -256,6 +262,15 @@ function CreatedTokensDialog({ tokens, onClose }: { tokens: CreatedTokenDto[] | 
                     list):
                   </p>
                   <CodeBlock code={t.linuxEnrollCommand} />
+                </>
+              )}
+              {t.macEnrollCommand && (
+                <>
+                  <p className="text-xs text-muted">
+                    macOS (experimental): install the .pkg package from the Agent packages tab (<code>sudo installer -pkg &lt;file&gt; -target /</code>), then
+                    enroll (the token is piped in, so it does not appear in the process list):
+                  </p>
+                  <CodeBlock code={t.macEnrollCommand} />
                 </>
               )}
             </div>

@@ -377,7 +377,8 @@ public sealed record EndpointDetailDto(
     AgentUpdateInfoDto? AgentUpdate = null,
     LinuxDetailsDto? Linux = null,
     ApplicationUpdatesStatusDto? Applications = null,
-    RestartDetailsDto? Restart = null);
+    RestartDetailsDto? Restart = null,
+    MacOSDetailsDto? MacOS = null);
 
 /// <summary>What a pending restart is for. Null when no restart is pending.</summary>
 /// <param name="Updates">Updates waiting for the restart.</param>
@@ -401,9 +402,18 @@ public sealed record RestartUpdateDto(Guid? UpdateGuid, string Title, IReadOnlyL
 public sealed record ApplicationUpdatesStatusDto(bool Enabled, bool Supported, int ApprovedApps, string? WingetVersion, DateTimeOffset? LastCheckAt,
     string? LastError, string? WingetSetupError = null, string? ServerCopyError = null);
 
-/// <summary>Linux-only endpoint details (null for Windows endpoints).</summary>
+/// <summary>Linux-only endpoint details (null for Windows and macOS endpoints).</summary>
 /// <param name="KeyProtection">How the agent's private key is protected: systemd-creds-host or file-permissions.</param>
 public sealed record LinuxDetailsDto(string? OsId, string? OsVersion, string? KernelVersion, string? PackageManager, string? KeyProtection);
+
+/// <summary>macOS-only endpoint details (null for Windows and Linux endpoints). The macOS agent is experimental.</summary>
+/// <param name="OsId">Always <c>macos</c>.</param>
+/// <param name="OsVersion">The <c>sw_vers</c> ProductVersion, e.g. <c>15.7.2</c>.</param>
+/// <param name="OsBuild">The macOS build (<c>sw_vers</c> BuildVersion, e.g. <c>24G325</c>).</param>
+/// <param name="KernelVersion">The Darwin kernel release.</param>
+/// <param name="PackageManager"><c>softwareupdate</c>.</param>
+/// <param name="KeyProtection">How the agent's private key is protected (<c>file-permissions</c>).</param>
+public sealed record MacOSDetailsDto(string? OsId, string? OsVersion, string? OsBuild, string? KernelVersion, string? PackageManager, string? KeyProtection);
 
 /// <summary>Whether the endpoint's agent can update itself, and to what.</summary>
 /// <param name="AvailableVersion">The version an agent update would install now (null when none).</param>
@@ -653,8 +663,13 @@ public sealed record EnrollmentTokenDto(
 public sealed record CreateTokensRequest(Guid OrganizationId, Guid? SiteId, string? Description, int ExpiresInHours, int MaxUses, int Count);
 
 /// <param name="LinuxEnrollCommand">Enrolls an installed Linux agent; the token is piped in so it never shows in the process list.</param>
-public sealed record CreatedTokenDto(EnrollmentTokenDto Token, string PlaintextToken, string MsiExecCommand, string? LinuxEnrollCommand = null);
+/// <param name="MacEnrollCommand">Enrolls an installed macOS agent (experimental) the same way; null when the server has no
+/// macOS (pkg) agent package.</param>
+public sealed record CreatedTokenDto(EnrollmentTokenDto Token, string PlaintextToken, string MsiExecCommand, string? LinuxEnrollCommand = null,
+    string? MacEnrollCommand = null);
 
+/// <param name="MacOneLiner"><c>curl … | sudo sh</c> command that installs the experimental macOS agent; null (like
+/// <paramref name="MacScriptUrl"/>) when the server has no macOS (pkg) agent package.</param>
 public sealed record DeploymentCodeDto(
     Guid Id,
     string Code,
@@ -674,7 +689,9 @@ public sealed record DeploymentCodeDto(
     string OneLiner,
     string ScriptUrl,
     string? LinuxOneLiner = null,
-    string? LinuxScriptUrl = null);
+    string? LinuxScriptUrl = null,
+    string? MacOneLiner = null,
+    string? MacScriptUrl = null);
 
 public sealed record CreateDeploymentCodeRequest(Guid OrganizationId, Guid? SiteId, string Name, int? ExpiresInDays, IReadOnlyList<string>? AllowedSourceCidrs,
     int? MaxPendingRequests);

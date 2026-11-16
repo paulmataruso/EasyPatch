@@ -15,12 +15,29 @@ public sealed record AgentUpdateTarget(AgentPackage? Package, string? ErrorCode,
 }
 
 /// <summary>
-/// Chooses the agent package for an update: the newest package for the agent's architecture (or the requested version),
-/// which must be newer than the installed agent and carry a release signature from a key the agent trusts. The server
-/// cannot verify the signature itself; the agent does that before installing.
+/// Chooses the agent package for an update: the newest package for the agent's architecture and package format (or the
+/// requested version), which must be newer than the installed agent and carry a release signature from a key the agent
+/// trusts. The server cannot verify the signature itself; the agent does that before installing.
 /// </summary>
 public static class AgentUpdatePlanner
 {
+    /// <summary>The package format the endpoint's agent installs updates from: the one it reported (MSI when it did not say,
+    /// see <see cref="AgentRelease.NormalizeFormat"/>), or null when that format does not belong to the endpoint's platform
+    /// (MSI for Windows, deb or rpm for Linux, pkg for macOS), so that no agent is ever offered another platform's package.</summary>
+    public static string? PackageFormat(Endpoint endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        var format = endpoint.AgentPackageFormat ?? AgentRelease.FormatMsi;
+        var fits = endpoint.Platform switch
+        {
+            AgentPlatforms.Windows => format == AgentRelease.FormatMsi,
+            AgentPlatforms.Linux => format is AgentRelease.FormatDeb or AgentRelease.FormatRpm,
+            AgentPlatforms.MacOS => format == AgentRelease.FormatPkg,
+            _ => false,
+        };
+        return fits ? format : null;
+    }
+
     public static AgentUpdateTarget Resolve(Endpoint endpoint, AgentPackageService packages, string? version = null)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
@@ -33,7 +50,12 @@ public static class AgentUpdatePlanner
                 "or was built without a release key. Install a newer agent package on it once; after that it can update itself.");
         }
 
-        var format = endpoint.AgentPackageFormat ?? AgentRelease.FormatMsi;
+        if (PackageFormat(endpoint) is not { } format)
+        {
+            return Fail(AgentUpdateTarget.NoPackage, endpoint.AgentPackageFormat is null
+                ? $"The EasyPatch agent on {endpoint.Hostname} did not report its package format, so no {endpoint.Platform} agent package can be chosen."
+                : $"The EasyPatch agent on {endpoint.Hostname} reported package format '{endpoint.AgentPackageFormat}', which is not a {endpoint.Platform} package format.");
+        }
 
         if (version is not null && AgentRelease.ParseVersion(version) is null)
         {

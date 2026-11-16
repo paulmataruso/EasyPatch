@@ -90,7 +90,12 @@ public sealed class ScanIngestionService(
         {
             var message = report.ErrorMessage ?? WindowsUpdateErrors.DescribeCode(report.ErrorCode);
             endpoint.LastScanError = Truncate(message, 2000);
-            var what = endpoint.Platform == AgentPlatforms.Linux ? "Package update scan" : "Windows Update scan";
+            var what = endpoint.Platform switch
+            {
+                AgentPlatforms.Linux => "Package update scan",
+                AgentPlatforms.MacOS => "Software update scan",
+                _ => "Windows Update scan",
+            };
             EndpointEvents.Add(db, endpoint, "ScanFailed", $"{what} failed: {message}", now, EventSeverity.Warning, report.JobId,
                 new { report.ErrorCode });
             await db.SaveChangesAsync(ct);
@@ -293,6 +298,13 @@ public sealed class ScanIngestionService(
             endpoint.OsVersion = Truncate(report.OsDisplayVersion ?? report.OsVersion, 255);
             endpoint.OsBuild = endpoint.KernelVersion;
         }
+        else if (endpoint.Platform == AgentPlatforms.MacOS)
+        {
+            // macOS: the version is the sw_vers ProductVersion ("15.7.2") and the build its BuildVersion ("24G325"), so
+            // OsChanged records macOS updates; the Darwin kernel release is the fallback when the agent sent no build.
+            endpoint.OsVersion = Truncate(report.OsVersion ?? report.OsDisplayVersion, 255);
+            endpoint.OsBuild = Truncate(report.OsBuildVersion, 255) ?? endpoint.KernelVersion;
+        }
         endpoint.AgentVersion = Truncate(report.AgentVersion, 255);
         endpoint.AgentInstalledAt = report.AgentInstalledAt ?? endpoint.AgentInstalledAt;
         endpoint.LastInventoryAt = now;
@@ -306,9 +318,12 @@ public sealed class ScanIngestionService(
 
         if (previousOs is not null && previousOs != endpoint.OsBuild)
         {
-            EndpointEvents.Add(db, endpoint, "OsChanged", endpoint.Platform == AgentPlatforms.Linux
-                ? $"Running kernel changed from {previousOs} to {endpoint.OsBuild}."
-                : $"Operating system build changed from {previousOs} to {endpoint.OsBuild}.", now);
+            EndpointEvents.Add(db, endpoint, "OsChanged", endpoint.Platform switch
+            {
+                AgentPlatforms.Linux => $"Running kernel changed from {previousOs} to {endpoint.OsBuild}.",
+                AgentPlatforms.MacOS => $"macOS build changed from {previousOs} to {endpoint.OsBuild}.",
+                _ => $"Operating system build changed from {previousOs} to {endpoint.OsBuild}.",
+            }, now);
         }
 
         if (string.Equals(endpoint.WindowsUpdateServiceStartMode, "Disabled", StringComparison.OrdinalIgnoreCase))
@@ -549,6 +564,7 @@ public sealed class ScanIngestionService(
         null => null,
         UpdateSourceType.Wsus => $"WSUS ({source.WsusServer})",
         UpdateSourceType.PackageRepositories => "Package repositories",
+        UpdateSourceType.AppleSoftwareUpdate => "Apple software update",
         var type => type.ToString(),
     };
 

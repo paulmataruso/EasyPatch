@@ -13,7 +13,7 @@ import {
   type UserMessagePreset,
   type UserMessagePresetDto,
 } from '../api/types';
-import { formatDuration, isLinux } from '../lib/format';
+import { formatDuration, isLinux, isMacOS } from '../lib/format';
 import { Dialog } from './Dialog';
 import { jobIdOf } from './InstallDialog';
 import { EXPIRY_OPTIONS, RestartModeFields } from './PolicySections';
@@ -153,7 +153,8 @@ export function RestartDialog({ target, onClose, onBulkResult }: {
         {endpoint && <EndpointRestartContext endpoint={endpoint} />}
         {target?.kind === 'bulk' && (
           <p className="text-muted">
-            Each endpoint gets its own restart job. Endpoints whose agent is older than 1.1.0 are skipped and listed in the results.
+            Each endpoint gets its own restart job. Endpoints whose agent is older than 1.1.0 are skipped and listed in the results. macOS endpoints
+            (experimental agent) restart without warning signed-in users on screen.
           </p>
         )}
 
@@ -226,6 +227,12 @@ function EndpointRestartContext({ endpoint }: { endpoint: EndpointDetailDto }) {
   return (
     <div className="flex flex-col gap-2">
       {!s.isOnline && <Alert tone="warn">The endpoint is offline. The restart waits until it checks in, up to the time limit below.</Alert>}
+      {isMacOS(s.platform) && (
+        <Alert tone="warn" title="Signed-in users are not warned on screen">
+          The experimental macOS agent restarts the Mac with <code>shutdown -r</code>. It shows no countdown, deadline or question, so unsaved work in open
+          sessions can be lost.
+        </Alert>
+      )}
       <SessionSummary endpoint={endpoint} />
       {endpoint.activeJob && endpoint.activeJob.type !== 'NotifyUser' && (
         <p className="text-xs text-muted">Another job is active; the restart starts after it finishes.</p>
@@ -239,6 +246,13 @@ export function SessionSummary({ endpoint }: { endpoint: EndpointDetailDto }) {
   const trays = endpoint.trayConnectedSessions ?? 0;
   if (users === null) return <p className="text-xs text-muted">Signed-in users: unknown until the agent reports.</p>;
   if (users === 0) return <p className="text-xs text-muted">Nobody is signed in.</p>;
+  if (isMacOS(endpoint.summary.platform)) {
+    return (
+      <p className="text-xs text-warn">
+        {users} signed-in user{users === 1 ? '' : 's'}. The macOS agent has no EasyPatch tray and does not warn signed-in users on screen before a restart.
+      </p>
+    );
+  }
   if (isLinux(endpoint.summary.platform) && !endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.tray)) {
     return (
       <p className="text-xs text-muted">
@@ -324,11 +338,15 @@ export function MessageDialog({ target, onClose, onBulkResult }: {
           <Alert tone="danger" title="This agent cannot show messages">
             {endpoint && isLinux(endpoint.summary.platform)
               ? 'Linux agents have no EasyPatch tray, so they cannot show messages to users.'
-              : 'Install EasyPatch agent 1.1.0 or later on this endpoint.'}
+              : endpoint && isMacOS(endpoint.summary.platform)
+                ? 'The macOS agent has no EasyPatch tray, so it cannot show messages to users.'
+                : 'Install EasyPatch agent 1.1.0 or later on this endpoint.'}
           </Alert>
         )}
         {target?.kind === 'bulk' && (
-          <p className="text-muted">Endpoints whose agent cannot show messages (Linux agents and agents older than 1.1.0) are skipped and listed in the results.</p>
+          <p className="text-muted">
+            Endpoints whose agent cannot show messages (Linux and macOS agents, and agents older than 1.1.0) are skipped and listed in the results.
+          </p>
         )}
         {endpoint && !unsupported && <SessionSummary endpoint={endpoint} />}
         {presets.isPending ? (

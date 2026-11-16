@@ -35,7 +35,7 @@ import { useUrlState } from '../../lib/urlState';
 export function EndpointsPage() {
   return (
     <>
-      <PageHeader title="Endpoints" subtitle="Windows and Linux devices running the EasyPatch agent." />
+      <PageHeader title="Endpoints" subtitle="Windows, Linux and (experimental) macOS devices running the EasyPatch agent." />
       <EndpointList />
     </>
   );
@@ -133,6 +133,12 @@ export function EndpointList({ organizationId: fixedOrg }: { organizationId?: st
               <option value="Rocky Linux">Rocky Linux</option>
               <option value="AlmaLinux">AlmaLinux</option>
               <option value="Oracle Linux">Oracle Linux</option>
+            </optgroup>
+            <optgroup label="macOS (experimental)">
+              <option value="macOS">All macOS</option>
+              <option value="macOS Tahoe">macOS Tahoe</option>
+              <option value="macOS Sequoia">macOS Sequoia</option>
+              <option value="macOS Sonoma">macOS Sonoma</option>
             </optgroup>
           </Select>
         </Field>
@@ -389,7 +395,8 @@ function BulkInstallDialog({ open, count, loading, error, onClose, onConfirm }: 
       <div className="flex flex-col gap-3 text-sm">
         <p>
           Each endpoint receives an <strong>Install all missing updates</strong> job. The agent performs a fresh update scan (Windows Update on Windows, apt or dnf
-          on Linux) and installs every update its policy allows (allowed categories, optional updates and exclusions).
+          on Linux, softwareupdate on macOS) and installs every update its policy allows (allowed categories, optional updates and exclusions). On Apple silicon
+          Macs, macOS updates that need a restart cannot be installed by the agent and fail.
         </p>
         <Alert tone="warn" title="Installing does not restart endpoints">
           Updates that need a restart are reported as <em>Pending restart</em>. Restart those endpoints with <strong>Restart…</strong> or a restart schedule in

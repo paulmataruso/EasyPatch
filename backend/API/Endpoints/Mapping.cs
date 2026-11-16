@@ -94,7 +94,7 @@ internal static class Mapping
     public static bool IsOutdated(string? agentVersion, Version? latest) =>
         latest is not null && Version.TryParse(agentVersion, out var v) && v < latest;
 
-    /// <summary>The newest agent version per package format (MSI for Windows, deb and rpm for Linux): an agent is
+    /// <summary>The newest agent version per package format (MSI for Windows, deb and rpm for Linux, pkg for macOS): an agent is
     /// outdated only when a newer package exists for the kind of agent it is.</summary>
     public sealed class LatestAgentVersions(IReadOnlyDictionary<string, Version> byFormat)
     {

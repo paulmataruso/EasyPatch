@@ -18,7 +18,8 @@ export function Advisories({ advisories, max = MAX_ADVISORIES, className }: { ad
 
 /**
  * Linux package facts shown where Windows updates show KB numbers: (name,) installed → new version, architecture,
- * repository and advisories. The installed version is only known in endpoint views.
+ * repository and advisories. The installed version is only known in endpoint views. macOS updates (Apple software update) have
+ * neither a KB number nor a package.
  */
 export function PackageFacts({ pkg, showName = false, className }: { pkg: PackageInfoDto; showName?: boolean; className?: string }) {
   const version = pkg.installedVersion ? formatVersionChange(pkg.installedVersion, pkg.version) : showName ? pkg.version : null;

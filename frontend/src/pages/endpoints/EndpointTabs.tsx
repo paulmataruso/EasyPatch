@@ -61,6 +61,8 @@ import {
   formatVersionChange,
   humanize,
   isLinux,
+  isMacOS,
+  isWindows,
   jobItemPercent,
 } from '../../lib/format';
 import { describeApplicationUpdates } from '../../lib/applications';
@@ -73,6 +75,10 @@ import { useUrlState } from '../../lib/urlState';
 export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
   const s = e.summary;
   const linux = isLinux(s.platform);
+  const mac = isMacOS(s.platform);
+  const macVersion = e.macOS?.osVersion ?? s.osVersion;
+  const macBuild = e.macOS?.osBuild ?? s.osBuild;
+  const keyProtection = e.linux?.keyProtection ?? e.macOS?.keyProtection ?? null;
   const yesNo = (v: boolean | null) => (v === null ? '—' : v ? 'Yes' : 'No');
   const diskLow = e.systemDriveFreeBytes !== null && e.systemDriveFreeBytes < 10 * 1024 ** 3;
   const lastScanItems: [ReactNode, ReactNode][] = [
@@ -94,7 +100,23 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
       <Card title="Operating system">
         <KeyValueList
           items={
-            linux
+            mac
+              ? [
+                  ['Operating system', s.operatingSystem],
+                  ['Version / build', [macVersion, macBuild && `build ${macBuild}`].filter(Boolean).join(' · ') || null],
+                  ['Darwin kernel', e.macOS?.kernelVersion],
+                  ['Architecture', s.architecture],
+                  [
+                    'Support status',
+                    <span className="flex flex-wrap items-center gap-2">
+                      {humanize(s.osSupportStatus)}
+                      <span className="text-muted">Apple publishes no end-of-support dates for macOS</span>
+                    </span>,
+                  ],
+                  lastBoot,
+                  ['Time zone', e.timeZoneId],
+                ]
+              : linux
               ? [
                   ['Operating system', s.operatingSystem],
                   ['Distribution', [e.linux?.osId, e.linux?.osVersion ?? s.osVersion].filter(Boolean).join(' ') || null],
@@ -131,7 +153,13 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
         )}
       </Card>
 
-      {linux ? <PackageManagerCard endpoint={e} lastScanItems={lastScanItems} /> : <WindowsUpdateCard endpoint={e} lastScanItems={lastScanItems} />}
+      {linux ? (
+        <PackageManagerCard endpoint={e} lastScanItems={lastScanItems} />
+      ) : mac ? (
+        <SoftwareUpdateCard endpoint={e} lastScanItems={lastScanItems} />
+      ) : (
+        <WindowsUpdateCard endpoint={e} lastScanItems={lastScanItems} />
+      )}
       {e.applications && (e.applications.enabled || e.applications.lastCheckAt || e.applications.wingetSetupError) && (
         <ApplicationUpdatesCard status={e.applications} />
       )}
@@ -145,11 +173,11 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
             ['Processor', e.processorName],
             ['Memory', formatBytes(e.totalMemoryBytes)],
             [
-              linux ? 'Root file system' : 'System drive',
+              linux ? 'Root file system' : mac ? 'Startup volume' : 'System drive',
               e.systemDriveTotalBytes !== null ? (
                 <span className={diskLow ? 'text-warn' : undefined}>
                   {formatBytes(e.systemDriveFreeBytes)} free of {formatBytes(e.systemDriveTotalBytes)}
-                  {diskLow && (linux ? ' — low' : ' — low; cumulative updates may need 10 GB or more')}
+                  {diskLow && (linux || mac ? ' — low' : ' — low; cumulative updates may need 10 GB or more')}
                 </span>
               ) : null,
             ],
@@ -171,7 +199,7 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
             ['Enrolled', formatDateTime(e.enrolledAt)],
             ['Last check-in', s.lastCheckInAt ? `${formatDateTime(s.lastCheckInAt)} (${formatRelative(s.lastCheckInAt)})` : 'Never'],
             ['Signed-in users', <SessionSummary endpoint={e} />],
-            ...(linux ? [['Key protection', describeKeyProtection(e.linux?.keyProtection)] as [ReactNode, ReactNode]] : []),
+            ...(linux || mac ? [['Key protection', describeKeyProtection(keyProtection)] as [ReactNode, ReactNode]] : []),
             ['Compliance evaluated', formatDateTime(e.complianceEvaluatedAt)],
             ['Notes', e.notes ? <span className="whitespace-pre-wrap">{e.notes}</span> : null],
           ]}
@@ -180,6 +208,9 @@ export function OverviewTab({ endpoint: e }: { endpoint: EndpointDetailDto }) {
           <p className="mt-3 text-xs text-muted">
             The agent's private key relies on root-only file permissions: systemd-creds (systemd 250 or later) was not available or did not work.
           </p>
+        )}
+        {mac && keyProtection === 'file-permissions' && (
+          <p className="mt-3 text-xs text-muted">The agent's private key relies on root-only file permissions; the macOS agent does not use the keychain.</p>
         )}
         <h3 className="mt-5 mb-2 text-xs font-semibold tracking-wide text-muted uppercase">Credentials</h3>
         {e.credentials.length === 0 ? (
@@ -294,6 +325,40 @@ function PackageManagerCard({ endpoint: e, lastScanItems }: { endpoint: Endpoint
           {e.lastScanError}
         </Alert>
       )}
+    </Card>
+  );
+}
+
+/** macOS: Apple's software update service, which the (experimental) agent drives through softwareupdate. */
+function SoftwareUpdateCard({ endpoint: e, lastScanItems }: { endpoint: EndpointDetailDto; lastScanItems: [ReactNode, ReactNode][] }) {
+  const yesNo = (v: boolean | null) => (v === null ? '—' : v ? 'Yes' : 'No');
+  const architecture = e.agentUpdate?.architecture ?? e.summary.architecture ?? '';
+  const appleSilicon = /arm/i.test(architecture);
+  return (
+    <Card title="Software update">
+      <KeyValueList
+        items={[
+          ['Update source', e.updateSourceType ? humanize(e.updateSourceType) : null],
+          ['Managed by MDM', yesNo(e.managedByMdm)],
+          ['Package manager', e.macOS?.packageManager ? <Mono>{e.macOS.packageManager}</Mono> : null],
+          ['Automatic updates', e.automaticUpdatesMode],
+          ...lastScanItems,
+        ]}
+      />
+      <div className="mt-4 flex flex-col gap-2">
+        {appleSilicon && (
+          <Alert tone="warn" title="macOS updates that need a restart cannot be installed on Apple silicon">
+            Apple requires a volume owner's password or an MDM to install them, so the agent fails them (macos_owner_required). Install them on the Mac or through
+            your MDM. Updates that need no restart install normally.
+          </Alert>
+        )}
+        {e.managedByMdm && (
+          <Alert tone="info" title="Managed by MDM">
+            An MDM manages this Mac's software updates. Its settings may defer or force updates regardless of what EasyPatch installs.
+          </Alert>
+        )}
+        {e.lastScanError && <Alert tone="danger" title="Last scan failed">{e.lastScanError}</Alert>}
+      </div>
     </Card>
   );
 }
@@ -576,13 +641,14 @@ function ExcludeDialog({ endpointId, update, onClose }: { endpointId: string; up
 export function InstalledTab({ endpoint }: { endpoint: EndpointDetailDto }) {
   const endpointId = endpoint.summary.id;
   const linux = isLinux(endpoint.summary.platform);
+  const mac = isMacOS(endpoint.summary.platform);
   const { canOperate } = useAuth();
   const [search, setSearch] = useState('');
   const [removing, setRemoving] = useState<RemovableUpdate | null>(null);
   const list = useList<EndpointUpdateDto>(`/endpoints/${endpointId}/installed-updates`, undefined, { refetchInterval: 30_000 });
   const managed = endpoint.summary.status === 'Active';
   const canRemove = canOperate && managed && endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.uninstallUpdates);
-  const removeHint = canOperate && managed && !linux && !canRemove ? ' Removing an update needs EasyPatch agent 1.8.0 or later.' : '';
+  const removeHint = canOperate && managed && isWindows(endpoint.summary.platform) && !canRemove ? ' Removing an update needs EasyPatch agent 1.8.0 or later.' : '';
   const items = list.page.items.filter(
     (u) => !search || `${u.title} ${u.kbNumbers.join(' ')} ${u.package?.name ?? ''}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -591,11 +657,13 @@ export function InstalledTab({ endpoint }: { endpoint: EndpointDetailDto }) {
   return (
     <>
       <Toolbar>
-        <TextField label="Filter" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={linux ? 'Title or package' : 'Title or KB'} className="w-72" />
+        <TextField label="Filter" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={linux ? 'Title or package' : mac ? 'Title' : 'Title or KB'} className="w-72" />
         <p className="pb-2 text-xs text-muted">
           {linux
             ? 'Package updates the agent reported as available and later found installed appear here. The full list of installed packages is not reported.'
-            : `Only updates confirmed installed by a Windows Update scan appear here.${removeHint}`}
+            : mac
+              ? 'macOS updates the agent reported as available and later found installed appear here. The Mac’s full update history is not reported.'
+              : `Only updates confirmed installed by a Windows Update scan appear here.${removeHint}`}
         </p>
       </Toolbar>
       {items.length === 0 ? (
@@ -606,7 +674,7 @@ export function InstalledTab({ endpoint }: { endpoint: EndpointDetailDto }) {
             <thead>
               <tr>
                 <th>Update</th>
-                <th>{linux ? 'Package' : 'KB'}</th>
+                {!mac && <th>{linux ? 'Package' : 'KB'}</th>}
                 <th>Category</th>
                 <th>Installed</th>
                 {canRemove && <th className="text-right">Actions</th>}
@@ -623,19 +691,21 @@ export function InstalledTab({ endpoint }: { endpoint: EndpointDetailDto }) {
                       </Link>
                     )}
                   </td>
-                  <td className="text-xs">
-                    {u.package ? (
-                      <span className="flex flex-col gap-0.5">
-                        <span className="font-mono">{u.package.name}</span>
-                        <span className="font-mono text-muted">
-                          {formatVersionChange(u.package.installedVersion, u.package.version)}
-                          {u.package.architecture && ` · ${u.package.architecture}`}
+                  {!mac && (
+                    <td className="text-xs">
+                      {u.package ? (
+                        <span className="flex flex-col gap-0.5">
+                          <span className="font-mono">{u.package.name}</span>
+                          <span className="font-mono text-muted">
+                            {formatVersionChange(u.package.installedVersion, u.package.version)}
+                            {u.package.architecture && ` · ${u.package.architecture}`}
+                          </span>
                         </span>
-                      </span>
-                    ) : (
-                      <span className="font-mono whitespace-nowrap">{u.kbNumbers.join(', ') || '—'}</span>
-                    )}
-                  </td>
+                      ) : (
+                        <span className="font-mono whitespace-nowrap">{u.kbNumbers.join(', ') || '—'}</span>
+                      )}
+                    </td>
+                  )}
                   <td>
                     <CategoryBadge category={u.category} />
                   </td>
@@ -660,13 +730,17 @@ export function InstalledTab({ endpoint }: { endpoint: EndpointDetailDto }) {
   );
 }
 
-export function HistoryTab({ endpointId, linux = false }: { endpointId: string; linux?: boolean }) {
+export function HistoryTab({ endpointId, platform }: { endpointId: string; platform?: string | null }) {
   const [page, setPage] = useState(1);
-  const list = useList<UpdateHistoryDto>(linux ? null : `/endpoints/${endpointId}/update-history`, { page, pageSize: 100 }, { keepPrevious: true });
-  if (linux) {
+  const windows = isWindows(platform);
+  const list = useList<UpdateHistoryDto>(windows ? `/endpoints/${endpointId}/update-history` : null, { page, pageSize: 100 }, { keepPrevious: true });
+  if (!windows) {
     return (
       <EmptyState title="No update history" icon={<History className="size-8" aria-hidden />}>
-        Linux agents do not report package-manager history. Installations made through EasyPatch are listed on the Jobs tab.
+        {isMacOS(platform)
+          ? 'The macOS agent does not report the Mac’s software update history.'
+          : 'Linux agents do not report package-manager history.'}{' '}
+        Installations made through EasyPatch are listed on the Jobs tab.
       </EmptyState>
     );
   }
@@ -824,7 +898,8 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
     </span>,
   ];
   const report = endpoint.windowsUpdatePolicy;
-  const linux = isLinux(endpoint.summary.platform);
+  // Linux and macOS agents have no tray, winget or Windows Update settings.
+  const windows = isWindows(endpoint.summary.platform);
   const supportsWu = endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.windowsUpdatePolicy);
   const anyManaged = WINDOWS_UPDATE_POLICY_GROUPS.some((g) => p.windowsUpdate?.[WU_GROUPS[g].key]);
   return (
@@ -856,12 +931,12 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
                 'excludedKbs',
                 <>
                   {p.excludedKbs.length ? <span className="font-mono text-xs">{p.excludedKbs.join(', ')}</span> : 'None'}
-                  {linux && <span className="text-xs text-muted">(Windows updates only)</span>}
+                  {!windows && <span className="text-xs text-muted">(Windows updates only)</span>}
                 </>,
               ),
-              ...(linux
-                ? []
-                : [row('Application updates (winget)', 'applicationUpdates', describeApplicationUpdates(p.applicationUpdates))]),
+              ...(windows
+                ? [row('Application updates (winget)', 'applicationUpdates', describeApplicationUpdates(p.applicationUpdates))]
+                : []),
               row('Rollout delay: security updates', 'securityInstallDelayDays', delayText(p.securityInstallDelayDays ?? 0)),
               row('Rollout delay: other updates', 'installDelayDays', delayText(p.installDelayDays ?? 0)),
               row(
@@ -877,15 +952,15 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
                   ? `${formatDays(p.maintenanceDays)} at ${p.maintenanceStart?.slice(0, 5) ?? '—'} for ${formatDuration(p.maintenanceDurationMinutes)} (${p.timeZone})`
                   : 'None',
               ),
-              ...(linux
-                ? []
-                : [
+              ...(windows
+                ? [
                     row(
                       'Download before the window',
                       'preDownloadHours',
                       (p.preDownloadHours ?? 0) > 0 ? `Up to ${p.preDownloadHours} hours before it opens (with automatic installation)` : 'Off',
                     ),
-                  ]),
+                  ]
+                : []),
             ]}
           />
         </Card>
@@ -893,12 +968,12 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
           <KeyValueList
             items={[
               row('Restart schedule', 'restartSchedule', p.restartSchedule ? `${describeRestartSchedule(p.restartSchedule)} (${p.timeZone})` : 'None'),
-              ...(linux
-                ? []
-                : [
+              ...(windows
+                ? [
                     row('EasyPatch icon', 'trayIconEnabled', p.trayIconEnabled ? 'Shown' : 'Hidden (shown only with a message or restart request)'),
                     row('Installation notifications', 'installNotificationsEnabled', p.installNotificationsEnabled ? 'On' : 'Off'),
-                  ]),
+                  ]
+                : []),
               row('Agent updates', 'agentAutoUpdateEnabled', p.agentAutoUpdateEnabled ? 'Automatic' : 'Manual'),
               ['Signed-in users', <SessionSummary endpoint={endpoint} />],
               [
@@ -907,14 +982,14 @@ export function EffectivePolicyTab({ endpoint }: { endpoint: EndpointDetailDto }
                   endpoint.agentCapabilities.map(humanize).join(', ')
                 ) : (
                   <span className="text-warn">
-                    {linux ? 'None reported' : 'None: restarts, messages and Windows Update settings need agent 1.1.0 or later'}
+                    {windows ? 'None: restarts, messages and Windows Update settings need agent 1.1.0 or later' : 'None reported'}
                   </span>
                 ),
               ],
             ]}
           />
         </Card>
-        {!linux && (
+        {windows && (
           <Card title="Windows Update settings" className="xl:col-span-2">
             {!supportsWu && anyManaged && (
               <Alert tone="warn" className="mb-4">
@@ -1057,7 +1132,7 @@ function EndpointPolicyDialog({ endpoint, open, onClose }: { endpoint: EndpointD
         ) : (
           <PolicyEditor
             scope="Endpoint"
-            linux={isLinux(s.platform)}
+            platform={s.platform}
             policy={policy.data ?? null}
             inherited={resolveInherited([global.data, org.data, site.data, ...tagPolicies.map((l) => l.policy)])}
             readOnly={false}

@@ -1,4 +1,4 @@
-import { CircleDashed, Loader2, Power, RotateCw, ShieldAlert } from 'lucide-react';
+import { CircleDashed, FlaskConical, Loader2, Power, RotateCw, ShieldAlert } from 'lucide-react';
 import type {
   ComplianceStatus,
   EndpointStatus,
@@ -10,7 +10,7 @@ import type {
   OsSupportStatus,
   UpdateCategory,
 } from '../api/types';
-import { humanize, isLinux } from '../lib/format';
+import { humanize, isLinux, isMacOS, MACOS_EXPERIMENTAL } from '../lib/format';
 import { Badge, Dot, type Tone } from './ui';
 
 export const complianceTone: Record<ComplianceStatus, Tone> = {
@@ -162,8 +162,15 @@ export function OsSupportBadge({ status }: { status: OsSupportStatus }) {
   return <Badge tone="neutral">Unknown</Badge>;
 }
 
-/** "Windows" or "Linux" (EndpointSummaryDto.platform). */
+/** "Windows", "Linux" or "macOS" (EndpointSummaryDto.platform); macOS is marked experimental. */
 export function PlatformBadge({ platform }: { platform: string | null | undefined }) {
+  if (isMacOS(platform)) {
+    return (
+      <Badge tone="warn" title={`macOS endpoint (Apple software update). ${MACOS_EXPERIMENTAL}`} icon={<FlaskConical className="size-3" aria-hidden />}>
+        macOS <span className="font-normal">(experimental)</span>
+      </Badge>
+    );
+  }
   const linux = isLinux(platform);
   return (
     <Badge tone={linux ? 'info' : 'neutral'} title={linux ? 'Linux endpoint (apt or dnf)' : 'Windows endpoint'}>

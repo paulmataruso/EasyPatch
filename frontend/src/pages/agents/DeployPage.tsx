@@ -16,7 +16,7 @@ export function DeployPage() {
         title="Deploy"
         subtitle={
           canOperate
-            ? 'Deploy the EasyPatch agent with enrollment tokens (msiexec on Windows, easypatch-agent enroll on Linux) or tokenless deployment codes (RMM scripts with approval).'
+            ? 'Deploy the EasyPatch agent with enrollment tokens (msiexec on Windows, easypatch-agent enroll on Linux and the experimental macOS agent) or tokenless deployment codes (RMM scripts with approval).'
             : 'Enrollment tokens, deployment codes and agent packages.'
         }
       />

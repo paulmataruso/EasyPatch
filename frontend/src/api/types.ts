@@ -676,7 +676,7 @@ export interface EndpointSummaryDto {
   osSupportStatus: OsSupportStatus;
   currentActivity: string | null;
   lastSeenIp: string | null;
-  /** "Windows" or "Linux" (see ENDPOINT_PLATFORMS). */
+  /** "Windows", "Linux" or "macOS" (see ENDPOINT_PLATFORMS). */
   platform: string;
   /** Allowed updates still inside their rollout delay (not counted as missing). */
   missingDeferredCount: number;
@@ -685,15 +685,35 @@ export interface EndpointSummaryDto {
   knownExploitedMissingCount: number;
 }
 
-export const ENDPOINT_PLATFORMS = { windows: 'Windows', linux: 'Linux' } as const;
+/** shared/EasyPatch.Contracts/Agent/AgentDtos.cs AgentPlatforms. The macOS agent is experimental. */
+export const ENDPOINT_PLATFORMS = { windows: 'Windows', linux: 'Linux', macOS: 'macOS' } as const;
 
-/** shared/EasyPatch.Contracts/Agent/AgentRelease.cs package formats. */
-export const AGENT_PACKAGE_FORMATS = { msi: 'msi', deb: 'deb', rpm: 'rpm' } as const;
+/** shared/EasyPatch.Contracts/Agent/AgentRelease.cs package formats ("pkg": the experimental macOS agent). */
+export const AGENT_PACKAGE_FORMATS = { msi: 'msi', deb: 'deb', rpm: 'rpm', pkg: 'pkg' } as const;
 
 /** Update source type a Linux agent reports (its apt or dnf repositories). */
 export const UPDATE_SOURCE_PACKAGE_REPOSITORIES = 'PackageRepositories';
 
-/** Linux-only endpoint details (null for Windows endpoints). */
+/** Update source type the macOS agent reports (Apple's software update service, through softwareupdate). */
+export const UPDATE_SOURCE_APPLE_SOFTWARE_UPDATE = 'AppleSoftwareUpdate';
+
+/** macOS-only endpoint details (null for Windows and Linux endpoints). The macOS agent is experimental. */
+export interface MacOSDetailsDto {
+  /** Always "macos". */
+  osId: string | null;
+  /** sw_vers ProductVersion, e.g. "15.7.2". */
+  osVersion: string | null;
+  /** sw_vers BuildVersion, e.g. "24G325". */
+  osBuild: string | null;
+  /** The Darwin kernel release. */
+  kernelVersion: string | null;
+  /** "softwareupdate". */
+  packageManager: string | null;
+  /** How the agent's private key is protected ("file-permissions"). */
+  keyProtection: string | null;
+}
+
+/** Linux-only endpoint details (null for Windows and macOS endpoints). */
 export interface LinuxDetailsDto {
   /** os-release ID, e.g. "ubuntu", "debian", "rhel", "rocky". */
   osId: string | null;
@@ -796,12 +816,14 @@ export interface EndpointDetailDto {
   windowsUpdatePolicyReportedAt: Instant | null;
   hasOwnPolicy: boolean;
   agentUpdate: AgentUpdateInfoDto | null;
-  /** Null for Windows endpoints. */
+  /** Null for Windows and macOS endpoints. */
   linux: LinuxDetailsDto | null;
-  /** winget application updates (null for Linux endpoints). */
+  /** winget application updates (null for Linux and macOS endpoints). */
   applications?: ApplicationUpdatesStatusDto | null;
   /** What a pending restart is for; null when no restart is pending. */
   restart?: RestartDetailsDto | null;
+  /** Null for Windows and Linux endpoints (and from servers before the macOS agent). */
+  macOS?: MacOSDetailsDto | null;
 }
 
 export interface ApplicationUpdatesStatusDto {
@@ -831,7 +853,7 @@ export interface AgentUpdateInfoDto {
   availableVersion: string | null;
   code: string | null;
   message: string | null;
-  /** The agent's package format: "msi", "deb" or "rpm". */
+  /** The agent's package format: "msi", "deb", "rpm" or "pkg". */
   packageFormat: string | null;
 }
 
@@ -1222,6 +1244,8 @@ export interface CreatedTokenDto {
   msiExecCommand: string;
   /** Enrolls an installed Linux agent; the token is piped in so it never shows in the process list. */
   linuxEnrollCommand: string | null;
+  /** Enrolls an installed macOS agent (experimental) the same way; null when the server has no macOS (pkg) package. */
+  macEnrollCommand?: string | null;
 }
 
 export interface DeploymentCodeDto {
@@ -1245,6 +1269,9 @@ export interface DeploymentCodeDto {
   /** `curl … | sudo sh` command that installs and enrolls a Linux agent. */
   linuxOneLiner: string | null;
   linuxScriptUrl: string | null;
+  /** `curl … | sudo sh` command for the experimental macOS agent; null (like macScriptUrl) when the server has no pkg package. */
+  macOneLiner?: string | null;
+  macScriptUrl?: string | null;
 }
 
 export interface CreateDeploymentCodeRequest {
@@ -1264,7 +1291,7 @@ export interface InstallScriptResponse {
   packageVersion: string;
   sha256: string;
   requireSignature: boolean;
-  /** "Windows" or "Linux". For Linux, packageFileName and sha256 list every package the script can install. */
+  /** "Windows", "Linux" or "macOS". For Linux and macOS, packageFileName and sha256 list every package the script can install. */
   platform: string;
   /** Windows: the downloads skip the certificate check and the agent trusts the server's published CA. */
   skipCertificateCheck: boolean;
@@ -1322,7 +1349,7 @@ export interface AgentPackageDto {
   releaseKeyId: string | null;
   /** Why a .sig file next to the package was ignored. */
   signatureProblem: string | null;
-  /** "msi", "deb" or "rpm". */
+  /** "msi", "deb", "rpm" or "pkg". */
   format: string;
 }
 
@@ -1376,7 +1403,7 @@ export interface ComplianceReportRow {
   osSupportStatus: OsSupportStatus;
   lastScanAt: Instant | null;
   lastCheckInAt: Instant | null;
-  /** "Windows" or "Linux". On Linux, osBuild is the kernel version. */
+  /** "Windows", "Linux" or "macOS". On Linux, osBuild is the kernel version; on macOS the Apple build. */
   platform: string;
 }
 

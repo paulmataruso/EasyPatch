@@ -28,7 +28,7 @@ import {
   TextField,
   Toolbar,
 } from '../../components/ui';
-import { formatDateTime, formatRelative } from '../../lib/format';
+import { formatDateTime, formatRelative, MACOS_EXPERIMENTAL } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 
 export function DeploymentCodesTab() {
@@ -58,7 +58,8 @@ export function DeploymentCodesTab() {
   return (
     <>
       <Alert tone="info" className="mb-4" title="Tokenless installs for RMM tools">
-        A deployment code is not a secret. The generated PowerShell script (Windows) or shell script (Linux) downloads the agent, verifies its SHA-256 hash (on
+        A deployment code is not a secret. The generated PowerShell script (Windows) or shell script (Linux, or the experimental macOS agent) downloads the
+        agent, verifies its SHA-256 hash (on
         Windows optionally also its Authenticode signature), installs it, and the endpoint then waits in{' '}
         <Link to="/approvals" className="text-accent hover:underline">Pending Approvals</Link>. Nothing is managed until an administrator approves it.
         Restrict codes to your RMM’s egress IP ranges where possible.
@@ -250,7 +251,7 @@ function CreateCodeDialog({ open, defaultOrganizationId, onClose, onCreated }: {
   );
 }
 
-type ScriptPlatform = 'windows' | 'linux';
+type ScriptPlatform = 'windows' | 'linux' | 'macos';
 
 function InstallScriptDialog({ code, onClose }: { code: DeploymentCodeDto | null; onClose: () => void }) {
   const [platform, setPlatform] = useState<ScriptPlatform>('windows');
@@ -264,9 +265,16 @@ function InstallScriptDialog({ code, onClose }: { code: DeploymentCodeDto | null
             tabs={[
               { id: 'windows', label: 'Windows (PowerShell)' },
               { id: 'linux', label: 'Linux (shell)' },
+              { id: 'macos', label: 'macOS (experimental)' },
             ]}
           />
-          {platform === 'windows' ? <WindowsScript key={code.id} code={code} /> : <LinuxScript key={code.id} code={code} />}
+          {platform === 'windows' ? (
+            <WindowsScript key={code.id} code={code} />
+          ) : platform === 'linux' ? (
+            <LinuxScript key={code.id} code={code} />
+          ) : (
+            <MacScript key={code.id} code={code} />
+          )}
         </>
       )}
     </Dialog>
@@ -380,6 +388,87 @@ function LinuxScript({ code }: { code: DeploymentCodeDto }) {
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium">Full shell script</p>
                 <DownloadButton fileName={`easypatch-install-${code.code}.sh`} text={s.script} label="Download .sh" mime="text/x-shellscript" />
+              </div>
+              <CodeBlock code={s.script} wrap={false} maxHeight="22rem" />
+            </div>
+            <div className="text-xs text-muted">
+              <p>Packages (version {s.packageVersion}); the script contains no secrets:</p>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {files.map((file, i) => (
+                  <li key={file}>
+                    <span className="font-mono">{file}</span>
+                    {hashes[i] && (
+                      <>
+                        {' '}
+                        SHA-256 <span className="font-mono break-all">{hashes[i]}</span>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
+        )
+      )}
+    </div>
+  );
+}
+
+/** What to know before installing the experimental macOS agent (deployment codes, enrollment tokens and packages). */
+export function MacOSExperimentalNotice({ className }: { className?: string }) {
+  return (
+    <Alert tone="warn" className={className} title={MACOS_EXPERIMENTAL}>
+      <ul className="mt-1 flex list-disc flex-col gap-0.5 pl-5">
+        <li>
+          On Apple silicon Macs the agent cannot install macOS updates that need a restart: Apple requires a volume owner’s password or an MDM. Those
+          updates fail (<span className="font-mono">macos_owner_required</span>); install them on the Mac or through your MDM. Intel Macs install them, and
+          they complete at the next restart.
+        </li>
+        <li>Restarts give signed-in users no on-screen warning, and the agent cannot show messages to users.</li>
+        <li>
+          The package is not signed or notarized by Apple. Downloaded with a browser and opened, macOS blocks it until you allow it in System Settings ›
+          Privacy &amp; Security.
+        </li>
+        <li>Requires macOS 14 (Sonoma) or later on Intel (x64) or Apple silicon (arm64).</li>
+      </ul>
+    </Alert>
+  );
+}
+
+function MacScript({ code }: { code: DeploymentCodeDto }) {
+  const script = useApi<InstallScriptResponse>(`/deployment-codes/${code.id}/install-script`, { platform: 'macOS' });
+  const s = script.data;
+  // As for Linux, the response lists every package the script can install (comma separated, in the same order).
+  const files = s ? s.packageFileName.split(', ') : [];
+  const hashes = s ? s.sha256.split(', ') : [];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <MacOSExperimentalNotice />
+      <p className="text-sm text-muted">
+        The script checks for macOS 14 or later, picks the .pkg package for the Mac’s CPU (Apple silicon or Intel), verifies its SHA-256 hash, writes{' '}
+        <span className="font-mono">/Library/EasyPatch/agent.conf</span> and installs the package with <span className="font-mono">installer</span>. The Mac must
+        trust the server’s certificate.
+      </p>
+      {script.isPending ? (
+        <Spinner label="Generating script…" />
+      ) : script.isError ? (
+        <ErrorState error={script.error} compact onRetry={() => void script.refetch()} />
+      ) : (
+        s && (
+          <>
+            <div>
+              <p className="mb-1 text-sm font-medium">One-liner for your RMM or a Terminal session (runs as root through sudo)</p>
+              <CodeBlock code={s.oneLiner} />
+              <p className="mt-1 text-xs text-muted">
+                Downloads the script from <span className="font-mono">{s.scriptUrl}</span>. If your tool can run a script file directly, use the full script below
+                instead (run it as root).
+              </p>
+            </div>
+            <div>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium">Full shell script</p>
+                <DownloadButton fileName={`easypatch-install-macos-${code.code}.sh`} text={s.script} label="Download .sh" mime="text/x-shellscript" />
               </div>
               <CodeBlock code={s.script} wrap={false} maxHeight="22rem" />
             </div>

@@ -1,25 +1,28 @@
 import { Download, Package } from 'lucide-react';
 import { useList } from '../../api/hooks';
-import type { AgentPackageDto, AgentVersionCountDto } from '../../api/types';
+import { AGENT_PACKAGE_FORMATS, type AgentPackageDto, type AgentVersionCountDto } from '../../api/types';
 import { CopyButton } from '../../components/Copy';
 import { Badge, buttonClasses, Card, EmptyState, ErrorState, ProgressBar, Spinner, TableWrap } from '../../components/ui';
-import { formatBytes, formatDateTime, formatPackageFormat } from '../../lib/format';
+import { formatBytes, formatDateTime, formatPackageFormat, MACOS_EXPERIMENTAL } from '../../lib/format';
+import { MacOSExperimentalNotice } from './DeploymentCodesTab';
 
 export function PackagesTab() {
   const packages = useList<AgentPackageDto>('/agent-packages');
   const versions = useList<AgentVersionCountDto>('/agent-versions', undefined, { refetchInterval: 60_000 });
   const total = versions.page.items.reduce((sum, v) => sum + v.count, 0);
+  const macPackages = packages.page.items.some((p) => p.format === AGENT_PACKAGE_FORMATS.pkg);
 
   return (
     <div className="flex flex-col gap-5">
       <Card title="Agent packages" padded={false}>
         <p className="px-4 pt-3 text-sm text-muted">
           Agent packages found in the server’s agent-packages directory, named{' '}
-          <span className="font-mono">EasyPatchAgent-&lt;version&gt;-&lt;x64|arm64&gt;.&lt;msi|deb|rpm&gt;</span>: MSI for Windows, DEB for Debian and Ubuntu, RPM
-          for RHEL-family distributions. Publish a new agent version by copying the package and its <span className="font-mono">.sig</span> release signature
+          <span className="font-mono">EasyPatchAgent-&lt;version&gt;-&lt;x64|arm64&gt;.&lt;msi|deb|rpm|pkg&gt;</span>: MSI for Windows, DEB for Debian and Ubuntu, RPM
+          for RHEL-family distributions, PKG for the experimental macOS agent. Publish a new agent version by copying the package and its <span className="font-mono">.sig</span> release signature
           there. Agents update themselves only to signed packages of their own format, and check the signature against the release key built into them.
         </p>
         <div className="p-4">
+          {macPackages && <MacOSExperimentalNotice className="mb-4" />}
           {packages.isPending ? (
             <Spinner />
           ) : packages.isError ? (
@@ -52,7 +55,13 @@ export function PackagesTab() {
                         {p.version} {p.isLatest && <Badge tone="ok">latest</Badge>}
                       </td>
                       <td>
-                        <Badge tone={p.format === 'msi' ? 'neutral' : 'info'}>{formatPackageFormat(p.format)}</Badge>
+                        {p.format === AGENT_PACKAGE_FORMATS.pkg ? (
+                          <Badge tone="warn" title={MACOS_EXPERIMENTAL}>
+                            {formatPackageFormat(p.format)} · experimental
+                          </Badge>
+                        ) : (
+                          <Badge tone={p.format === AGENT_PACKAGE_FORMATS.msi ? 'neutral' : 'info'}>{formatPackageFormat(p.format)}</Badge>
+                        )}
                       </td>
                       <td>{p.architecture}</td>
                       <td className="text-right whitespace-nowrap tabular-nums">{formatBytes(p.sizeBytes)}</td>
@@ -84,7 +93,7 @@ export function PackagesTab() {
                       <td className="text-right">
                         <a href={p.downloadUrl} className={buttonClasses('secondary', 'sm')} download>
                           <Download className="size-3.5" aria-hidden />
-                          {formatPackageFormat(p.format)}
+                          {(p.format ?? AGENT_PACKAGE_FORMATS.msi).toUpperCase()}
                         </a>
                       </td>
                     </tr>

@@ -27,7 +27,7 @@ import {
   Tabs,
   Textarea,
 } from '../../components/ui';
-import { formatDateTime, formatPackageFormat, formatRelative, humanize, isLinux, osDetails } from '../../lib/format';
+import { describeAgentPackage, formatDateTime, formatRelative, humanize, isLinux, isMacOS, isWindows, MACOS_EXPERIMENTAL, osDetails } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
 import { ActivityTab, EffectivePolicyTab, HistoryTab, InstalledTab, JobsTab, OverviewTab, UpdatesTab } from './EndpointTabs';
 
@@ -50,7 +50,7 @@ export function EndpointDetailPage() {
   const e = endpoint.data;
   const s = e.summary;
   const managed = s.status === 'Active';
-  const linux = isLinux(s.platform);
+  const windows = isWindows(s.platform);
   const details = osDetails(s);
 
   return (
@@ -94,6 +94,12 @@ export function EndpointDetailPage() {
       />
 
       <div className="mb-4 flex flex-col gap-3">
+        {isMacOS(s.platform) && (
+          <Alert tone="warn" title="Experimental macOS agent">
+            {MACOS_EXPERIMENTAL} On Apple silicon it cannot install macOS updates that need a restart (Apple requires a volume owner's password or
+            an MDM), and signed-in users are not warned on screen before a restart.
+          </Alert>
+        )}
         {!managed && (
           <Alert tone="danger" title={`This endpoint is ${s.status.toLowerCase()}`}>
             Its credentials are revoked. The agent can no longer report or receive jobs. Reinstall the agent and enroll again to manage it.
@@ -101,7 +107,7 @@ export function EndpointDetailPage() {
         )}
         {(e.summary.rebootPending || e.pendingRebootUpdateCount > 0) && (
           <Alert tone="info" title={`Restart pending${e.rebootPendingSince ? ` since ${formatDateTime(e.rebootPendingSince)}` : ''}`}>
-            <RestartDetails endpoint={e} linux={linux} />
+            <RestartDetails endpoint={e} windows={windows} />
             <p className="mt-2">
               <Power className="mr-1 inline size-3.5" aria-hidden />
               EasyPatch restarts an endpoint only when you ask it to, or on a restart schedule set in policy. The agent reports the new state after the restart.
@@ -157,7 +163,7 @@ export function EndpointDetailPage() {
       {tab === 'overview' && <OverviewTab endpoint={e} />}
       {tab === 'updates' && <UpdatesTab endpoint={e} onInstallSelected={(guids) => setInstall({ mode: 'Selected', guids })} onInstallAll={() => setInstall({ mode: 'AllEligible' })} />}
       {tab === 'installed' && <InstalledTab endpoint={e} />}
-      {tab === 'history' && <HistoryTab endpointId={e.summary.id} linux={linux} />}
+      {tab === 'history' && <HistoryTab endpointId={e.summary.id} platform={s.platform} />}
       {tab === 'jobs' && <JobsTab endpointId={e.summary.id} />}
       {tab === 'activity' && <ActivityTab endpointId={e.summary.id} />}
       {tab === 'policy' && <EffectivePolicyTab endpoint={e} />}
@@ -180,7 +186,7 @@ export function EndpointDetailPage() {
 /** "Updates automatically", "1.3.0 available", or why the agent cannot update itself. */
 function agentHint(e: EndpointDetailDto): ReactNode {
   const u = e.agentUpdate;
-  const pkg = u?.packageFormat ? `${formatPackageFormat(u.packageFormat)} package` : isLinux(e.summary.platform) ? 'package' : 'MSI';
+  const pkg = u?.packageFormat ? describeAgentPackage(u.packageFormat) : isWindows(e.summary.platform) ? 'MSI' : 'package';
   if (!u?.supported) return e.summary.agentOutdated ? `Newer version available (install the ${pkg} once)` : undefined;
   if (u.availableVersion) return u.automaticUpdates ? `Updating to ${u.availableVersion} automatically` : `${u.availableVersion} available`;
   if (u.code === 'agent_up_to_date') return u.automaticUpdates ? 'Up to date, updates automatically' : 'Up to date';
@@ -233,7 +239,9 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
     ? undefined
     : isLinux(s.platform)
       ? 'Linux agents have no EasyPatch tray, so they cannot show messages to users.'
-      : 'This agent cannot show messages. Install EasyPatch agent 1.1.0 or later.';
+      : isMacOS(s.platform)
+        ? 'The macOS agent has no EasyPatch tray, so it cannot show messages to users.'
+        : 'This agent cannot show messages. Install EasyPatch agent 1.1.0 or later.';
   const canUninstall = endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.uninstall);
   const uninstallHint = canUninstall
     ? undefined
@@ -326,7 +334,7 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
                 Update agent…
               </MenuItem>
               <MenuItem icon={<Pencil className="size-4" aria-hidden />} onClick={() => { setMenu(false); setDialog('edit'); }}>
-                Edit site, notes, ESU
+                {isMacOS(s.platform) ? 'Edit site and notes' : 'Edit site, notes, ESU'}
               </MenuItem>
               <MenuItem icon={<PackageX className="size-4" aria-hidden />} danger disabled={!canUninstall} hint={uninstallHint}
                 onClick={() => { setMenu(false); setDialog('uninstall'); }}>
@@ -360,7 +368,9 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
           The agent removes itself the next time it checks in, after any job it is running.{' '}
           {isLinux(s.platform)
             ? 'It removes the easypatch-agent package, which unenrolls it.'
-            : 'It runs its uninstaller, which restores the Windows Update settings EasyPatch changed, unenrolls it and removes the program.'}{' '}
+            : isMacOS(s.platform)
+              ? 'It unenrolls and removes the agent and its launchd daemon from the Mac.'
+              : 'It runs its uninstaller, which restores the Windows Update settings EasyPatch changed, unenrolls it and removes the program.'}{' '}
           The endpoint then shows as decommissioned with its history kept; delete it afterwards if you no longer need the record.
         </p>
         <p className="mt-2">
@@ -459,23 +469,26 @@ function EditEndpointDialog({ endpoint, open, onClose }: { endpoint: EndpointDet
             ))}
           </Select>
         </Field>
-        <Field
-          label={isLinux(s.platform) ? 'Extended security maintenance (Ubuntu Pro ESM)' : 'Extended Security Updates (ESU)'}
-          htmlFor="ep-esu"
-          hint={
-            isLinux(s.platform)
-              ? `Detected automatically on Ubuntu: ${endpoint.esuLicenseDetected ? 'Ubuntu Pro ESM services enabled' : 'no Ubuntu Pro ESM services found'}. Override only if detection is wrong.`
-              : `Detected automatically: ${endpoint.esuLicenseDetected ? 'ESU license found' : 'no ESU license found'}. Override only if detection is wrong.`
-          }
-        >
-          <Select id="ep-esu" value={form.esuOverride ?? 'Auto'} onChange={(e) => setForm({ ...form, esuOverride: e.target.value as EsuOverride })}>
-            {ESU_OVERRIDES.map((o) => (
-              <option key={o} value={o}>
-                {o === 'Auto' ? 'Automatic detection' : o === 'Enrolled' ? (isLinux(s.platform) ? 'Enrolled in extended support' : 'Enrolled in ESU') : 'Not enrolled'}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        {/* macOS has no extended support programme to record (Apple publishes no lifecycle dates). */}
+        {!isMacOS(s.platform) && (
+          <Field
+            label={isLinux(s.platform) ? 'Extended security maintenance (Ubuntu Pro ESM)' : 'Extended Security Updates (ESU)'}
+            htmlFor="ep-esu"
+            hint={
+              isLinux(s.platform)
+                ? `Detected automatically on Ubuntu: ${endpoint.esuLicenseDetected ? 'Ubuntu Pro ESM services enabled' : 'no Ubuntu Pro ESM services found'}. Override only if detection is wrong.`
+                : `Detected automatically: ${endpoint.esuLicenseDetected ? 'ESU license found' : 'no ESU license found'}. Override only if detection is wrong.`
+            }
+          >
+            <Select id="ep-esu" value={form.esuOverride ?? 'Auto'} onChange={(e) => setForm({ ...form, esuOverride: e.target.value as EsuOverride })}>
+              {ESU_OVERRIDES.map((o) => (
+                <option key={o} value={o}>
+                  {o === 'Auto' ? 'Automatic detection' : o === 'Enrolled' ? (isLinux(s.platform) ? 'Enrolled in extended support' : 'Enrolled in ESU') : 'Not enrolled'}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <Field label="Notes" htmlFor="ep-notes">
           <Textarea id="ep-notes" value={form.notes ?? ''} maxLength={4000} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </Field>
@@ -498,7 +511,7 @@ const RESTART_SOURCES: Record<string, string> = {
 };
 
 /** What the pending restart is for: the updates waiting for it and anything else Windows has queued. */
-function RestartDetails({ endpoint: e, linux }: { endpoint: EndpointDetailDto; linux: boolean }) {
+function RestartDetails({ endpoint: e, windows }: { endpoint: EndpointDetailDto; windows: boolean }) {
   const r = e.restart;
   const updates = r?.updates ?? [];
   const packages = r?.servicingPackages ?? [];
@@ -506,7 +519,7 @@ function RestartDetails({ endpoint: e, linux }: { endpoint: EndpointDetailDto; l
   const fileCount = r?.fileOperationCount ?? files.length;
   const reasons = e.rebootReasons.length > 0 && (
     <p className="text-xs">
-      Reported by {linux ? 'the operating system' : 'Windows'}: {e.rebootReasons.join(', ')}.
+      Reported by {windows ? 'Windows' : 'the operating system'}: {e.rebootReasons.join(', ')}.
     </p>
   );
 
@@ -542,7 +555,7 @@ function RestartDetails({ endpoint: e, linux }: { endpoint: EndpointDetailDto; l
         </div>
       ) : (
         <p>
-          {r?.detailsSupported || linux
+          {r?.detailsSupported || !windows
             ? 'No update is waiting for this restart.'
             : 'No installed update is known to be waiting for this restart.'}
         </p>
@@ -578,7 +591,7 @@ function RestartDetails({ endpoint: e, linux }: { endpoint: EndpointDetailDto; l
         </details>
       )}
       {reasons}
-      {!linux && r && !r.detailsSupported && e.summary.rebootPending && (
+      {windows && r && !r.detailsSupported && e.summary.rebootPending && (
         <p className="text-xs text-muted">Agent 1.5.3 and later also report which updates and files Windows has queued for the restart.</p>
       )}
     </div>

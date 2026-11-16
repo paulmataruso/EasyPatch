@@ -246,27 +246,46 @@ export function describeUserAgent(ua: string | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Platforms (Windows and Linux endpoints)
+// Platforms (Windows, Linux and macOS endpoints)
 // ---------------------------------------------------------------------------------------------
 
-/** True for a Linux endpoint ("Linux" platform); anything else (including a missing value) is Windows. */
+/** Shown wherever the macOS agent appears. */
+export const MACOS_EXPERIMENTAL = 'Experimental: the macOS agent is in development and not for production use.';
+
+/** True for a Linux endpoint ("Linux" platform). */
 export function isLinux(platform: string | null | undefined): boolean {
   return platform?.toLowerCase() === 'linux';
 }
 
+/** True for a macOS endpoint ("macOS" platform; the macOS agent is experimental). */
+export function isMacOS(platform: string | null | undefined): boolean {
+  return platform?.toLowerCase() === 'macos';
+}
+
+/** True for a Windows endpoint: anything that is not Linux or macOS, including a missing value (agents before 1.3.0). */
+export function isWindows(platform: string | null | undefined): boolean {
+  return !isLinux(platform) && !isMacOS(platform);
+}
+
+/** "Windows", "Linux" or "macOS". */
+export function platformName(platform: string | null | undefined): string {
+  return isLinux(platform) ? 'Linux' : isMacOS(platform) ? 'macOS' : 'Windows';
+}
+
 /**
- * The secondary OS line: "23H2 · build 22631.4317" on Windows; "kernel 6.8.0-45-generic" on Linux, where the version
- * (VERSION_ID) is only added when the distribution name does not already contain it.
+ * The secondary OS line: "23H2 · build 22631.4317" on Windows; "kernel 6.8.0-45-generic" on Linux and "build 24G325" on
+ * macOS, where the version (VERSION_ID, or the macOS version) is only added when the OS name does not already contain it.
  */
 export function osDetails(os: { platform: string; operatingSystem: string | null; osVersion: string | null; osBuild: string | null }): string[] {
-  if (isLinux(os.platform)) {
+  if (isLinux(os.platform) || isMacOS(os.platform)) {
     const version = os.osVersion && !(os.operatingSystem ?? '').includes(os.osVersion) ? os.osVersion : null;
-    return [version, os.osBuild && `kernel ${os.osBuild}`].filter((v): v is string => !!v);
+    const build = os.osBuild && (isLinux(os.platform) ? `kernel ${os.osBuild}` : `build ${os.osBuild}`);
+    return [version, build].filter((v): v is string => !!v);
   }
   return [os.osVersion, os.osBuild && `build ${os.osBuild}`].filter((v): v is string => !!v);
 }
 
-/** How a Linux agent protects its private key (LinuxDetailsDto.keyProtection). */
+/** How a Linux or macOS agent protects its private key (LinuxDetailsDto/MacOSDetailsDto.keyProtection). */
 export function describeKeyProtection(value: string | null | undefined): string {
   switch (value) {
     case 'systemd-creds-host':
@@ -288,7 +307,14 @@ export function formatVersionChange(installed: string | null | undefined, versio
   return version || installed || '—';
 }
 
-/** Agent package format for display: "msi" → "MSI", "deb" → "DEB", "rpm" → "RPM". */
+/** Agent package format for display: "msi" → "MSI", "deb" → "DEB", "rpm" → "RPM", "pkg" → "macOS package (.pkg)". */
 export function formatPackageFormat(format: string | null | undefined): string {
+  if (format?.toLowerCase() === 'pkg') return 'macOS package (.pkg)';
   return format ? format.toUpperCase() : '—';
+}
+
+/** An agent package in a sentence: "MSI package", "DEB package", "macOS package (.pkg)". */
+export function describeAgentPackage(format: string | null | undefined): string {
+  if (!format) return 'package';
+  return format.toLowerCase() === 'pkg' ? formatPackageFormat(format) : `${formatPackageFormat(format)} package`;
 }

@@ -376,6 +376,14 @@ public abstract class IntegrationTest(PostgresFixture postgres) : IAsyncLifetime
         }
 
         await Factory.DisposeAsync();
+
+        // Close this test's pooled connections now. Each test has its own database (and so its own pool), and idle
+        // connections would otherwise stay open until Npgsql prunes them, running the shared container out of connections.
+        await using (var connection = new NpgsqlConnection(Factory.ConnectionString))
+        {
+            NpgsqlConnection.ClearPool(connection);
+        }
+
         GC.SuppressFinalize(this);
     }
 

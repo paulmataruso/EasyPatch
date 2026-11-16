@@ -458,7 +458,8 @@ function DeployTab({ org }: { org: OrganizationDto }) {
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <Card title={<span className="flex items-center gap-2"><KeyRound className="size-4" aria-hidden /> Enrollment tokens</span>}>
         <p className="text-sm text-muted">
-          Secret, limited-use tokens for a manual or GPO-based <code>msiexec</code> installation on Windows, or <code>easypatch-agent enroll</code> on Linux.
+          Secret, limited-use tokens for a manual or GPO-based <code>msiexec</code> installation on Windows, or <code>easypatch-agent enroll</code> on Linux and
+          macOS (experimental).
           Endpoints enrolled with a token become active immediately.
         </p>
         <div className="mt-3 flex gap-2">
@@ -469,7 +470,8 @@ function DeployTab({ org }: { org: OrganizationDto }) {
       </Card>
       <Card title={<span className="flex items-center gap-2"><Terminal className="size-4" aria-hidden /> Deployment codes (RMM)</span>}>
         <p className="text-sm text-muted">
-          Tokenless PowerShell (Windows) or shell (Linux) installer for RMM tools. The script contains no secret; each new endpoint waits in{' '}
+          Tokenless PowerShell (Windows) or shell (Linux, experimental macOS) installer for RMM tools. The script contains no secret; each new endpoint waits
+          in{' '}
           <strong>Pending Approvals</strong> until an administrator approves it.
         </p>
         <div className="mt-3 flex gap-2">

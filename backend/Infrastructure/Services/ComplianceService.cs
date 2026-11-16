@@ -129,10 +129,15 @@ public sealed class ComplianceService(EasyPatchDbContext db, PolicyService polic
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         var today = DateOnly.FromDateTime(now.UtcDateTime);
-        var result = endpoint.Platform == EasyPatch.Contracts.Agent.AgentPlatforms.Linux
-            ? LifecycleEvaluator.EvaluateLinux(lifecycle, endpoint.OsId, endpoint.OsVersion, endpoint.EsuLicenseDetected, endpoint.EsuOverride, today)
-            : LifecycleEvaluator.Evaluate(lifecycle, endpoint.OsBuildNumber, endpoint.OsEdition, endpoint.OsProductType,
-                endpoint.EsuLicenseDetected, endpoint.EsuOverride, today);
+        var result = endpoint.Platform switch
+        {
+            EasyPatch.Contracts.Agent.AgentPlatforms.Linux =>
+                LifecycleEvaluator.EvaluateLinux(lifecycle, endpoint.OsId, endpoint.OsVersion, endpoint.EsuLicenseDetected, endpoint.EsuOverride, today),
+            // Apple publishes no end-of-support dates for macOS releases, so their support status stays unknown.
+            EasyPatch.Contracts.Agent.AgentPlatforms.MacOS => new LifecycleResult(OsSupportStatus.Unknown, null, "macOS", "Any", null),
+            _ => LifecycleEvaluator.Evaluate(lifecycle, endpoint.OsBuildNumber, endpoint.OsEdition, endpoint.OsProductType,
+                endpoint.EsuLicenseDetected, endpoint.EsuOverride, today),
+        };
         endpoint.OsSupportStatus = result.Status;
         endpoint.OsEndOfServicing = result.EndOfServicing;
     }

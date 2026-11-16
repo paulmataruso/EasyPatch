@@ -17,7 +17,7 @@ public sealed class EasyPatchOptions
     /// <summary>Public HTTPS base URL agents and installers use, e.g. https://patches.example.com.</summary>
     public string PublicUrl { get; set; } = "https://localhost";
 
-    /// <summary>Directory containing agent packages (EasyPatchAgent-&lt;version&gt;-&lt;arch&gt;.&lt;msi|deb|rpm&gt;), each
+    /// <summary>Directory containing agent packages (EasyPatchAgent-&lt;version&gt;-&lt;arch&gt;.&lt;msi|deb|rpm|pkg&gt;), each
     /// optionally with its release signature (<c>.sig</c>).</summary>
     public string AgentPackagesPath { get; set; } = "/app/agent-packages";
 
@@ -32,11 +32,12 @@ public sealed class EasyPatchOptions
 /// <param name="Release">The release signature file, when present and describing exactly this file. The server never
 /// checks the signature itself (it has no release key); agents do.</param>
 /// <param name="SignatureProblem">Why a <c>.sig</c> file next to the package was ignored.</param>
-/// <param name="Format">msi, deb or rpm (<see cref="AgentRelease.PackageFormats"/>).</param>
+/// <param name="Format">msi, deb, rpm or pkg (<see cref="AgentRelease.PackageFormats"/>).</param>
 public sealed record AgentPackage(string FileName, string Version, string Architecture, long SizeBytes, string Sha256, DateTimeOffset ModifiedAt,
     AgentReleaseSignature? Release = null, string? SignatureProblem = null, string Format = AgentRelease.FormatMsi);
 
-/// <summary>Lists agent packages (MSI, deb, rpm) placed in the packages directory (mounted read-only into the API container).</summary>
+/// <summary>Lists agent packages (MSI, deb, rpm, and pkg for the experimental macOS agent) placed in the packages directory (mounted
+/// read-only into the API container).</summary>
 public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> options, TimeProvider clock, ILogger<AgentPackageService> logger)
 {
     private readonly ConcurrentDictionary<string, (long Length, DateTime Modified, string Sha256)> hashes = new();
@@ -45,7 +46,7 @@ public sealed partial class AgentPackageService(IOptions<EasyPatchOptions> optio
     private DateTimeOffset cachedAt = DateTimeOffset.MinValue;
     private readonly Lock gate = new();
 
-    [GeneratedRegex(@"^EasyPatchAgent-(?<version>\d+\.\d+\.\d+(?:\.\d+)?)-(?<arch>x64|arm64)\.(?<format>msi|deb|rpm)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^EasyPatchAgent-(?<version>\d+\.\d+\.\d+(?:\.\d+)?)-(?<arch>x64|arm64)\.(?<format>msi|deb|rpm|pkg)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FileNamePattern();
 
     public IReadOnlyList<AgentPackage> List()

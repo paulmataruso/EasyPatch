@@ -10,7 +10,7 @@ import {
   type UpdateCategory,
 } from '../api/types';
 import { describeApplicationUpdates, isValidAppId, MAX_APPROVED_APPS, parseAppIds, SUGGESTED_APPS } from '../lib/applications';
-import { DAY_LABELS, formatDays, formatDuration, humanize, isValidTime, normalizeKb } from '../lib/format';
+import { DAY_LABELS, formatDays, formatDuration, humanize, isMacOS, isValidTime, isWindows, normalizeKb } from '../lib/format';
 import {
   DEFAULT_RESTART_SCHEDULE,
   describeRestartSchedule,
@@ -126,7 +126,7 @@ interface NumberSpec {
 
 const NUMBER_FIELDS: NumberSpec[] = [
   { key: 'checkInIntervalSeconds', label: 'Check-in interval', unit: 'seconds', min: 15, max: 3600, hint: 'How often idle agents contact the server. Agents with an active job check in every 15 s.' },
-  { key: 'scanIntervalMinutes', label: 'Scan interval', unit: 'minutes', min: 30, max: 10080, hint: 'How often agents scan for updates (Windows Update, or apt/dnf on Linux).' },
+  { key: 'scanIntervalMinutes', label: 'Scan interval', unit: 'minutes', min: 30, max: 10080, hint: 'How often agents scan for updates (Windows Update, apt/dnf on Linux, softwareupdate on macOS).' },
   { key: 'inventoryIntervalMinutes', label: 'Inventory interval', unit: 'minutes', min: 60, max: 10080, hint: 'How often agents report OS and hardware inventory.' },
   { key: 'jitterPercent', label: 'Jitter', unit: '%', min: 0, max: 50, hint: 'Randomizes intervals so endpoints do not all check in together.' },
   { key: 'scanStaleAfterHours', label: 'Scan considered stale after', unit: 'hours', min: 1, max: 720, hint: 'Endpoints without a successful scan for this long are reported as Scan stale.' },
@@ -169,7 +169,7 @@ export function PolicyEditor({
   onSave,
   onReset,
   timeZone,
-  linux = false,
+  platform,
 }: {
   scope: PolicyScope;
   policy: PolicyDto | null;
@@ -182,9 +182,14 @@ export function PolicyEditor({
   /** Removes this policy layer (everything inherits). Not offered for the global policy. */
   onReset?: () => void;
   timeZone?: string;
-  /** Endpoint policy for a Linux endpoint: hides the tray and Windows Update settings, which Linux agents do not use. */
-  linux?: boolean;
+  /**
+   * The endpoint's platform, for an endpoint policy. On Linux and macOS endpoints the tray, winget and Windows Update settings
+   * are hidden: those agents do not use them. Other scopes leave it out and show everything.
+   */
+  platform?: string | null;
 }) {
+  // Without a platform (global, organization, site and tag policies) every setting is shown.
+  const windowsOnlyHidden = platform != null && !isWindows(platform);
   const isGlobal = scope === 'Global';
   const isEndpoint = scope === 'Endpoint';
   const isTag = scope === 'Tag';
@@ -323,7 +328,8 @@ export function PolicyEditor({
             <p className="text-sm font-medium">Excluded KBs</p>
             <p className="text-xs text-muted">
               Never installed by EasyPatch at this scope or below. Use for updates with known problems.
-              {linux && ' KB exclusions apply to Windows updates only; exclude a Linux package update on the endpoint’s Updates tab.'}
+              {windowsOnlyHidden &&
+                ` KB exclusions apply to Windows updates only; exclude a ${isMacOS(platform) ? 'macOS update' : 'Linux package update'} on the endpoint’s Updates tab.`}
             </p>
             {!isGlobal && inherited && inherited.excludedKbs.length > 0 && (
               <p className="mt-1 text-xs text-muted">Inherited: {inherited.excludedKbs.join(', ')}</p>
@@ -484,7 +490,7 @@ export function PolicyEditor({
         </Row>
       </Card>
 
-      {!linux && (
+      {!windowsOnlyHidden && (
         <Card title="User experience">
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <BoolRow
@@ -527,7 +533,7 @@ export function PolicyEditor({
         />
       </Card>
 
-      {!linux && (
+      {!windowsOnlyHidden && (
         <Card title="Application updates (winget)">
           <Row
             label="Third-party application updates"
@@ -556,7 +562,7 @@ export function PolicyEditor({
         </Card>
       )}
 
-      {!linux && (
+      {!windowsOnlyHidden && (
         <Card title="Windows Update settings">
           <WindowsUpdateSection
             value={form.windowsUpdate}

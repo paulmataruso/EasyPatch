@@ -57,7 +57,7 @@ export function UpdatesPage() {
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : list.page.items.length === 0 ? (
         <EmptyState title="No updates found" icon={<PackageCheck className="size-8" aria-hidden />}>
-          Updates appear after endpoints complete an update scan (Windows Update, or apt/dnf on Linux).
+          Updates appear after endpoints complete an update scan (Windows Update, apt/dnf on Linux, or softwareupdate on macOS).
         </EmptyState>
       ) : (
         <>

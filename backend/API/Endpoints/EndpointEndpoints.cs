@@ -530,8 +530,11 @@ public static class EndpointEndpoints
             await db.Policies.AnyAsync(p => p.Scope == PolicyScope.Endpoint && p.EndpointId == id, ct),
             await AgentUpdateInfoAsync(e, packages, policies, ct),
             e.Platform == AgentPlatforms.Linux ? new LinuxDetailsDto(e.OsId, e.OsVersion, e.KernelVersion, e.PackageManager, e.KeyProtection) : null,
-            e.Platform == AgentPlatforms.Linux ? null : await ApplicationStatusAsync(e, policies, db, ct),
-            await RestartDetailsAsync(e, db, ct));
+            e.Platform == AgentPlatforms.Windows ? await ApplicationStatusAsync(e, policies, db, ct) : null,
+            await RestartDetailsAsync(e, db, ct),
+            e.Platform == AgentPlatforms.MacOS
+                ? new MacOSDetailsDto(e.OsId, e.OsVersion, e.OsBuild, e.KernelVersion, e.PackageManager, e.KeyProtection)
+                : null);
     }
 
     /// <summary>Agents that report what Windows has queued for a restart (<see cref="RebootDetails"/>).</summary>
@@ -550,7 +553,7 @@ public static class EndpointEndpoints
             .Select(u => new RestartUpdateDto(u.UpdateGuid, u.Update!.Title, u.Update.KbNumbers, "Installed", u.InstalledAt ?? u.StateChangedAt))
             .ToListAsync(ct);
         var details = ScanIngestionService.ReadRebootDetails(e.RebootDetails);
-        var supported = e.Platform != AgentPlatforms.Linux && Mapping.ParseVersion(e.AgentVersion) is { } version && version >= RestartDetailsVersion;
+        var supported = e.Platform == AgentPlatforms.Windows && Mapping.ParseVersion(e.AgentVersion) is { } version && version >= RestartDetailsVersion;
         if (details is null)
         {
             return new RestartDetailsDto(updates, [], [], 0, supported);

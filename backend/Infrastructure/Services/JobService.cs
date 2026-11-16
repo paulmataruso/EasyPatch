@@ -82,6 +82,17 @@ public sealed class JobService(
                     "not_supported_on_linux");
             }
 
+            if (endpoint.Platform == AgentPlatforms.MacOS && request.Type is JobType.NotifyUser or JobType.UninstallUpdate or JobType.DownloadUpdates)
+            {
+                throw AppException.Conflict(request.Type switch
+                    {
+                        JobType.NotifyUser => $"{endpoint.Hostname} is a macOS endpoint. Messages to users are only available on Windows.",
+                        JobType.UninstallUpdate => $"{endpoint.Hostname} is a macOS endpoint. Removing updates is only available on Windows.",
+                        _ => $"{endpoint.Hostname} is a macOS endpoint. Downloading updates ahead of the maintenance window is only available on Windows.",
+                    },
+                    "not_supported_on_macos");
+            }
+
             if (request.Type is JobType.UninstallUpdate or JobType.DownloadUpdates)
             {
                 var what = request.Type == JobType.UninstallUpdate ? "remove updates" : "download updates ahead of the maintenance window";

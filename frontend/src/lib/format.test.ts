@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   dayBoundary,
+  describeAgentPackage,
   describeKeyProtection,
   describeSkipReason,
   describeUserAgent,
@@ -14,10 +15,14 @@ import {
   formatVersionChange,
   humanize,
   isLinux,
+  isMacOS,
   isValidTime,
+  isWindows,
   jobItemPercent,
+  MACOS_EXPERIMENTAL,
   normalizeKb,
   osDetails,
+  platformName,
   truncate,
 } from './format';
 import { aggregateTrend } from './trend';
@@ -69,6 +74,7 @@ describe('formatting', () => {
     expect(humanize('WaitingForReboot')).toBe('Waiting for restart');
     expect(humanize('DotNet')).toBe('.NET');
     expect(humanize('ServicingStack')).toBe('Servicing stack');
+    expect(humanize('AppleSoftwareUpdate')).toBe('Apple software update');
     expect(humanize(null)).toBe('—');
   });
   it('formats maintenance days', () => {
@@ -148,8 +154,24 @@ describe('platforms', () => {
     expect(isLinux('Windows')).toBe(false);
     expect(isLinux(null)).toBe(false);
     expect(isLinux(undefined)).toBe(false);
+    expect(isLinux('macOS')).toBe(false);
   });
-  it('describes the OS version: build on Windows, kernel on Linux', () => {
+  it('tells macOS apart, so it is never shown as Windows', () => {
+    expect(isMacOS('macOS')).toBe(true);
+    expect(isMacOS('macos')).toBe(true);
+    expect(isMacOS('Linux')).toBe(false);
+    expect(isMacOS(null)).toBe(false);
+    expect(isWindows('macOS')).toBe(false);
+    expect(isWindows('Linux')).toBe(false);
+    expect(isWindows('Windows')).toBe(true);
+    // Agents before 1.3.0 did not report a platform; they only ran on Windows.
+    expect(isWindows(null)).toBe(true);
+    expect(platformName('macOS')).toBe('macOS');
+    expect(platformName('Linux')).toBe('Linux');
+    expect(platformName(undefined)).toBe('Windows');
+    expect(MACOS_EXPERIMENTAL).toBe('Experimental: the macOS agent is in development and not for production use.');
+  });
+  it('describes the OS version: build on Windows, kernel on Linux, version and build on macOS', () => {
     expect(osDetails({ platform: 'Windows', operatingSystem: 'Windows 11 Pro', osVersion: '23H2', osBuild: '22631.4317' })).toEqual(['23H2', 'build 22631.4317']);
     expect(osDetails({ platform: 'Windows', operatingSystem: null, osVersion: null, osBuild: null })).toEqual([]);
     // VERSION_ID is dropped when PRETTY_NAME already contains it.
@@ -160,6 +182,9 @@ describe('platforms', () => {
       '9.4',
       'kernel 5.14.0-427.el9.x86_64',
     ]);
+    // The macOS version is dropped when the OS name already contains it; the build is the Apple build, not the kernel.
+    expect(osDetails({ platform: 'macOS', operatingSystem: 'macOS Sequoia 15.7.2', osVersion: '15.7.2', osBuild: '24G325' })).toEqual(['build 24G325']);
+    expect(osDetails({ platform: 'macOS', operatingSystem: 'macOS Sequoia', osVersion: '15.7.2', osBuild: '24G325' })).toEqual(['15.7.2', 'build 24G325']);
   });
   it('describes key protection', () => {
     expect(describeKeyProtection('systemd-creds-host')).toBe('systemd-creds (host key)');
@@ -172,7 +197,12 @@ describe('platforms', () => {
     expect(formatVersionChange(null, '1.2-3')).toBe('1.2-3');
     expect(formatVersionChange(null, null)).toBe('—');
     expect(formatPackageFormat('deb')).toBe('DEB');
+    expect(formatPackageFormat('pkg')).toBe('macOS package (.pkg)');
     expect(formatPackageFormat(null)).toBe('—');
+    expect(describeAgentPackage('msi')).toBe('MSI package');
+    expect(describeAgentPackage('rpm')).toBe('RPM package');
+    expect(describeAgentPackage('pkg')).toBe('macOS package (.pkg)');
+    expect(describeAgentPackage(null)).toBe('package');
   });
 });
 

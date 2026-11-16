@@ -229,7 +229,7 @@ public sealed class CheckInService(
         }
 
         var lease = await jobs.LeaseForCheckInAsync(endpoint, request.ActiveJobIds, policy, settings, ct);
-        var latest = packages.GetLatest(endpoint.AgentArchitecture ?? "x64", endpoint.AgentPackageFormat ?? AgentRelease.FormatMsi);
+        var latest = AgentUpdatePlanner.PackageFormat(endpoint) is { } format ? packages.GetLatest(endpoint.AgentArchitecture ?? "x64", format) : null;
         return new CheckInResponse
         {
             ServerTime = now,
