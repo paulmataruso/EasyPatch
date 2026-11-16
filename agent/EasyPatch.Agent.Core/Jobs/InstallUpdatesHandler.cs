@@ -243,7 +243,7 @@ public sealed class InstallUpdatesHandler
                 return JobOutcome.Finished;
             }
 
-            if (wu is IBatchUpdateService)
+            if (wu is IBatchUpdateService || !wu.KeepsDownloads)
             {
                 const string unsupported = "Downloading updates ahead of the maintenance window is only available with Windows Update.";
                 _reporter.Report(jobId, JobStatus.Failed, "NotStarted", 100, unsupported, errorCode: "not_supported", errorMessage: unsupported);

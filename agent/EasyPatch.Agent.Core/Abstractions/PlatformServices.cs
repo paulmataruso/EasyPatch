@@ -5,7 +5,7 @@ using EasyPatch.Contracts.Updates;
 namespace EasyPatch.Agent.Core.Abstractions;
 
 // Platform abstractions. Production implementations live in EasyPatch.WindowsUpdate, EasyPatch.Inventory and
-// EasyPatch.Agent (Windows), and in EasyPatch.Agent.Linux. Test doubles live exclusively in test projects.
+// EasyPatch.Agent (Windows), in EasyPatch.Linux and in EasyPatch.MacOS. Test doubles live exclusively in test projects.
 
 /// <summary>Opaque reference to an update (a WUA update object, or a Linux package upgrade), valid until disposed.</summary>
 public interface IUpdateHandle : IDisposable
@@ -107,12 +107,16 @@ public sealed class WindowsUpdateException : Exception
     }
 }
 
-/// <summary>The operating system's update mechanism (Windows Update; apt or dnf on Linux). Implementations must never report
+/// <summary>The operating system's update mechanism (Windows Update; apt or dnf on Linux; softwareupdate on macOS). Implementations must never report
 /// success they did not observe.</summary>
 public interface IUpdateService
 {
-    /// <summary>Name used in messages, e.g. "Windows Update", "apt", "dnf".</summary>
+    /// <summary>Name used in messages, e.g. "Windows Update", "apt", "dnf", "softwareupdate".</summary>
     string Name => "Windows Update";
+
+    /// <summary>Updates can be downloaded ahead of a maintenance window and kept for the installation (Windows Update). Only
+    /// then does the agent advertise <see cref="AgentCapabilities.DownloadUpdates"/>.</summary>
+    bool KeepsDownloads => true;
 
     /// <summary>Error code and message for a failed scan.</summary>
     (string Code, string Message) DescribeFailure(Exception exception)
@@ -336,7 +340,7 @@ public sealed record AgentPlatform(
 
     /// <summary>The update service downloads updates one by one without installing them (Windows Update keeps the downloads for
     /// the installation); apt and dnf work in transactions and do not.</summary>
-    public bool SupportsDownloadOnly => Updates is not IBatchUpdateService;
+    public bool SupportsDownloadOnly => Updates is not IBatchUpdateService && Updates.KeepsDownloads;
 
     public IReadOnlyList<string> Capabilities
     {
