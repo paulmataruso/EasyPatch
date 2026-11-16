@@ -55,4 +55,5 @@ until launchctl bootstrap system "$plist"; do
 done
 
 echo "EasyPatch agent installed and started ($label)."
+echo "Experimental: the macOS agent is in development and not for production use."
 exit 0
