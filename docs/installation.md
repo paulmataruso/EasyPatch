@@ -97,7 +97,12 @@ the console requires you to:
 2. **Choose a new password**: 12 to 256 characters with at least 4 distinct characters. It may
    not contain the username.
 
-MFA is required for every user while the server setting `RequireMfa` is on (the default).
+MFA is required for every user while the server setting `RequireMfa` is on (the default). An
+authenticator app, a security key or a passkey each satisfies it. Passkeys and security keys
+work only when `EASYPATCH_DOMAIN` is a DNS name with a certificate the browsers trust (the
+public ACME certificate does this); with an IP address the console offers the authenticator app
+only. Users manage them under **My account → Passkeys and security keys**; see
+[security.md](security.md#admin-authentication).
 
 Then:
 
@@ -271,7 +276,7 @@ The API image includes administration commands. Run them with
 | `migrate` | Apply database migrations (the `migrate` service runs this automatically) |
 | `create-admin --email <email> [--name <name>] [--password-stdin]` | Create a SuperAdmin who signs in with `<email>`. `<name>` is the account name shown in the console (default: the part of the address before `@`) |
 | `reset-password --email <email> [--password-stdin]` | Reset a password and revoke the user's sessions. A generated password must be changed at next sign-in |
-| `reset-mfa --email <email>` | Remove a user's MFA and revoke their sessions. They enroll again at next sign-in |
+| `reset-mfa --email <email>` | Remove a user's MFA (authenticator app, passkeys and security keys) and revoke their sessions. They enroll again at next sign-in |
 | `unlock --email <email>` | Clear a login lockout |
 | `help` | List the commands |
 
@@ -316,7 +321,8 @@ To reach a lab server from other machines on a private network, set both the add
 name to the host's LAN IP address in `.env`, for example `EASYPATCH_BIND_ADDRESS=192.168.1.20`
 and `EASYPATCH_DOMAIN=192.168.1.20`. Then open `https://192.168.1.20:8443`. Caddy's internal CA
 issues a certificate for the IP address. Anyone who can reach that address can reach the sign-in
-page, so do this only on a trusted network. Agents only connect to a server whose certificate
+page, so do this only on a trusted network. Browsers do not allow passkeys or security keys on
+an IP address, so such a server offers only the authenticator app for MFA. Agents only connect to a server whose certificate
 they trust. For a lab agent, either put Caddy's root certificate in the computer's Trusted Root
 store, or turn on *Skip certificate check* when you generate the Windows install script: the
 agent then trusts Caddy's CA, which the lab proxy publishes at `/server-ca.crt`, for its

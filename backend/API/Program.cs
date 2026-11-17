@@ -35,6 +35,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
 builder.Services.AddScoped<IActorContext, HttpActorContext>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<WebAuthnService>();
 builder.Services.AddSingleton<CsrfProtection>();
 builder.Services.AddHostedService<PresenceFlushService>();
 
@@ -123,6 +124,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c
 
 app.MapAgentEndpoints();
 app.MapAuthEndpoints();
+app.MapWebAuthnEndpoints();
 app.MapUserEndpoints();
 app.MapApiTokenEndpoints();
 app.MapOrganizationEndpoints();

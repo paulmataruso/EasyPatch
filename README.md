@@ -162,7 +162,10 @@ All screenshots show fictional demo data.
   * tokenless deployment codes for RMM scripts. Each computer that uses one waits for an
     administrator to approve it, after the administrator compares key fingerprints.
 * **Strong admin security**:
-  * Argon2id password hashing and mandatory TOTP MFA with recovery codes;
+  * sign-in with the email address; Argon2id password hashing and mandatory MFA with recovery
+    codes, by authenticator app (TOTP) or security key;
+  * passkeys (WebAuthn) for passwordless sign-in, offered after sign-in to users without one
+    (needs a DNS name with a trusted certificate);
   * server-side sessions, CSRF protection, lockout and rate limits;
   * three roles: SuperAdmin, Admin, ReadOnly;
   * API tokens for scripts and integrations: read-only or operator, optionally limited to

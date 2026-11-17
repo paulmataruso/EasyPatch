@@ -86,16 +86,21 @@ public sealed class AuthService(
 
         user.FailedLoginCount = 0;
         var settings = await settingsService.GetAsync(ct);
-        var (session, token) = NewSession(user, mfaCompleted: !user.MfaEnabled, ip, userAgent, settings, now);
-        if (!user.MfaEnabled)
+        var hasMfa = await HasSecondFactorAsync(user, ct);
+        var (session, token) = NewSession(user, mfaCompleted: !hasMfa, ip, userAgent, settings, now);
+        if (!hasMfa)
         {
             user.LastLoginAt = now;
             audit.Record("auth.login", "User", user.Id.ToString());
         }
 
         await db.SaveChangesAsync(ct);
-        return new LoginResult(user, session, token, user.MfaEnabled, !user.MfaEnabled && settings.RequireMfa);
+        return new LoginResult(user, session, token, hasMfa, !hasMfa && settings.RequireMfa);
     }
+
+    /// <summary>An authenticator app or at least one security key or passkey.</summary>
+    public async Task<bool> HasSecondFactorAsync(User user, CancellationToken ct = default) =>
+        user.MfaEnabled || await db.WebAuthnCredentials.AnyAsync(c => c.UserId == user.Id, ct);
 
     public async Task<SessionValidation?> ValidateSessionAsync(string? token, CancellationToken ct = default)
     {
@@ -127,7 +132,9 @@ public sealed class AuthService(
             await db.SaveChangesAsync(ct);
         }
 
-        return new SessionValidation(session, session.User, !session.User.MfaEnabled && settings.RequireMfa);
+        // Only users without an authenticator app need the (cheap) security key lookup.
+        var setupRequired = settings.RequireMfa && !await HasSecondFactorAsync(session.User, ct);
+        return new SessionValidation(session, session.User, setupRequired);
     }
 
     public async Task VerifyMfaAsync(Guid sessionId, string code, CancellationToken ct = default)
@@ -136,7 +143,7 @@ public sealed class AuthService(
         var session = await db.UserSessions.Include(s => s.User).FirstOrDefaultAsync(s => s.Id == sessionId, ct)
                       ?? throw AppException.Unauthorized("session_invalid", "Your session has expired. Sign in again.");
         var user = session.User!;
-        if (!user.MfaEnabled || user.MfaSecretProtected is null)
+        if (!await HasSecondFactorAsync(user, ct))
         {
             throw AppException.BadRequest("Multi-factor authentication is not enabled for this account.");
         }
@@ -146,8 +153,10 @@ public sealed class AuthService(
             return;
         }
 
-        var secret = Totp.Base32Decode(MfaProtector.Unprotect(user.MfaSecretProtected));
-        var step = Totp.Verify(secret, code, now, user.MfaLastUsedStep);
+        // An authenticator code, or a recovery code (also for users whose only second factor is a security key).
+        var step = user.MfaEnabled && user.MfaSecretProtected is not null
+            ? Totp.Verify(Totp.Base32Decode(MfaProtector.Unprotect(user.MfaSecretProtected)), code, now, user.MfaLastUsedStep)
+            : null;
         var usedRecovery = false;
         if (step is null)
         {
@@ -248,15 +257,17 @@ public sealed class AuthService(
         return codes;
     }
 
+    /// <summary>Removes the authenticator app. While the server requires MFA this is allowed only if a security key or passkey
+    /// remains.</summary>
     public async Task DisableMfaAsync(Guid userId, string password, string code, CancellationToken ct = default)
     {
-        var settings = await settingsService.GetAsync(ct);
-        if (settings.RequireMfa)
+        var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
+        var keys = await db.WebAuthnCredentials.AnyAsync(c => c.UserId == userId, ct);
+        if (!keys && await RequireMfaAsync(ct))
         {
             throw AppException.Conflict("Multi-factor authentication is required by server policy and cannot be disabled.", "mfa_required");
         }
 
-        var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
         RequirePassword(user, password);
         if (user.MfaSecretProtected is null ||
             (Totp.Verify(Totp.Base32Decode(MfaProtector.Unprotect(user.MfaSecretProtected)), code, clock.GetUtcNow(), user.MfaLastUsedStep) is null
@@ -265,7 +276,12 @@ public sealed class AuthService(
             throw AppException.BadRequest("The verification code is not valid.", "invalid_mfa_code");
         }
 
-        ClearMfa(user);
+        ClearTotp(user);
+        if (!keys)
+        {
+            user.RecoveryCodeHashes = [];
+        }
+
         audit.Record("auth.mfa_disabled", "User", user.Id.ToString());
         await db.SaveChangesAsync(ct);
     }
@@ -274,7 +290,7 @@ public sealed class AuthService(
     {
         var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
         RequirePassword(user, password);
-        if (!user.MfaEnabled)
+        if (!await HasSecondFactorAsync(user, ct))
         {
             throw AppException.BadRequest("Multi-factor authentication is not enabled.");
         }
@@ -434,12 +450,14 @@ public sealed class AuthService(
         return user;
     }
 
+    /// <summary>Removes every second factor (authenticator app, security keys and passkeys, recovery codes) and signs the user out.</summary>
     public async Task ResetMfaAsync(Guid userId, CancellationToken ct = default)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw AppException.NotFound("User");
         ClearMfa(user);
+        var keys = await db.WebAuthnCredentials.Where(c => c.UserId == userId).ExecuteDeleteAsync(ct);
         await RevokeSessionsAsync(user.Id, null, ct);
-        audit.Record("user.mfa_reset", "User", user.Id.ToString());
+        audit.Record("user.mfa_reset", "User", user.Id.ToString(), details: new { securityKeysRemoved = keys });
         await db.SaveChangesAsync(ct);
     }
 
@@ -478,13 +496,45 @@ public sealed class AuthService(
 
     private void RequirePassword(User user, string password)
     {
-        if (hasher.Verify(password ?? string.Empty, user.PasswordHash) == PasswordVerification.Failed)
+        // An empty password never matches (and Argon2 refuses an empty input).
+        if (string.IsNullOrEmpty(password) || hasher.Verify(password, user.PasswordHash) == PasswordVerification.Failed)
         {
             throw AppException.BadRequest("The current password is incorrect.", "invalid_password");
         }
     }
 
-    private void RegisterFailure(User user, DateTimeOffset now)
+    /// <summary>A sign-in this recent confirms a change to the user's sign-in methods without asking for the password again.</summary>
+    public static readonly TimeSpan RecentSignIn = TimeSpan.FromMinutes(10);
+
+    /// <summary>The account has a password it can sign in with (accounts created by single sign-on may not).</summary>
+    internal static bool HasUsablePassword(User user) => user.PasswordHash.StartsWith('$');
+
+    /// <summary>Confirms a change to the user's sign-in methods: the current password when one is given, otherwise a sign-in (with
+    /// MFA) within <see cref="RecentSignIn"/>.</summary>
+    internal void RequireReauthentication(User user, UserSession session, string? password)
+    {
+        if (!string.IsNullOrEmpty(password))
+        {
+            RequirePassword(user, password);
+        }
+        else if (clock.GetUtcNow() - session.CreatedAt > RecentSignIn)
+        {
+            throw HasUsablePassword(user)
+                ? AppException.BadRequest("Enter your current password to confirm.", "invalid_password")
+                : new AppException(403, "reauthentication_required", "Sign out and sign in again, then retry within 10 minutes.");
+        }
+    }
+
+    internal async Task<bool> RequireMfaAsync(CancellationToken ct) => (await settingsService.GetAsync(ct)).RequireMfa;
+
+    internal async Task<(UserSession Session, string Token)> NewSessionAsync(User user, bool mfaCompleted, string? ip, string? userAgent,
+        CancellationToken ct)
+    {
+        var settings = await settingsService.GetAsync(ct);
+        return NewSession(user, mfaCompleted, ip, userAgent, settings, clock.GetUtcNow());
+    }
+
+    internal void RegisterFailure(User user, DateTimeOffset now)
     {
         user.FailedLoginCount++;
         if (user.FailedLoginCount >= MaxFailedAttempts)
@@ -517,7 +567,7 @@ public sealed class AuthService(
         return (session, token);
     }
 
-    private static List<string> GenerateRecoveryCodes(User user)
+    internal static List<string> GenerateRecoveryCodes(User user)
     {
         var codes = Enumerable.Range(0, 10).Select(_ => SecureTokens.CreateCode(string.Empty, 10)).ToList();
         user.RecoveryCodeHashes = codes.Select(c => SecureTokens.Hash(NormalizeRecovery(c))).ToList();
@@ -547,11 +597,16 @@ public sealed class AuthService(
 
     private static void ClearMfa(User user)
     {
+        ClearTotp(user);
+        user.RecoveryCodeHashes = [];
+    }
+
+    private static void ClearTotp(User user)
+    {
         user.MfaEnabled = false;
         user.MfaSecretProtected = null;
         user.MfaPendingSecretProtected = null;
         user.MfaLastUsedStep = null;
-        user.RecoveryCodeHashes = [];
     }
 
     private static AppException InvalidCredentials() =>

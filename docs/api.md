@@ -65,13 +65,30 @@ administrator approval.
 | Method | Route | Notes |
 |---|---|---|
 | POST | `/login` | `{email, password}` → `{mfaRequired, mfaSetupRequired, user}`. The email address is the only sign-in name (case does not matter). Sets the session and `XSRF-TOKEN` cookies. A wrong address or password, an inactive or a locked account all answer `401 invalid_credentials`. |
-| POST | `/mfa/verify` | `{code}` (TOTP or recovery code) completes the sign-in |
+| POST | `/mfa/verify` | `{code}` (TOTP or recovery code) completes the sign-in; for a security key see `/mfa/webauthn` below |
 | POST | `/logout` | Revokes the current session |
 | GET | `/me` | Current user, role and MFA state. Also refreshes the `XSRF-TOKEN` cookie. |
 | POST | `/mfa/setup` | Returns the secret, the `otpauth` URI and a QR code as a PNG data URI |
 | POST | `/mfa/enable` | `{code}` → 10 recovery codes, shown once |
-| POST | `/mfa/disable` | `{password, code}`. Refused (`409 mfa_required`) while the `RequireMfa` server setting is on. |
+| POST | `/mfa/disable` | `{password, code}` removes the authenticator app. While the `RequireMfa` server setting is on, refused (`409 mfa_required`) unless a security key or passkey remains. |
 | POST | `/mfa/recovery-codes` | `{password}` → a new set of recovery codes |
+| GET | `/webauthn` | Anonymous. `{available, rpId, reason, message}`: whether passkeys and security keys work here. `reason` is `ip_address`, `not_https` or `invalid_public_url` when not. |
+| POST | `/webauthn/register/options` | `{passkey, password?}` → `PublicKeyCredentialCreationOptions` JSON (binary members base64url). `passkey: true` asks for a discoverable credential with user verification. The password is needed when the account already has a second factor and the sign-in is more than 10 minutes old (`400 invalid_password`). |
+| POST | `/webauthn/register` | `{name?, credential}` (the browser's `PublicKeyCredential` as JSON) → `{credential, recoveryCodes}`. Recovery codes are returned once, for the account's first second factor. `400 webauthn_failed` when verification fails. |
+| GET | `/webauthn/credentials` | Your passkeys and security keys: `{id, name, isPasskey, isSynced, transports, createdAt, lastUsedAt}` |
+| PUT | `/webauthn/credentials/{id}` | `{name}` renames one |
+| POST | `/webauthn/credentials/{id}/remove` | `{password?}` (as for registration). The last second factor cannot be removed while MFA is required (`409 mfa_required`). |
+| POST | `/mfa/webauthn/options` | During sign-in, after the password: `PublicKeyCredentialRequestOptions` JSON for the account's keys |
+| POST | `/mfa/webauthn` | `{credential}` completes the sign-in with a security key or passkey (`401 invalid_security_key` otherwise) |
+| POST | `/passkey/options` | Anonymous. Starts a passkey sign-in: request options with an empty allow list and user verification required. Sets a short-lived `__Host-easypatch-webauthn` cookie that binds the sign-in to this browser. |
+| POST | `/passkey` | Anonymous. `{credential}` → `{mfaRequired: false, mfaSetupRequired: false, user}` and the session cookies, like `/login`. `401 invalid_passkey` when the passkey is unknown or does not verify. |
+| POST | `/passkey-prompt/dismiss` | "Not now" to the offer to create a passkey; `user.passkeyPrompt` is false for 30 days |
+
+Every WebAuthn route answers `409 webauthn_unavailable` when the console's public URL is an IP
+address or not HTTPS, and `400 webauthn_challenge_expired` when the challenge is older than 5
+minutes, was already answered, or (passkey sign-in) belongs to another browser. `/me` and the
+sign-in responses include `totpEnabled`, `securityKeyCount`, `passkeyCount` and `passkeyPrompt`;
+`mfaEnabled` is true for either kind of second factor.
 | POST | `/password/change` | `{currentPassword, newPassword}`. Revokes your other sessions. |
 | POST | `/password/reset` | `{token, newPassword}`. Anonymous; the token comes from an administrator-issued link. |
 | GET | `/sessions` | Your active sessions |
@@ -85,7 +102,8 @@ Until a user has completed every sign-in step, other routes answer `403` with
 `GET /`, `POST /` (`{username, email, role, password, organizationIds}`; without a password
 the response contains a one-time set-password link), `GET /{id}`, `PUT /{id}` (`email`, `role`,
 `isActive`), `POST /{id}/reset-link`,
-`POST /{id}/mfa/reset`, `POST /{id}/sessions/revoke`, `PUT /{id}/organizations`
+`POST /{id}/mfa/reset` (removes the authenticator app, passkeys, security keys and recovery
+codes), `POST /{id}/sessions/revoke`, `PUT /{id}/organizations`
 (`{organizationIds[]}`; an empty list means all organizations). An email address that another
 user has (ignoring case) answers `409 email_in_use`, a taken username `409 username_in_use`,
 and an address that is not a plain `name@domain` `400 validation_failed`.

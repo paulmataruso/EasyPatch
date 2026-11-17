@@ -15,7 +15,8 @@ public static class AuthEndpoints
     {
         var g = app.MapGroup("/api/v1/auth").WithTags("Authentication");
 
-        g.MapPost("/login", async (LoginRequest request, AuthService auth, CsrfProtection csrf, HttpContext http, CancellationToken ct) =>
+        g.MapPost("/login", async (LoginRequest request, AuthService auth, CsrfProtection csrf, HttpContext http, EasyPatchDbContext db,
+            WebAuthnService webauthn, CancellationToken ct) =>
         {
             new Validator().Required("email", request.Email, 256).Required("password", request.Password, 1024).ThrowIfInvalid();
             var result = await auth.LoginAsync(request.Email, request.Password, http.Connection.RemoteIpAddress?.ToString(),
@@ -23,7 +24,7 @@ public static class AuthEndpoints
             SessionCookies.Issue(http, result.SessionToken, result.Session.ExpiresAt);
             csrf.IssueCookie(http, result.Session.Id);
             return TypedResults.Ok(new LoginResponse(result.MfaRequired, result.MfaSetupRequired,
-                ToCurrentUser(result.User, result.Session.MfaCompleted, result.MfaSetupRequired)));
+                await CurrentUserAsync(result.User, result.Session.MfaCompleted, result.MfaSetupRequired, db, webauthn, ct)));
         }).AllowAnonymous().RequireRateLimiting(RateLimits.Login);
 
         g.MapPost("/mfa/verify", async (MfaCodeRequest request, ClaimsPrincipal user, AuthService auth, CancellationToken ct) =>
@@ -40,13 +41,14 @@ public static class AuthEndpoints
             return TypedResults.NoContent();
         }).RequireAuthorization(Policies.SessionAny);
 
-        g.MapGet("/me", async (ClaimsPrincipal principal, EasyPatchDbContext db, CsrfProtection csrf, HttpContext http, CancellationToken ct) =>
+        g.MapGet("/me", async (ClaimsPrincipal principal, EasyPatchDbContext db, WebAuthnService webauthn, CsrfProtection csrf, HttpContext http,
+            CancellationToken ct) =>
         {
             var userId = principal.GetUserId();
             var user = await db.Users.AsNoTracking().Include(u => u.OrganizationAccess).FirstAsync(u => u.Id == userId, ct);
             csrf.IssueCookie(http, principal.GetSessionId());
-            return TypedResults.Ok(ToCurrentUser(user, principal.FindFirstValue(EasyPatchClaims.MfaCompleted) == "true",
-                principal.FindFirstValue(EasyPatchClaims.MfaSetupRequired) == "true"));
+            return TypedResults.Ok(await CurrentUserAsync(user, principal.FindFirstValue(EasyPatchClaims.MfaCompleted) == "true",
+                principal.FindFirstValue(EasyPatchClaims.MfaSetupRequired) == "true", db, webauthn, ct));
         }).RequireAuthorization(Policies.SessionAny);
 
         g.MapPost("/mfa/setup", async (ClaimsPrincipal user, AuthService auth, CancellationToken ct) =>
@@ -110,9 +112,17 @@ public static class AuthEndpoints
         }).RequireAuthorization(Policies.Account);
     }
 
-    internal static CurrentUserDto ToCurrentUser(User user, bool mfaCompleted, bool mfaSetupRequired) => new(
-        user.Id, user.Username, user.Email, user.Role, user.MfaEnabled, mfaCompleted, mfaSetupRequired, user.MustChangePassword,
-        user.OrganizationAccess.Select(a => a.OrganizationId).ToList(), user.LastLoginAt);
+    internal static async Task<CurrentUserDto> CurrentUserAsync(User user, bool mfaCompleted, bool mfaSetupRequired, EasyPatchDbContext db,
+        WebAuthnService webauthn, CancellationToken ct)
+    {
+        var kinds = await db.WebAuthnCredentials.AsNoTracking().Where(c => c.UserId == user.Id).Select(c => c.IsPasskey).ToListAsync(ct);
+        var passkeys = kinds.Count(k => k);
+        // Offer a passkey only once the user is fully signed in, not while they still have to finish MFA or change their password.
+        var prompt = mfaCompleted && !mfaSetupRequired && !user.MustChangePassword && webauthn.ShouldPromptForPasskey(user, passkeys);
+        return new CurrentUserDto(user.Id, user.Username, user.Email, user.Role, user.MfaEnabled || kinds.Count > 0, mfaCompleted, mfaSetupRequired,
+            user.MustChangePassword, user.OrganizationAccess.Select(a => a.OrganizationId).ToList(), user.LastLoginAt,
+            TotpEnabled: user.MfaEnabled, SecurityKeyCount: kinds.Count, PasskeyCount: passkeys, PasskeyPrompt: prompt);
+    }
 }
 
 public static class UserEndpoints
@@ -185,6 +195,6 @@ public static class UserEndpoints
     private static string ResetUrl(EasyPatchOptions options, string token) => $"{options.PublicUrl.TrimEnd('/')}/reset-password#token={token}";
 
     private static readonly System.Linq.Expressions.Expression<Func<User, UserDto>> ToDto = u => new UserDto(
-        u.Id, u.Username, u.Email, u.Role, u.IsActive, u.MfaEnabled, u.CreatedAt, u.LastLoginAt, u.LockoutUntil,
-        u.OrganizationAccess.Select(a => a.OrganizationId).ToList());
+        u.Id, u.Username, u.Email, u.Role, u.IsActive, u.MfaEnabled || u.WebAuthnCredentials.Any(), u.CreatedAt, u.LastLoginAt, u.LockoutUntil,
+        u.OrganizationAccess.Select(a => a.OrganizationId).ToList(), u.MfaEnabled, u.WebAuthnCredentials.Count());
 }

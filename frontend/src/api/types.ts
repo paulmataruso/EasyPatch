@@ -300,12 +300,48 @@ export interface CurrentUserDto {
   username: string;
   email: string;
   role: UserRole;
+  /** A second factor is set up: an authenticator app or a security key / passkey. */
   mfaEnabled: boolean;
   mfaCompleted: boolean;
   mfaSetupRequired: boolean;
   mustChangePassword: boolean;
   organizationIds: Guid[];
   lastLoginAt: Instant | null;
+  /** An authenticator app (TOTP) is set up. */
+  totpEnabled: boolean;
+  /** Security keys and passkeys registered to the account. */
+  securityKeyCount: number;
+  /** Of those, the ones that sign in without a password (discoverable). */
+  passkeyCount: number;
+  /** Offer to set up a passkey now (none yet, passkeys work on this server, no "Not now" in the last 30 days). */
+  passkeyPrompt: boolean;
+}
+
+/** Whether passkeys and security keys work with this server (HTTPS and a DNS name are required). */
+export interface WebAuthnStatusDto {
+  available: boolean;
+  rpId: string | null;
+  /** ip_address, not_https or invalid_public_url when unavailable. */
+  reason: string | null;
+  message: string | null;
+}
+
+export interface WebAuthnCredentialDto {
+  id: Guid;
+  name: string;
+  /** Signs in without a password. Otherwise a security key used as the second factor. */
+  isPasskey: boolean;
+  /** Synced to other devices by a password manager or the platform. */
+  isSynced: boolean;
+  transports: string[];
+  createdAt: Instant;
+  lastUsedAt: Instant | null;
+}
+
+export interface WebAuthnRegisterResponse {
+  credential: WebAuthnCredentialDto;
+  /** Shown once, when this is the account's first second factor. */
+  recoveryCodes: string[] | null;
 }
 
 export interface MfaSetupResponse {
@@ -357,11 +393,14 @@ export interface UserDto {
   email: string;
   role: UserRole;
   isActive: boolean;
+  /** An authenticator app or at least one security key / passkey. */
   mfaEnabled: boolean;
   createdAt: Instant;
   lastLoginAt: Instant | null;
   lockoutUntil: Instant | null;
   organizationIds: Guid[];
+  totpEnabled: boolean;
+  securityKeyCount: number;
 }
 
 export interface CreateUserRequest {

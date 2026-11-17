@@ -97,6 +97,7 @@ erDiagram
     users ||--o{ user_sessions : has
     users ||--o{ user_organization_access : "scoped to"
     users ||--o{ password_reset_tokens : has
+    users ||--o{ webauthn_credentials : has
     users ||--o{ audit_logs : performs
     api_tokens ||--o{ audit_logs : performs
     organizations ||--o{ compliance_snapshots : tracks
@@ -106,6 +107,8 @@ erDiagram
 |---|---|
 | `users` | username (display name), email (the sign-in name; stored in lower case, unique on `lower(email)`), Argon2id `password_hash`, `role` (SuperAdmin, Admin, ReadOnly), MFA secret (protected with ASP.NET Data Protection), recovery code hashes, lockout counters, `security_stamp` |
 | `user_sessions` | SHA-256 of the session token, MFA-completed flag, idle and absolute expiry, `revoked_at` |
+| `webauthn_credentials` | Passkeys and security keys: credential ID (unique), public key, signature counter, AAGUID, transports, name, passkey and backup flags, created and last used |
+| `webauthn_challenges` | Pending WebAuthn ceremonies: the options with their challenge, bound to a session or to the hash of a browser cookie; single use, 5-minute expiry |
 | `user_organization_access` | When a non-SuperAdmin user has rows here, they can only see those organizations. No rows means all organizations. Managed under Settings → Users. |
 | `password_reset_tokens` | Hashed, single-use, expiring tokens issued by an administrator |
 | `api_tokens` | API tokens for scripts and integrations: SHA-256 of the secret, display prefix, `role` (ReadOnly or Admin), `all_organizations` or `organization_ids`, expiry, last use time and address, `revoked_at`. Managed under Settings → API tokens. |

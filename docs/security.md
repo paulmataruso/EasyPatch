@@ -19,6 +19,7 @@ changes Windows Update policy values only for settings an administrator configur
 |---|---|---|
 | Admin credentials | `users.password_hash` | Argon2id (m=19 MiB, t=2, p=1). Login rate limits and account lockout. |
 | MFA secrets | `users.mfa_secret_protected` | ASP.NET Data Protection; the keys are in a separate volume |
+| Passkeys and security keys | `webauthn_credentials` | Public keys only (not secret); the private keys stay on the authenticators |
 | Admin sessions | Browser cookie and `user_sessions` | Random 256-bit token, only its SHA-256 is stored. `__Host-` cookie that is `Secure`, `HttpOnly` and `SameSite=Strict`. Idle and absolute expiry. Can be revoked. |
 | Agent private keys | Endpoint `C:\ProgramData\EasyPatch\agent.key` | Generated on the device and never transmitted. DPAPI (LocalMachine). Directory ACL allows only SYSTEM and Administrators. |
 | Agent public keys | `agent_credentials` | Not secret. Expire and can be revoked. |
@@ -43,6 +44,48 @@ changes Windows Update policy values only for settings an administrator configur
   * MFA is **required by default** (`RequireMfa` in server settings). Users without MFA can
     only enroll MFA until they do.
   * Users get 10 single-use recovery codes, stored hashed.
+  * A **security key or passkey** (WebAuthn, below) also counts as MFA: a user has MFA when
+    they have an authenticator app or at least one security key or passkey. While the server
+    requires MFA, the last of these cannot be removed.
+* **Security keys and passkeys (WebAuthn / FIDO2).** Verified with the MIT-licensed
+  passwordless-lib `Fido2` library (pinned), using the browser's own `navigator.credentials`
+  API; EasyPatch does no cryptography of its own here.
+  * *Two uses.* A **security key** is the second step after the password, in place of an
+    authenticator code (user verification not required). A **passkey** is a discoverable
+    credential that signs in on its own with **Sign in with a passkey**: the authenticator must
+    verify the user (PIN or biometrics), so possession plus verification count as both factors
+    and no further MFA step follows.
+  * *What is stored* (`webauthn_credentials`): the credential ID (unique across users), the
+    public key, the signature counter, the AAGUID, transports, a name, whether it is a passkey,
+    the backup flags, and when it was added and last used. The private key never leaves the
+    authenticator. Attestation is not requested (`none`).
+  * *Relying party.* The RP ID is the host name of the console's public URL
+    (`EASYPATCH_DOMAIN`), and the only accepted origin is `https://<domain>[:port]`. Browsers
+    offer WebAuthn only on a secure origin with a DNS name, so **passkeys and security keys
+    need a DNS name and a certificate the browser trusts**. When the public URL is an IP
+    address or not HTTPS, the server reports them as unavailable (`GET /api/v1/auth/webauthn`
+    gives the reason) and the console explains it instead of offering them. Changing the
+    domain later invalidates every registered passkey and security key (they are bound to
+    the RP ID).
+  * *Challenges.* Each ceremony's options, with a fresh random challenge, are kept on the
+    server (`webauthn_challenges`), bound to the session (registration, second factor) or, for
+    a passkey sign-in, to the SHA-256 of a random value in a `__Host-`, `HttpOnly`,
+    `SameSite=Strict` cookie. A challenge is deleted when it is answered, right or wrong, and
+    expires after 5 minutes. Responses are checked for the origin, the RP ID hash, user
+    presence (and verification where required), the signature, and a signature counter that
+    must increase when the authenticator keeps one (a counter that goes backwards suggests a
+    cloned key and is refused).
+  * *Adding and removing* a key needs the current password, unless the user signed in (with
+    MFA) within the last 10 minutes. Each user can register up to 20. The first second factor
+    of an account comes with recovery codes. An administrator's **Reset MFA** (and the CLI
+    `reset-mfa`) removes the user's passkeys and security keys too.
+  * *Failures* count towards the account lockout like wrong codes, and the routes share the
+    sign-in rate limit. Challenges, public keys, credential IDs and browser responses are never
+    logged or audited; the log records only the library's error code.
+  * *Passkey offer.* After signing in, a user without a passkey is offered to create one, but
+    only when passkeys work on this server and in their browser. "Not now" is stored on the
+    server (`users.passkey_prompt_dismissed_at`), and the offer returns after 30 days. A
+    security key registered only as a second factor does not count as a passkey.
 * **Sessions.**
   * Server-side and revocable, either individually or all at once.
   * Changing your password revokes all your other sessions.

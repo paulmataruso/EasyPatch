@@ -5,6 +5,22 @@ the web console and the agents share one version number.
 
 ## [Unreleased]
 
+### Added
+
+- **Security keys and passkeys (WebAuthn).** On **My account → Passkeys and security keys**
+  users add, rename and remove them. A security key can be the second step after the password
+  instead of an authenticator code; a passkey signs in on its own with **Sign in with a
+  passkey** (PIN or biometrics on the device count as the second factor). Either one satisfies
+  the "MFA required" policy, and a new user can choose one instead of an authenticator app.
+  Passkeys and security keys need the console to be reached by a **DNS name with a
+  certificate the browser trusts**; on an IP address (or plain HTTP) the console says they are
+  unavailable. **Reset MFA** also removes a user's passkeys and security keys. Verification
+  uses the MIT-licensed `Fido2` library 4.3.3 (with `NSec.Cryptography` and `libsodium`,
+  pinned).
+- **Passkey offer after sign-in.** Users without a passkey are offered to create one, when
+  passkeys work on the server and in their browser. "Not now" is remembered on the server for
+  30 days.
+
 ### Changed
 
 - **Users sign in with their email address**, not their username; case does not matter. The

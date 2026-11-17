@@ -86,7 +86,15 @@ export function UsersTab() {
                     <div className="text-xs text-muted">{u.email}</div>
                   </td>
                   <td>{humanize(u.role)}</td>
-                  <td>{u.mfaEnabled ? <Badge tone="ok">Enabled</Badge> : <Badge tone="warn">Not enrolled</Badge>}</td>
+                  <td>
+                    {u.mfaEnabled ? (
+                      <Badge tone="ok" title={[u.totpEnabled && 'Authenticator app', u.securityKeyCount > 0 && `${u.securityKeyCount} passkey(s) / security key(s)`].filter(Boolean).join(' · ')}>
+                        Enabled{u.securityKeyCount > 0 ? ` · ${u.securityKeyCount} key${u.securityKeyCount === 1 ? '' : 's'}` : ''}
+                      </Badge>
+                    ) : (
+                      <Badge tone="warn">Not enrolled</Badge>
+                    )}
+                  </td>
                   <td className="max-w-64 text-sm">
                     {u.role === 'SuperAdmin' || u.organizationIds.length === 0 ? (
                       <span className="text-muted">All organizations</span>
@@ -148,7 +156,8 @@ export function UsersTab() {
         confirmLabel={action?.kind === 'reset-link' ? 'Create link' : action?.kind === 'reset-mfa' ? 'Reset MFA' : 'Sign out'}
       >
         {action?.kind === 'reset-link' && 'The link works once and expires in 60 minutes. Send it to the user over a trusted channel.'}
-        {action?.kind === 'reset-mfa' && 'Their authenticator and recovery codes stop working and their sessions end. They must enroll MFA again at next sign-in.'}
+        {action?.kind === 'reset-mfa' &&
+          'Their authenticator app, passkeys, security keys and recovery codes are removed and their sessions end. They must set up MFA again at next sign-in.'}
         {action?.kind === 'revoke-sessions' && 'All of their active sessions end immediately.'}
       </ConfirmDialog>
       <Dialog

@@ -9,6 +9,7 @@ import { useToast } from '../../components/Toast';
 import { Alert, Badge, Button, Card, ErrorState, InlineError, KeyValueList, PageHeader, Spinner, TableWrap, TextField } from '../../components/ui';
 import { describeUserAgent, formatDateTime, formatRelative, humanize } from '../../lib/format';
 import { MfaEnrollment, PasswordChangeForm, RecoveryCodesView } from '../auth/AuthPages';
+import { SecurityKeysCard } from '../auth/SecurityKeys';
 
 export function AccountPage() {
   const { user, refresh } = useAuth();
@@ -34,6 +35,7 @@ export function AccountPage() {
           <p className="mt-4 text-xs text-muted">A super administrator can change your email, role or organization access.</p>
         </Card>
         <MfaCard />
+        <SecurityKeysCard />
         <Card title="Change password">
           <p className="mb-3 text-sm text-muted">Changing your password signs out your other sessions.</p>
           <div className="max-w-md">
@@ -62,6 +64,9 @@ function MfaCard() {
   const [disabling, setDisabling] = useState(false);
   if (!user) return null;
   const required = settings.data?.requireMfa ?? true;
+  const keys = user.securityKeyCount;
+  // The authenticator app can go when the server does not require MFA, or a security key or passkey remains.
+  const canRemoveApp = user.totpEnabled && (!required || keys > 0);
 
   return (
     <Card title="Two-factor authentication">
@@ -73,15 +78,22 @@ function MfaCard() {
           </p>
           <p className="mt-0.5 text-sm text-muted">
             {user.mfaEnabled
-              ? 'Signing in requires your password and a code from your authenticator app (or a recovery code).'
-              : 'Protect your account with an authenticator app. Anyone with your password can otherwise install updates on managed endpoints.'}
+              ? 'Signing in requires your password and a second factor (or a recovery code), or a passkey alone.'
+              : 'Protect your account with an authenticator app, a security key or a passkey. Anyone with your password can otherwise install updates on managed endpoints.'}
           </p>
+          <ul className="mt-2 space-y-0.5 text-sm">
+            <li>Authenticator app: {user.totpEnabled ? 'on' : 'off'}</li>
+            <li>
+              Passkeys and security keys: {keys === 0 ? 'none' : keys}
+              {user.passkeyCount > 0 && keys > 0 && ` (${user.passkeyCount} passkey${user.passkeyCount === 1 ? '' : 's'})`}
+            </li>
+          </ul>
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        {!user.mfaEnabled && (
-          <Button variant="primary" icon={<ShieldCheck className="size-4" aria-hidden />} onClick={() => setEnrolling(true)}>
-            Set up two-factor authentication
+        {!user.totpEnabled && (
+          <Button variant={user.mfaEnabled ? 'secondary' : 'primary'} icon={<ShieldCheck className="size-4" aria-hidden />} onClick={() => setEnrolling(true)}>
+            Set up authenticator app
           </Button>
         )}
         {user.mfaEnabled && (
@@ -89,19 +101,21 @@ function MfaCard() {
             New recovery codes
           </Button>
         )}
-        {user.mfaEnabled && !required && (
+        {canRemoveApp && (
           <Button variant="danger-ghost" icon={<ShieldOff className="size-4" aria-hidden />} onClick={() => setDisabling(true)}>
-            Turn off
+            Remove authenticator app
           </Button>
         )}
       </div>
-      {user.mfaEnabled && required && <p className="mt-3 text-xs text-muted">Two-factor authentication cannot be turned off while the server requires it.</p>}
+      {user.totpEnabled && !canRemoveApp && (
+        <p className="mt-3 text-xs text-muted">The server requires two-factor authentication: add a passkey or security key before removing the authenticator app.</p>
+      )}
 
       <Dialog
         open={enrolling}
         onClose={() => setEnrolling(false)}
         dismissible={!enrollLocked}
-        title="Set up two-factor authentication"
+        title="Set up an authenticator app"
         size="sm"
       >
         {enrolling && (
@@ -110,7 +124,7 @@ function MfaCard() {
             onDone={() => {
               setEnrolling(false);
               setEnrollLocked(false);
-              toast.success('Two-factor authentication is on.');
+              toast.success('Authenticator app is set up.');
               void refresh();
             }}
           />
@@ -119,10 +133,11 @@ function MfaCard() {
       <RegenerateCodesDialog open={regenerating} onClose={() => setRegenerating(false)} />
       <DisableMfaDialog
         open={disabling}
+        keysRemain={keys > 0}
         onClose={() => setDisabling(false)}
         onDisabled={() => {
           setDisabling(false);
-          toast.success('Two-factor authentication is off.');
+          toast.success(keys > 0 ? 'Authenticator app removed.' : 'Two-factor authentication is off.');
           void refresh();
         }}
       />
@@ -174,7 +189,7 @@ function RegenerateCodesDialog({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function DisableMfaDialog({ open, onClose, onDisabled }: { open: boolean; onClose: () => void; onDisabled: () => void }) {
+function DisableMfaDialog({ open, keysRemain, onClose, onDisabled }: { open: boolean; keysRemain: boolean; onClose: () => void; onDisabled: () => void }) {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -202,9 +217,13 @@ function DisableMfaDialog({ open, onClose, onDisabled }: { open: boolean; onClos
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Turn off two-factor authentication?" size="sm">
+    <Dialog open={open} onClose={onClose} title={keysRemain ? 'Remove the authenticator app?' : 'Turn off two-factor authentication?'} size="sm">
       <form onSubmit={submit} className="flex flex-col gap-3.5">
-        <Alert tone="warn">Your account will be protected by your password alone. Your recovery codes stop working.</Alert>
+        <Alert tone="warn">
+          {keysRemain
+            ? 'You will sign in with your passkey or security key. Your recovery codes keep working.'
+            : 'Your account will be protected by your password alone. Your recovery codes stop working.'}
+        </Alert>
         <TextField label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
         <TextField label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} required />
         <InlineError error={error} />

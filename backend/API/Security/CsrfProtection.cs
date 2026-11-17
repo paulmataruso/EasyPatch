@@ -63,7 +63,12 @@ public sealed class CsrfProtection(IDataProtectionProvider provider)
 public sealed class CsrfMiddleware(RequestDelegate next, CsrfProtection csrf)
 {
     /// <summary>Routes that do not act on behalf of an existing session (a stale cookie must not block them).</summary>
-    private static readonly PathString[] Exempt = ["/api/v1/auth/login", "/api/v1/auth/password/reset"];
+    private static readonly PathString[] Exempt =
+    [
+        "/api/v1/auth/login", "/api/v1/auth/password/reset",
+        // Passkey sign-in: the finish request must come from the browser holding the SameSite=Strict binding cookie set by the start.
+        "/api/v1/auth/passkey/options", "/api/v1/auth/passkey",
+    ];
 
     public async Task InvokeAsync(HttpContext context)
     {

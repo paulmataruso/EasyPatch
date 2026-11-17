@@ -20,6 +20,11 @@ public sealed record LoginResponse(bool MfaRequired, bool MfaSetupRequired, Curr
 
 public sealed record MfaCodeRequest(string Code);
 
+/// <param name="MfaEnabled">The user has a second factor: an authenticator app (<paramref name="TotpEnabled"/>) or a security key or
+/// passkey (<paramref name="SecurityKeyCount"/>).</param>
+/// <param name="PasskeyCount">Security keys and passkeys that can sign in without a password (discoverable credentials).</param>
+/// <param name="PasskeyPrompt">Offer to set up a passkey now: passkeys work on this server, the user has none and has not answered
+/// "Not now" in the last 30 days.</param>
 public sealed record CurrentUserDto(
     Guid Id,
     string Username,
@@ -30,7 +35,35 @@ public sealed record CurrentUserDto(
     bool MfaSetupRequired,
     bool MustChangePassword,
     IReadOnlyList<Guid> OrganizationIds,
-    DateTimeOffset? LastLoginAt);
+    DateTimeOffset? LastLoginAt,
+    bool TotpEnabled = false,
+    int SecurityKeyCount = 0,
+    int PasskeyCount = 0,
+    bool PasskeyPrompt = false);
+
+/// <summary>Whether passkeys and security keys can be used with this server (they need HTTPS and a DNS name).</summary>
+/// <param name="Reason"><c>ip_address</c>, <c>not_https</c> or <c>invalid_public_url</c> when unavailable.</param>
+public sealed record WebAuthnStatusDto(bool Available, string? RpId, string? Reason, string? Message);
+
+/// <param name="IsPasskey">Discoverable: signs in without an email address or password. Otherwise a security key used as the
+/// second factor.</param>
+/// <param name="IsSynced">Synced to the user's other devices by their password manager or platform.</param>
+public sealed record WebAuthnCredentialDto(Guid Id, string Name, bool IsPasskey, bool IsSynced, IReadOnlyList<string> Transports,
+    DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
+
+/// <param name="Passkey">A passkey (discoverable, with PIN or biometrics) instead of a security key used only as a second factor.</param>
+/// <param name="Password">The current password, required when the account already has a second factor.</param>
+public sealed record WebAuthnRegisterOptionsRequest(bool Passkey, string? Password);
+
+/// <param name="Credential">The browser's <c>PublicKeyCredential</c> in its JSON form (<c>toJSON()</c>).</param>
+public sealed record WebAuthnRegisterRequest(string? Name, System.Text.Json.JsonElement Credential);
+
+/// <param name="RecoveryCodes">Shown once, when this is the account's first second factor.</param>
+public sealed record WebAuthnRegisterResponse(WebAuthnCredentialDto Credential, IReadOnlyList<string>? RecoveryCodes);
+
+public sealed record WebAuthnRenameRequest(string Name);
+
+public sealed record WebAuthnAssertionRequest(System.Text.Json.JsonElement Credential);
 
 public sealed record MfaSetupResponse(string Secret, string OtpAuthUri, string QrCodeDataUri);
 
@@ -51,6 +84,7 @@ public sealed record SessionDto(Guid Id, DateTimeOffset CreatedAt, DateTimeOffse
 // Users (SuperAdmin)
 // ---------------------------------------------------------------------------------------------
 
+/// <param name="MfaEnabled">An authenticator app or at least one security key or passkey.</param>
 public sealed record UserDto(
     Guid Id,
     string Username,
@@ -61,7 +95,9 @@ public sealed record UserDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset? LastLoginAt,
     DateTimeOffset? LockoutUntil,
-    IReadOnlyList<Guid> OrganizationIds);
+    IReadOnlyList<Guid> OrganizationIds,
+    bool TotpEnabled,
+    int SecurityKeyCount);
 
 public sealed record CreateUserRequest(string Username, string Email, UserRole Role, string? Password, IReadOnlyList<Guid>? OrganizationIds);
 
