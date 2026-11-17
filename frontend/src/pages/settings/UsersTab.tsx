@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { KeyRound, LogOut, Pencil, Plus, ShieldOff, Users } from 'lucide-react';
+import { KeyRound, LogOut, Pencil, Plus, ShieldOff, Unlink, Users } from 'lucide-react';
 import { api } from '../../api/client';
-import { useApiMutation, useList, useOrganizations } from '../../api/hooks';
-import { USER_ROLES, type CreateUserRequest, type CreateUserResponse, type ResetLinkResponse, type UserDto, type UserRole } from '../../api/types';
+import { useApi, useApiMutation, useList, useOrganizations } from '../../api/hooks';
+import { USER_ROLES, type CreateUserRequest, type CreateUserResponse, type ExternalLoginDto, type ResetLinkResponse, type UserDto, type UserRole } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { CodeBlock, OneTimeNotice } from '../../components/Copy';
 import { ConfirmDialog, Dialog } from '../../components/Dialog';
@@ -81,12 +81,21 @@ export function UsersTab() {
                       {u.username}
                       {u.id === me?.id && <Badge tone="accent">you</Badge>}
                       {!u.isActive && <Badge tone="danger">disabled</Badge>}
+                      {u.externalLoginCount > 0 && <Badge tone="info" title="Linked to a single sign-on provider">SSO</Badge>}
                       {u.lockoutUntil && new Date(u.lockoutUntil) > new Date() && <Badge tone="warn" title={`Until ${formatDateTime(u.lockoutUntil)}`}>locked out</Badge>}
                     </div>
                     <div className="text-xs text-muted">{u.email}</div>
                   </td>
                   <td>{humanize(u.role)}</td>
-                  <td>{u.mfaEnabled ? <Badge tone="ok">Enabled</Badge> : <Badge tone="warn">Not enrolled</Badge>}</td>
+                  <td>
+                    {u.mfaEnabled ? (
+                      <Badge tone="ok" title={[u.totpEnabled && 'Authenticator app', u.securityKeyCount > 0 && `${u.securityKeyCount} passkey(s) / security key(s)`].filter(Boolean).join(' · ')}>
+                        Enabled{u.securityKeyCount > 0 ? ` · ${u.securityKeyCount} key${u.securityKeyCount === 1 ? '' : 's'}` : ''}
+                      </Badge>
+                    ) : (
+                      <Badge tone="warn">Not enrolled</Badge>
+                    )}
+                  </td>
                   <td className="max-w-64 text-sm">
                     {u.role === 'SuperAdmin' || u.organizationIds.length === 0 ? (
                       <span className="text-muted">All organizations</span>
@@ -148,7 +157,8 @@ export function UsersTab() {
         confirmLabel={action?.kind === 'reset-link' ? 'Create link' : action?.kind === 'reset-mfa' ? 'Reset MFA' : 'Sign out'}
       >
         {action?.kind === 'reset-link' && 'The link works once and expires in 60 minutes. Send it to the user over a trusted channel.'}
-        {action?.kind === 'reset-mfa' && 'Their authenticator and recovery codes stop working and their sessions end. They must enroll MFA again at next sign-in.'}
+        {action?.kind === 'reset-mfa' &&
+          'Their authenticator app, passkeys, security keys and recovery codes are removed and their sessions end. They must set up MFA again at next sign-in.'}
         {action?.kind === 'revoke-sessions' && 'All of their active sessions end immediately.'}
       </ConfirmDialog>
       <Dialog
@@ -223,8 +233,10 @@ function CreateUserDialog({ open, onClose, onCreated }: { open: boolean; onClose
     <Dialog open={open} onClose={onClose} title="New user">
       <form onSubmit={submit} className="flex flex-col gap-3.5">
         <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-          <TextField label="Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required maxLength={100} autoComplete="off" autoFocus />
-          <TextField label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required maxLength={320} autoComplete="off" />
+          <TextField label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required maxLength={256} autoComplete="off" autoFocus
+            hint="The user signs in with this address." />
+          <TextField label="Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required maxLength={64} autoComplete="off"
+            hint="Shown in the console and the audit log." />
         </div>
         <SelectField label="Role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })} hint={ROLE_HELP[form.role]}>
           {USER_ROLES.map((r) => (
@@ -300,7 +312,8 @@ function EditUserDialog({ user, isSelf, onClose }: { user: UserDto | null; isSel
           }}
           className="flex flex-col gap-3.5"
         >
-          <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required maxLength={320} />
+          <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required maxLength={256}
+            hint="The user signs in with this address. A change takes effect at their next sign-in." />
           <SelectField label="Role" value={role} onChange={(e) => setRole(e.target.value as UserRole)} hint={ROLE_HELP[role]} disabled={isSelf}>
             {USER_ROLES.map((r) => (
               <option key={r} value={r}>
@@ -312,6 +325,7 @@ function EditUserDialog({ user, isSelf, onClose }: { user: UserDto | null; isSel
           {role !== 'SuperAdmin' && <OrgAccessPicker value={orgIds} onChange={setOrgIds} />}
           <Checkbox label="Account enabled" hint="Disabled users cannot sign in; their sessions end." checked={active} onChange={(e) => setActive(e.target.checked)} disabled={isSelf} />
           {!active && user.isActive && <Alert tone="warn">Disabling the account signs the user out everywhere.</Alert>}
+          {user.externalLoginCount > 0 && <LinkedSignIns userId={user.id} />}
           <InlineError error={save.error} />
           <div className="flex justify-end gap-2 pt-1">
             <Button onClick={onClose}>Cancel</Button>
@@ -322,5 +336,36 @@ function EditUserDialog({ user, isSelf, onClose }: { user: UserDto | null; isSel
         </form>
       )}
     </Dialog>
+  );
+}
+
+/** The user's accounts at single sign-on providers. Removing a link stops that account from signing in as this user. */
+function LinkedSignIns({ userId }: { userId: string }) {
+  const toast = useToast();
+  const links = useApi<ExternalLoginDto[]>(`/users/${userId}/external-logins`);
+  const unlink = useApiMutation((l: ExternalLoginDto) => api.del<void>(`/users/${userId}/external-logins/${l.id}`), {
+    invalidate: ['/users'],
+    onSuccess: (_, l) => toast.success(`Unlinked from ${l.providerName}.`),
+  });
+  return (
+    <fieldset className="flex flex-col gap-1">
+      <legend className="mb-1 text-xs font-medium text-muted">Single sign-on</legend>
+      {links.isPending && <Spinner />}
+      <InlineError error={links.error ?? unlink.error} />
+      {links.data?.map((l) => (
+        <div key={l.id} className="flex items-center justify-between gap-2 rounded-md border border-line px-3 py-2 text-sm">
+          <div className="min-w-0">
+            <div className="font-medium">{l.providerName}</div>
+            <div className="truncate text-xs text-muted" title={`${l.issuer} · subject ${l.subject}`}>
+              {l.email ?? l.subject} · last used {formatRelative(l.lastUsedAt)}
+            </div>
+          </div>
+          <Button size="sm" variant="danger-ghost" icon={<Unlink className="size-3.5" aria-hidden />} loading={unlink.isPending && unlink.variables?.id === l.id}
+            onClick={() => unlink.mutate(l)}>
+            Unlink
+          </Button>
+        </div>
+      ))}
+    </fieldset>
   );
 }

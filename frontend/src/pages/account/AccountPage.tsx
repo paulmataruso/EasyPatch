@@ -9,6 +9,7 @@ import { useToast } from '../../components/Toast';
 import { Alert, Badge, Button, Card, ErrorState, InlineError, KeyValueList, PageHeader, Spinner, TableWrap, TextField } from '../../components/ui';
 import { describeUserAgent, formatDateTime, formatRelative, humanize } from '../../lib/format';
 import { MfaEnrollment, PasswordChangeForm, RecoveryCodesView } from '../auth/AuthPages';
+import { SecurityKeysCard } from '../auth/SecurityKeys';
 
 export function AccountPage() {
   const { user, refresh } = useAuth();
@@ -24,8 +25,8 @@ export function AccountPage() {
         <Card title="Profile">
           <KeyValueList
             items={[
+              ['Email (sign-in)', user.email],
               ['Username', user.username],
-              ['Email', user.email],
               ['Role', humanize(user.role)],
               ['Organization access', user.role === 'SuperAdmin' || orgNames.length === 0 ? 'All organizations' : orgNames.join(', ')],
               ['Last sign-in', user.lastLoginAt ? `${formatDateTime(user.lastLoginAt)} (${formatRelative(user.lastLoginAt)})` : '—'],
@@ -37,6 +38,7 @@ export function AccountPage() {
           <div className="max-w-md">
             <EmailChangeForm
               currentEmail={user.email}
+              hasPassword={user.hasPassword}
               onDone={(email) => {
                 toast.success(`Your email is now ${email}.`);
                 void refresh();
@@ -45,25 +47,35 @@ export function AccountPage() {
           </div>
         </Card>
         <MfaCard />
-        <Card title="Change password">
-          <p className="mb-3 text-sm text-muted">Changing your password signs out your other sessions.</p>
-          <div className="max-w-md">
-            <PasswordChangeForm
-              user={user}
-              onDone={() => {
-                toast.success('Password changed. Your other sessions were signed out.');
-                void refresh();
-              }}
-            />
-          </div>
-        </Card>
+        <SecurityKeysCard />
+        {user.hasPassword ? (
+          <Card title="Change password">
+            <p className="mb-3 text-sm text-muted">Changing your password signs out your other sessions.</p>
+            <div className="max-w-md">
+              <PasswordChangeForm
+                user={user}
+                onDone={() => {
+                  toast.success('Password changed. Your other sessions were signed out.');
+                  void refresh();
+                }}
+              />
+            </div>
+          </Card>
+        ) : (
+          <Card title="Password">
+            <p className="text-sm text-muted">
+              You sign in with single sign-on and have no EasyPatch password. A super administrator can send you a link to set one. To change
+              passkeys or two-factor settings, sign in again first if your sign-in is more than 10 minutes old.
+            </p>
+          </Card>
+        )}
         <SessionsCard />
       </div>
     </>
   );
 }
 
-function EmailChangeForm({ currentEmail, onDone }: { currentEmail: string; onDone: (email: string) => void }) {
+function EmailChangeForm({ currentEmail, hasPassword, onDone }: { currentEmail: string; hasPassword: boolean; onDone: (email: string) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -96,13 +108,17 @@ function EmailChangeForm({ currentEmail, onDone }: { currentEmail: string; onDon
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         error={trimmed && same ? 'That is already your email.' : null}
-        hint={`Currently ${currentEmail}.`}
+        hint={`Currently ${currentEmail}. You sign in with this address.`}
         maxLength={256}
         required
       />
-      <TextField label="Current password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+      {hasPassword ? (
+        <TextField label="Current password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+      ) : (
+        <p className="text-xs text-muted">Your account has no password: a sign-in within the last 10 minutes confirms the change.</p>
+      )}
       <InlineError error={error} />
-      <Button type="submit" variant="primary" loading={busy} disabled={!trimmed || same || !password} className="self-start">
+      <Button type="submit" variant="primary" loading={busy} disabled={!trimmed || same || (hasPassword && !password)} className="self-start">
         Change email
       </Button>
     </form>
@@ -119,6 +135,9 @@ function MfaCard() {
   const [disabling, setDisabling] = useState(false);
   if (!user) return null;
   const required = settings.data?.requireMfa ?? true;
+  const keys = user.securityKeyCount;
+  // The authenticator app can go when the server does not require MFA, or a security key or passkey remains.
+  const canRemoveApp = user.totpEnabled && (!required || keys > 0);
 
   return (
     <Card title="Two-factor authentication">
@@ -130,15 +149,22 @@ function MfaCard() {
           </p>
           <p className="mt-0.5 text-sm text-muted">
             {user.mfaEnabled
-              ? 'Signing in requires your password and a code from your authenticator app (or a recovery code).'
-              : 'Protect your account with an authenticator app. Anyone with your password can otherwise install updates on managed endpoints.'}
+              ? 'Signing in requires your password and a second factor (or a recovery code), or a passkey alone.'
+              : 'Protect your account with an authenticator app, a security key or a passkey. Anyone with your password can otherwise install updates on managed endpoints.'}
           </p>
+          <ul className="mt-2 space-y-0.5 text-sm">
+            <li>Authenticator app: {user.totpEnabled ? 'on' : 'off'}</li>
+            <li>
+              Passkeys and security keys: {keys === 0 ? 'none' : keys}
+              {user.passkeyCount > 0 && keys > 0 && ` (${user.passkeyCount} passkey${user.passkeyCount === 1 ? '' : 's'})`}
+            </li>
+          </ul>
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        {!user.mfaEnabled && (
-          <Button variant="primary" icon={<ShieldCheck className="size-4" aria-hidden />} onClick={() => setEnrolling(true)}>
-            Set up two-factor authentication
+        {!user.totpEnabled && (
+          <Button variant={user.mfaEnabled ? 'secondary' : 'primary'} icon={<ShieldCheck className="size-4" aria-hidden />} onClick={() => setEnrolling(true)}>
+            Set up authenticator app
           </Button>
         )}
         {user.mfaEnabled && (
@@ -146,19 +172,21 @@ function MfaCard() {
             New recovery codes
           </Button>
         )}
-        {user.mfaEnabled && !required && (
+        {canRemoveApp && (
           <Button variant="danger-ghost" icon={<ShieldOff className="size-4" aria-hidden />} onClick={() => setDisabling(true)}>
-            Turn off
+            Remove authenticator app
           </Button>
         )}
       </div>
-      {user.mfaEnabled && required && <p className="mt-3 text-xs text-muted">Two-factor authentication cannot be turned off while the server requires it.</p>}
+      {user.totpEnabled && !canRemoveApp && (
+        <p className="mt-3 text-xs text-muted">The server requires two-factor authentication: add a passkey or security key before removing the authenticator app.</p>
+      )}
 
       <Dialog
         open={enrolling}
         onClose={() => setEnrolling(false)}
         dismissible={!enrollLocked}
-        title="Set up two-factor authentication"
+        title="Set up an authenticator app"
         size="sm"
       >
         {enrolling && (
@@ -167,19 +195,21 @@ function MfaCard() {
             onDone={() => {
               setEnrolling(false);
               setEnrollLocked(false);
-              toast.success('Two-factor authentication is on.');
+              toast.success('Authenticator app is set up.');
               void refresh();
             }}
           />
         )}
       </Dialog>
-      <RegenerateCodesDialog open={regenerating} onClose={() => setRegenerating(false)} />
+      <RegenerateCodesDialog open={regenerating} hasPassword={user.hasPassword} onClose={() => setRegenerating(false)} />
       <DisableMfaDialog
         open={disabling}
+        keysRemain={keys > 0}
+        hasPassword={user.hasPassword}
         onClose={() => setDisabling(false)}
         onDisabled={() => {
           setDisabling(false);
-          toast.success('Two-factor authentication is off.');
+          toast.success(keys > 0 ? 'Authenticator app removed.' : 'Two-factor authentication is off.');
           void refresh();
         }}
       />
@@ -187,7 +217,8 @@ function MfaCard() {
   );
 }
 
-function RegenerateCodesDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Accounts without a password (single sign-on) confirm with a recent sign-in instead (the server checks it). */
+function RegenerateCodesDialog({ open, hasPassword, onClose }: { open: boolean; hasPassword: boolean; onClose: () => void }) {
   const [password, setPassword] = useState('');
   const [codes, setCodes] = useState<string[] | null>(null);
   const regenerate = useApiMutation((pw: string) => api.post<RecoveryCodesResponse>('/auth/mfa/recovery-codes', { password: pw }), {
@@ -207,7 +238,7 @@ function RegenerateCodesDialog({ open, onClose }: { open: boolean; onClose: () =
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (password) regenerate.mutate(password);
+    if (password || !hasPassword) regenerate.mutate(password);
   }
 
   return (
@@ -217,11 +248,13 @@ function RegenerateCodesDialog({ open, onClose }: { open: boolean; onClose: () =
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-3.5">
           <Alert tone="warn">Your current recovery codes stop working as soon as new ones are generated.</Alert>
-          <TextField label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+          {hasPassword && (
+            <TextField label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+          )}
           <InlineError error={regenerate.error} />
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="primary" loading={regenerate.isPending} disabled={!password}>
+            <Button type="submit" variant="primary" loading={regenerate.isPending} disabled={hasPassword && !password}>
               Generate codes
             </Button>
           </div>
@@ -231,7 +264,13 @@ function RegenerateCodesDialog({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function DisableMfaDialog({ open, onClose, onDisabled }: { open: boolean; onClose: () => void; onDisabled: () => void }) {
+function DisableMfaDialog({ open, keysRemain, hasPassword, onClose, onDisabled }: {
+  open: boolean;
+  keysRemain: boolean;
+  hasPassword: boolean;
+  onClose: () => void;
+  onDisabled: () => void;
+}) {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -259,15 +298,21 @@ function DisableMfaDialog({ open, onClose, onDisabled }: { open: boolean; onClos
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Turn off two-factor authentication?" size="sm">
+    <Dialog open={open} onClose={onClose} title={keysRemain ? 'Remove the authenticator app?' : 'Turn off two-factor authentication?'} size="sm">
       <form onSubmit={submit} className="flex flex-col gap-3.5">
-        <Alert tone="warn">Your account will be protected by your password alone. Your recovery codes stop working.</Alert>
-        <TextField label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+        <Alert tone="warn">
+          {keysRemain
+            ? 'You will sign in with your passkey or security key. Your recovery codes keep working.'
+            : 'Your account will be protected by your password alone. Your recovery codes stop working.'}
+        </Alert>
+        {hasPassword && (
+          <TextField label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+        )}
         <TextField label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} required />
         <InlineError error={error} />
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="danger" loading={busy} disabled={!password || code.trim().length < 6}>
+          <Button type="submit" variant="danger" loading={busy} disabled={(hasPassword && !password) || code.trim().length < 6}>
             Turn off
           </Button>
         </div>

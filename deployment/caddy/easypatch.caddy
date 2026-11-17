@@ -41,8 +41,15 @@
 		file_server
 	}
 
+	# The single sign-on callback URL carries the provider's one-time authorization code and state: keep them out of the log.
 	log {
 		output stdout
-		format json
+		format filter {
+			request>uri query {
+				replace code REDACTED
+				replace state REDACTED
+			}
+			wrap json
+		}
 	}
 }

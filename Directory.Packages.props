@@ -1,5 +1,5 @@
 <Project>
-  <!-- Central, pinned package versions. All packages are OSI-licensed (MIT / Apache-2.0 / PostgreSQL). -->
+  <!-- Central, pinned package versions. All packages are OSI-licensed (MIT / Apache-2.0 / ISC / PostgreSQL). -->
   <ItemGroup>
     <!-- Server -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.15" />
@@ -20,6 +20,15 @@
     <PackageVersion Include="PDFsharp-MigraDoc" Version="6.2.4" />
     <PackageVersion Include="PDFsharp" Version="6.2.4" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
+    <!-- Passkeys and security keys (WebAuthn): passwordless-lib fido2-net-lib, MIT. Its dependencies NSec.Cryptography (MIT)
+         and libsodium (ISC) are pinned explicitly; System.Formats.Cbor comes with .NET. -->
+    <PackageVersion Include="Fido2" Version="4.3.3" />
+    <PackageVersion Include="Fido2.Models" Version="4.3.3" />
+    <PackageVersion Include="NSec.Cryptography" Version="25.4.0" />
+    <PackageVersion Include="libsodium" Version="1.0.20.1" />
+    <!-- Single sign-on (OpenID Connect): discovery, JWKS and ID token validation. Microsoft IdentityModel, MIT. -->
+    <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
+    <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
     <!-- Agent -->
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.15" />

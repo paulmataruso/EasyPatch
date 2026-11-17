@@ -164,7 +164,13 @@ All screenshots show fictional demo data.
   * tokenless deployment codes for RMM scripts. Each computer that uses one waits for an
     administrator to approve it, after the administrator compares key fingerprints.
 * **Strong admin security**:
-  * Argon2id password hashing and mandatory TOTP MFA with recovery codes;
+  * sign-in with the email address; Argon2id password hashing and mandatory MFA with recovery
+    codes, by authenticator app (TOTP) or security key;
+  * passkeys (WebAuthn) for passwordless sign-in, offered after sign-in to users without one
+    (needs a DNS name with a trusted certificate);
+  * single sign-on with OpenID Connect providers (Microsoft Entra ID, Google, Keycloak and
+    others), linking existing users by verified email address. See
+    [docs/single-sign-on.md](docs/single-sign-on.md);
   * server-side sessions, CSRF protection, lockout and rate limits;
   * three roles: SuperAdmin, Admin, ReadOnly;
   * API tokens for scripts and integrations: read-only or operator, optionally limited to
@@ -221,12 +227,12 @@ git clone --branch v1.9.0 https://github.com/paulmataruso/EasyPatch.git easypatc
 $EDITOR .env                              # set EASYPATCH_DOMAIN and ACME_EMAIL
 docker compose pull                       # ghcr.io/paulmataruso/easypatch-server and -proxy
 docker compose up -d
-docker compose run --rm api create-admin --username admin --email admin@example.com
+docker compose run --rm api create-admin --email admin@example.com
 ```
 
 Then:
 
-1. Open `https://<EASYPATCH_DOMAIN>`, sign in with the printed temporary password, set up MFA
+1. Open `https://<EASYPATCH_DOMAIN>`, sign in with that email address and the printed temporary password, set up MFA
    and choose a new password.
 2. Download the agent packages (MSI, `.deb`, `.rpm` and their `.sig` files) from the
    [release](https://github.com/paulmataruso/EasyPatch/releases/latest) into
@@ -250,6 +256,7 @@ The full guides are [docs/installation.md](docs/installation.md),
 | [application-updates.md](docs/application-updates.md) | Third-party application updates with winget: requirements, approval, what the agent runs, restarts, limitations and trust model |
 | [compliance.md](docs/compliance.md) | Compliance statuses and rules, required updates, CVE and known-exploited data, OS support status, reports and monthly PDF reports |
 | [alerts.md](docs/alerts.md) | Alert rules, notification channels (email, Slack, Teams, signed webhooks), delivery and troubleshooting |
+| [single-sign-on.md](docs/single-sign-on.md) | Single sign-on with OpenID Connect: how accounts are linked, MFA, settings, Entra ID, Google and Keycloak setup |
 | [security.md](docs/security.md) | Security model, threat model, hardening checklist, known limitations |
 | [api.md](docs/api.md) | REST API (admin and agent protocol). The live OpenAPI document is served at `/api/docs` to signed-in administrators |
 | [troubleshooting.md](docs/troubleshooting.md) | Diagnosing server, sign-in, agent and job problems |

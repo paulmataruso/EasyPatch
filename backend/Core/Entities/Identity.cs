@@ -8,6 +8,9 @@ public sealed class User
     public required string PasswordHash { get; set; }
     public UserRole Role { get; set; }
     public bool IsActive { get; set; } = true;
+
+    /// <summary>An authenticator app (TOTP) is set up. Security keys and passkeys are the other second factor
+    /// (<see cref="WebAuthnCredential"/>): a user has MFA when either is present.</summary>
     public bool MfaEnabled { get; set; }
 
     /// <summary>TOTP secret protected with ASP.NET Data Protection.</summary>
@@ -24,7 +27,13 @@ public sealed class User
     public DateTimeOffset? LockoutUntil { get; set; }
     public DateTimeOffset PasswordChangedAt { get; set; }
     public bool MustChangePassword { get; set; }
+
+    /// <summary>When the user last answered "Not now" to the offer to set up a passkey.</summary>
+    public DateTimeOffset? PasskeyPromptDismissedAt { get; set; }
+
     public List<UserOrganizationAccess> OrganizationAccess { get; set; } = [];
+    public List<WebAuthnCredential> WebAuthnCredentials { get; set; } = [];
+    public List<ExternalLogin> ExternalLogins { get; set; } = [];
 }
 
 public sealed class UserSession
@@ -34,6 +43,10 @@ public sealed class UserSession
     public User? User { get; set; }
     public required string TokenHash { get; set; }
     public bool MfaCompleted { get; set; }
+
+    /// <summary>Signed in through an identity provider that enforces MFA: EasyPatch does not require its own second factor.</summary>
+    public bool MfaByProvider { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset LastSeenAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }

@@ -434,7 +434,7 @@ public abstract class IntegrationTest(PostgresFixture postgres) : IAsyncLifetime
         await WithScopeAsync(async sp =>
         {
             var auth = sp.GetRequiredService<AuthService>();
-            var user = await auth.CreateUserAsync(username, username + "@example.test", role, DefaultPassword);
+            var user = await auth.CreateUserAsync(username, EmailOf(username), role, DefaultPassword);
             if (organizations.Length > 0)
             {
                 await auth.SetOrganizationAccessAsync(user.Id, organizations);
@@ -447,11 +447,16 @@ public abstract class IntegrationTest(PostgresFixture postgres) : IAsyncLifetime
 
     protected Task<AdminSession> SuperAdminAsync() => CreateAndLoginAsync("root", UserRole.SuperAdmin);
 
+    /// <summary>The email address <see cref="CreateAndLoginAsync"/> gives a test user (users sign in with it).</summary>
+    protected static string EmailOf(string username) => username + "@example.test";
+
+    /// <summary>Signs in with the email address of <paramref name="username"/> (see <see cref="EmailOf"/>).</summary>
     protected async Task<AdminSession> LoginAsync(string username, string password, byte[]? mfaSecret = null)
     {
         var browser = new BrowserHandler();
         var session = new AdminSession(NewHttpClient(browser), browser, username, password) { MfaSecret = mfaSecret };
-        var login = await session.SendAsync<LoginResponse>(HttpMethod.Post, "/api/v1/auth/login", new LoginRequest(username, password), HttpStatusCode.OK);
+        var login = await session.SendAsync<LoginResponse>(HttpMethod.Post, "/api/v1/auth/login", new LoginRequest(EmailOf(username), password),
+            HttpStatusCode.OK);
         if (login.MfaSetupRequired)
         {
             var setup = await session.SendAsync<MfaSetupResponse>(HttpMethod.Post, "/api/v1/auth/mfa/setup", null, HttpStatusCode.OK);

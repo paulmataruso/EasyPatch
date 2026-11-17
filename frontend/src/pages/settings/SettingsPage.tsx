@@ -14,6 +14,7 @@ import { ApiTokensTab } from './ApiTokensTab';
 import { AuditTab } from './AuditTab';
 import { LifecycleTab } from './LifecycleTab';
 import { NotificationsTab } from './NotificationsTab';
+import { SsoTab } from './SsoTab';
 import { TagsTab } from './TagsTab';
 import { UsersTab } from './UsersTab';
 
@@ -35,6 +36,7 @@ export function SettingsPage() {
           { id: 'server', label: 'Server settings' },
           { id: 'users', label: 'Users', hidden: !isSuperAdmin },
           { id: 'api-tokens', label: 'API tokens', hidden: !isSuperAdmin },
+          { id: 'sso', label: 'Single sign-on', hidden: !isSuperAdmin },
           { id: 'lifecycle', label: 'OS lifecycle' },
           { id: 'audit', label: 'Audit log', hidden: !canOperate },
         ]}
@@ -46,6 +48,7 @@ export function SettingsPage() {
       {tab === 'server' && <ServerSettingsTab />}
       {tab === 'users' && isSuperAdmin && <UsersTab />}
       {tab === 'api-tokens' && isSuperAdmin && <ApiTokensTab />}
+      {tab === 'sso' && isSuperAdmin && <SsoTab />}
       {tab === 'lifecycle' && <LifecycleTab />}
       {tab === 'audit' && canOperate && <AuditTab />}
     </>

@@ -20,7 +20,7 @@ public sealed class ChangeEmailTests(PostgresFixture postgres) : IntegrationTest
         await root.ExpectAsync(HttpMethod.Post, "/api/v1/auth/email/change", new ChangeEmailRequest(DefaultPassword, "not an address"),
             HttpStatusCode.BadRequest, "validation_failed");
         await root.ExpectAsync(HttpMethod.Post, "/api/v1/auth/email/change", new ChangeEmailRequest(DefaultPassword, "Other@Example.test"),
-            HttpStatusCode.Conflict, "duplicate");
+            HttpStatusCode.Conflict, "email_in_use");
 
         await root.ExpectAsync(HttpMethod.Post, "/api/v1/auth/email/change", new ChangeEmailRequest(DefaultPassword, "  Me@Example.ORG "),
             HttpStatusCode.NoContent);

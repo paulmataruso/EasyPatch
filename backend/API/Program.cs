@@ -35,6 +35,19 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
 builder.Services.AddScoped<IActorContext, HttpActorContext>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<WebAuthnService>();
+builder.Services.AddScoped<OidcService>();
+builder.Services.AddSingleton<OidcConfigurationCache>();
+// Single sign-on: discovery, key sets and the token endpoint. No redirects or cookies, a short timeout, and no request logging.
+builder.Services.AddHttpClient(OidcService.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(15))
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    })
+    .RemoveAllLoggers();
 builder.Services.AddSingleton<CsrfProtection>();
 builder.Services.AddHostedService<PresenceFlushService>();
 
@@ -123,6 +136,8 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c
 
 app.MapAgentEndpoints();
 app.MapAuthEndpoints();
+app.MapWebAuthnEndpoints();
+app.MapSsoEndpoints();
 app.MapUserEndpoints();
 app.MapApiTokenEndpoints();
 app.MapOrganizationEndpoints();

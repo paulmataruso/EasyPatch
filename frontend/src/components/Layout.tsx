@@ -26,6 +26,7 @@ import type { AlertSummaryDto, DashboardSummaryDto } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { applyTheme, getStoredTheme, storeTheme, type Theme } from '../lib/theme';
 import { humanize } from '../lib/format';
+import { PasskeyPrompt } from '../pages/auth/SecurityKeys';
 import { cx } from './ui';
 
 interface NavItem {
@@ -229,6 +230,7 @@ export function AppLayout() {
             <Outlet />
           </div>
         </main>
+        <PasskeyPrompt />
       </div>
     </div>
   );

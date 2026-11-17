@@ -36,5 +36,5 @@ Next steps:
   1. Edit .env (EASYPATCH_DOMAIN, ACME_EMAIL) and point DNS for that name at this host.
   2. Copy a signed EasyPatch agent MSI into data/agent-packages/ (see docs/agent-installation.md).
   3. docker compose build && docker compose up -d
-  4. docker compose run --rm api create-admin --username admin --email you@example.com
+  4. docker compose run --rm api create-admin --email you@example.com   (you sign in with this address)
 MSG

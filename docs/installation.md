@@ -12,7 +12,7 @@ installation, first sign-in, agent packages, upgrades, backup and restore.
 | Host | 64-bit Linux with Docker Engine and the Docker Compose plugin. The development override (`docker-compose.dev.yml`) uses the `!override` tag, which needs Compose 2.24.4 or later |
 | DNS | One public DNS name pointing at the host, for example `patch.example.com`; see [DNS records](#dns-records) |
 | Inbound | TCP 443 from administrators and from every managed endpoint. TCP 80 from the internet, for ACME certificate validation and the HTTP to HTTPS redirect |
-| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. winget, from the `worker` only and only after a Windows agent could not download it from GitHub itself: `github.com` and `release-assets.githubusercontent.com` (see [winget for agents](#winget-for-agents)). Pulling the images needs `ghcr.io` and Docker Hub (PostgreSQL). Building them yourself needs `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` instead of `ghcr.io` |
+| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. winget, from the `worker` only and only after a Windows agent could not download it from GitHub itself: `github.com` and `release-assets.githubusercontent.com` (see [winget for agents](#winget-for-agents)). If you use single sign-on: the identity providers' HTTPS endpoints (TCP 443), from the `api` container. Pulling the images needs `ghcr.io` and Docker Hub (PostgreSQL). Building them yourself needs `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` instead of `ghcr.io` |
 
 Nothing else is published. PostgreSQL is attached only to an internal Docker network and has no
 host port.
@@ -92,20 +92,23 @@ ready. Caddy requests the certificate on first start; follow it with
 ## 4. Create the first administrator
 
 ```bash
-docker compose run --rm api create-admin --username admin --email admin@example.com
+docker compose run --rm api create-admin --email admin@example.com
 ```
 
-This creates a SuperAdmin and prints a temporary password once. The password is not logged.
+This creates a SuperAdmin who signs in with that email address and prints a temporary password
+once. The password is not logged. Users always sign in with their email address (case does not
+matter); `--name` sets the account name shown in the console and the audit log (by default the
+part of the address before `@`).
 To set the password yourself instead, pass `--password-stdin` and supply it on standard input
 (use `-T` so Compose passes stdin through):
 
 ```bash
-docker compose run --rm -T api create-admin --username admin --email admin@example.com --password-stdin
+docker compose run --rm -T api create-admin --email admin@example.com --password-stdin
 ```
 
 ## 5. First sign-in
 
-Open `https://<EASYPATCH_DOMAIN>` and sign in with the temporary password. Before anything else
+Open `https://<EASYPATCH_DOMAIN>` and sign in with the email address and the temporary password. Before anything else
 the console requires you to:
 
 1. **Set up multi-factor authentication**: scan the QR code with an authenticator app, enter a
@@ -113,7 +116,14 @@ the console requires you to:
 2. **Choose a new password**: 12 to 256 characters with at least 4 distinct characters. It may
    not contain the username.
 
-MFA is required for every user while the server setting `RequireMfa` is on (the default).
+MFA is required for every user while the server setting `RequireMfa` is on (the default). An
+authenticator app, a security key or a passkey each satisfies it. Passkeys and security keys
+work only when `EASYPATCH_DOMAIN` is a DNS name with a certificate the browsers trust (the
+public ACME certificate does this); with an IP address the console offers the authenticator app
+only. Users manage them under **My account → Passkeys and security keys**; see
+[security.md](security.md#admin-authentication). To let administrators sign in with Microsoft
+Entra ID, Google, Keycloak or another OpenID Connect provider, see
+[single-sign-on.md](single-sign-on.md).
 
 Then:
 
@@ -249,13 +259,13 @@ This writes `backups/<UTC timestamp>/`, created with umask 077, containing:
 | File | Contents |
 |---|---|
 | `easypatch.dump` | `pg_dump` custom-format database dump |
-| `dpkeys.tar` | ASP.NET Data Protection keys. **Without these, MFA secrets and notification secrets (SMTP password, webhook URLs and signing keys) in the dump cannot be decrypted: every user must enroll MFA again and the secrets must be entered again** |
+| `dpkeys.tar` | ASP.NET Data Protection keys. **Without these, MFA secrets, notification secrets (SMTP password, webhook URLs and signing keys) and single sign-on client secrets in the dump cannot be decrypted: every user must enroll MFA again and the secrets must be entered again** |
 | `agent-packages.tar` | The agent MSIs |
 | `SHA256SUMS` | Checksums of the three files |
 
 The stack must be running (the script uses the `postgres` and `api` containers). Copy backups off
 the host and protect them. The dump contains hashed credentials and agent public keys, and
-`dpkeys.tar` decrypts MFA secrets and notification secrets. Keep them in separate locations if you can.
+`dpkeys.tar` decrypts MFA secrets, notification secrets and single sign-on client secrets. Keep them in separate locations if you can.
 
 To restore:
 
@@ -285,10 +295,10 @@ The API image includes administration commands. Run them with
 | Command | Purpose |
 |---|---|
 | `migrate` | Apply database migrations (the `migrate` service runs this automatically) |
-| `create-admin --username <name> --email <email> [--password-stdin]` | Create a SuperAdmin |
-| `reset-password --username <name> [--password-stdin]` | Reset a password and revoke the user's sessions. A generated password must be changed at next sign-in |
-| `reset-mfa --username <name>` | Remove a user's MFA and revoke their sessions. They enroll again at next sign-in |
-| `unlock --username <name>` | Clear a login lockout |
+| `create-admin --email <email> [--name <name>] [--password-stdin]` | Create a SuperAdmin who signs in with `<email>`. `<name>` is the account name shown in the console (default: the part of the address before `@`) |
+| `reset-password --email <email> [--password-stdin]` | Reset a password and revoke the user's sessions. A generated password must be changed at next sign-in |
+| `reset-mfa --email <email>` | Remove a user's MFA (authenticator app, passkeys and security keys) and revoke their sessions. They enroll again at next sign-in |
+| `unlock --email <email>` | Clear a login lockout |
 | `help` | List the commands |
 
 These are for recovery when no SuperAdmin can sign in. Day-to-day, a SuperAdmin uses
@@ -322,7 +332,7 @@ credential lifetime, retention and session timeouts, is under **Settings → Ser
 ```bash
 # in .env: EASYPATCH_DOMAIN=localhost (ACME_EMAIL must be set but is not used)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm api create-admin --username admin --email admin@example.com
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm api create-admin --email admin@example.com
 ```
 
 Open `https://localhost:8443` and accept the certificate warning, or trust Caddy's root
@@ -332,7 +342,8 @@ To reach a lab server from other machines on a private network, set both the add
 name to the host's LAN IP address in `.env`, for example `EASYPATCH_BIND_ADDRESS=192.168.1.20`
 and `EASYPATCH_DOMAIN=192.168.1.20`. Then open `https://192.168.1.20:8443`. Caddy's internal CA
 issues a certificate for the IP address. Anyone who can reach that address can reach the sign-in
-page, so do this only on a trusted network. Agents only connect to a server whose certificate
+page, so do this only on a trusted network. Browsers do not allow passkeys or security keys on
+an IP address, so such a server offers only the authenticator app for MFA. Agents only connect to a server whose certificate
 they trust. For a lab agent, either put Caddy's root certificate in the computer's Trusted Root
 store, or turn on *Skip certificate check* when you generate the Windows install script: the
 agent then trusts Caddy's CA, which the lab proxy publishes at `/server-ca.crt`, for its

@@ -7,6 +7,33 @@ the web console and the agents share one version number.
 
 ### Added
 
+- **Security keys and passkeys (WebAuthn).** On **My account → Passkeys and security keys**
+  users add, rename and remove them. A security key can be the second step after the password
+  instead of an authenticator code; a passkey signs in on its own with **Sign in with a
+  passkey** (PIN or biometrics on the device count as the second factor). Either one satisfies
+  the "MFA required" policy, and a new user can choose one instead of an authenticator app.
+  Passkeys and security keys need the console to be reached by a **DNS name with a
+  certificate the browser trusts**; on an IP address (or plain HTTP) the console says they are
+  unavailable. **Reset MFA** also removes a user's passkeys and security keys. Verification
+  uses the MIT-licensed `Fido2` library 4.3.3 (with `NSec.Cryptography` and `libsodium`,
+  pinned).
+- **Passkey offer after sign-in.** Users without a passkey are offered to create one, when
+  passkeys work on the server and in their browser. "Not now" is remembered on the server for
+  30 days.
+- **Single sign-on with OpenID Connect** (Microsoft Entra ID, Google, Keycloak and other
+  providers), configured under **Settings → Single sign-on** by super administrators. Each
+  enabled provider adds a **Sign in with …** button; password sign-in stays available. The
+  authorization code flow uses PKCE, `state` and `nonce`; the ID token's signature, issuer,
+  audience, lifetime and nonce are checked. Existing users are linked on their first sign-in by
+  a verified email address (optionally trusting the provider's email claim), then by the
+  provider's issuer and subject. Creating accounts on first sign-in is off by default and needs
+  allowed email domains; new accounts get the chosen role (Read only by default, never super
+  administrator). EasyPatch's MFA still applies unless the provider is marked as enforcing MFA.
+  Super administrators see and remove users' links under **Settings → Users**. Client secrets
+  are encrypted with the Data Protection keys and never returned. The `api` container connects
+  to the configured providers over HTTPS, and the proxy's access log replaces the callback's
+  `code` and `state` parameters with `REDACTED`. Uses Microsoft IdentityModel 8.23.0 (MIT). See
+  [docs/single-sign-on.md](docs/single-sign-on.md).
 - **Restart all that need it** on an organization (page header) and on each site (*Sites* tab):
   lists the endpoints that report a pending restart, marking servers, domain controllers,
   offline endpoints and agents too old to restart, and restarts the ones you confirm. The
@@ -14,13 +41,20 @@ the web console and the agents share one version number.
   always *only if pending*. API: `GET`/`POST /api/v1/organizations/{id}/restart-pending`.
 - The *Sites* tab shows how many endpoints of each site have a restart pending (also
   `rebootPendingCount` on sites in the API).
-
 - **My account → Change email**: users change their own email address, confirmed with their
-  current password (`POST /api/v1/auth/email/change`). Super administrators can still change
+  current password (`POST /api/v1/auth/email/change`; `409 email_in_use` when another user has the address). Super administrators can still change
   any user's email under **Settings → Users**.
 
 ### Changed
 
+- **Users sign in with their email address**, not their username; case does not matter. The
+  username stays as the account's name in the console and the audit log. The upgrade adds a
+  unique index on `lower(email)` and stops, changing nothing, if two users share an address
+  in different case (give one of them another address first). The administration commands
+  `create-admin`, `reset-password`, `reset-mfa` and `unlock` take `--email` instead of
+  `--username`; `create-admin --name` sets the account name. Creating or changing a user with
+  an address another user has answers `409 email_in_use`, a taken username
+  `409 username_in_use`.
 - The endpoint page has a **Restart…** button next to **Scan now** (it was in the **More** menu).
 - Bulk results show endpoints that were skipped on purpose as *Skipped* instead of *Failed*.
 

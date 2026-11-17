@@ -36,19 +36,29 @@ public sealed class AuthService(
 
     public static string NormalizeUsername(string username) => username.Trim().ToLowerInvariant();
 
+    /// <summary>The form in which email addresses are stored and looked up: sign-in uses the email address, ignoring case.</summary>
+    public static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
+
+    /// <summary>A plain address (<c>name@domain</c>, no display name or angle brackets) of at most 256 characters.</summary>
+    public static bool IsValidEmail(string normalized) =>
+        normalized.Length is >= 3 and <= 256 && !normalized.Any(char.IsWhiteSpace) &&
+        System.Net.Mail.MailAddress.TryCreate(normalized, out var address) && address.Address == normalized &&
+        address.User.Length > 0 && address.Host.Length > 0;
+
     // -------------------------------------------------------------------------------------------
     // Login / sessions
     // -------------------------------------------------------------------------------------------
 
-    public async Task<LoginResult> LoginAsync(string username, string password, string? ip, string? userAgent, CancellationToken ct = default)
+    /// <summary>Signs in with the account's email address (the only sign-in name) and password.</summary>
+    public async Task<LoginResult> LoginAsync(string email, string password, string? ip, string? userAgent, CancellationToken ct = default)
     {
         var now = clock.GetUtcNow();
-        var normalized = NormalizeUsername(username ?? string.Empty);
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Username == normalized, ct);
+        var normalized = NormalizeEmail(email ?? string.Empty);
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == normalized, ct);
         if (user is null || !user.IsActive)
         {
             hasher.Verify(password ?? string.Empty, DummyHash); // equalize timing
-            audit.Record("auth.login_failed", "User", null, details: new { username = normalized, reason = "unknown_or_inactive" });
+            audit.Record("auth.login_failed", "User", null, details: new { email = normalized, reason = "unknown_or_inactive" });
             await db.SaveChangesAsync(ct);
             throw InvalidCredentials();
         }
@@ -76,16 +86,21 @@ public sealed class AuthService(
 
         user.FailedLoginCount = 0;
         var settings = await settingsService.GetAsync(ct);
-        var (session, token) = NewSession(user, mfaCompleted: !user.MfaEnabled, ip, userAgent, settings, now);
-        if (!user.MfaEnabled)
+        var hasMfa = await HasSecondFactorAsync(user, ct);
+        var (session, token) = NewSession(user, mfaCompleted: !hasMfa, ip, userAgent, settings, now);
+        if (!hasMfa)
         {
             user.LastLoginAt = now;
             audit.Record("auth.login", "User", user.Id.ToString());
         }
 
         await db.SaveChangesAsync(ct);
-        return new LoginResult(user, session, token, user.MfaEnabled, !user.MfaEnabled && settings.RequireMfa);
+        return new LoginResult(user, session, token, hasMfa, !hasMfa && settings.RequireMfa);
     }
+
+    /// <summary>An authenticator app or at least one security key or passkey.</summary>
+    public async Task<bool> HasSecondFactorAsync(User user, CancellationToken ct = default) =>
+        user.MfaEnabled || await db.WebAuthnCredentials.AnyAsync(c => c.UserId == user.Id, ct);
 
     public async Task<SessionValidation?> ValidateSessionAsync(string? token, CancellationToken ct = default)
     {
@@ -117,7 +132,10 @@ public sealed class AuthService(
             await db.SaveChangesAsync(ct);
         }
 
-        return new SessionValidation(session, session.User, !session.User.MfaEnabled && settings.RequireMfa);
+        // Only users without an authenticator app need the (cheap) security key lookup.
+        // A session from an identity provider that enforces MFA needs no EasyPatch second factor.
+        var setupRequired = settings.RequireMfa && !session.MfaByProvider && !await HasSecondFactorAsync(session.User, ct);
+        return new SessionValidation(session, session.User, setupRequired);
     }
 
     public async Task VerifyMfaAsync(Guid sessionId, string code, CancellationToken ct = default)
@@ -126,7 +144,7 @@ public sealed class AuthService(
         var session = await db.UserSessions.Include(s => s.User).FirstOrDefaultAsync(s => s.Id == sessionId, ct)
                       ?? throw AppException.Unauthorized("session_invalid", "Your session has expired. Sign in again.");
         var user = session.User!;
-        if (!user.MfaEnabled || user.MfaSecretProtected is null)
+        if (!await HasSecondFactorAsync(user, ct))
         {
             throw AppException.BadRequest("Multi-factor authentication is not enabled for this account.");
         }
@@ -136,8 +154,10 @@ public sealed class AuthService(
             return;
         }
 
-        var secret = Totp.Base32Decode(MfaProtector.Unprotect(user.MfaSecretProtected));
-        var step = Totp.Verify(secret, code, now, user.MfaLastUsedStep);
+        // An authenticator code, or a recovery code (also for users whose only second factor is a security key).
+        var step = user.MfaEnabled && user.MfaSecretProtected is not null
+            ? Totp.Verify(Totp.Base32Decode(MfaProtector.Unprotect(user.MfaSecretProtected)), code, now, user.MfaLastUsedStep)
+            : null;
         var usedRecovery = false;
         if (step is null)
         {
@@ -238,16 +258,18 @@ public sealed class AuthService(
         return codes;
     }
 
-    public async Task DisableMfaAsync(Guid userId, string password, string code, CancellationToken ct = default)
+    /// <summary>Removes the authenticator app. While the server requires MFA this is allowed only if a security key or passkey
+    /// remains.</summary>
+    public async Task DisableMfaAsync(Guid userId, Guid sessionId, string password, string code, CancellationToken ct = default)
     {
-        var settings = await settingsService.GetAsync(ct);
-        if (settings.RequireMfa)
+        var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
+        var keys = await db.WebAuthnCredentials.AnyAsync(c => c.UserId == userId, ct);
+        if (!keys && await RequireMfaAsync(ct))
         {
             throw AppException.Conflict("Multi-factor authentication is required by server policy and cannot be disabled.", "mfa_required");
         }
 
-        var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
-        RequirePassword(user, password);
+        await ConfirmAsync(user, sessionId, password, ct);
         if (user.MfaSecretProtected is null ||
             (Totp.Verify(Totp.Base32Decode(MfaProtector.Unprotect(user.MfaSecretProtected)), code, clock.GetUtcNow(), user.MfaLastUsedStep) is null
              && !TryConsumeRecoveryCode(user, code)))
@@ -255,16 +277,21 @@ public sealed class AuthService(
             throw AppException.BadRequest("The verification code is not valid.", "invalid_mfa_code");
         }
 
-        ClearMfa(user);
+        ClearTotp(user);
+        if (!keys)
+        {
+            user.RecoveryCodeHashes = [];
+        }
+
         audit.Record("auth.mfa_disabled", "User", user.Id.ToString());
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<IReadOnlyList<string>> RegenerateRecoveryCodesAsync(Guid userId, string password, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> RegenerateRecoveryCodesAsync(Guid userId, Guid sessionId, string password, CancellationToken ct = default)
     {
         var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
-        RequirePassword(user, password);
-        if (!user.MfaEnabled)
+        await ConfirmAsync(user, sessionId, password, ct);
+        if (!await HasSecondFactorAsync(user, ct))
         {
             throw AppException.BadRequest("Multi-factor authentication is not enabled.");
         }
@@ -289,14 +316,14 @@ public sealed class AuthService(
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>Changes the user's own email address after checking the current password. Sessions stay signed in.</summary>
-    public async Task ChangeEmailAsync(Guid userId, string currentPassword, string newEmail, CancellationToken ct = default)
+    /// <summary>Changes the user's own email address (the address they sign in with) after checking the current password, or
+    /// for an account without one, a recent sign-in. Sessions stay signed in; linked single sign-on accounts stay linked.</summary>
+    public async Task ChangeEmailAsync(Guid userId, Guid sessionId, string currentPassword, string newEmail, CancellationToken ct = default)
     {
         var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
-        RequirePassword(user, currentPassword);
-        var normalized = (newEmail ?? string.Empty).Trim().ToLowerInvariant();
-        if (normalized.Length > 256 || !System.Net.Mail.MailAddress.TryCreate(normalized, out var parsed) ||
-            !string.Equals(parsed.Address, normalized, StringComparison.Ordinal))
+        await ConfirmAsync(user, sessionId, currentPassword, ct);
+        var normalized = NormalizeEmail(newEmail ?? string.Empty);
+        if (!IsValidEmail(normalized))
         {
             throw AppException.BadRequest("Enter a valid email address.", "validation_failed");
         }
@@ -308,7 +335,7 @@ public sealed class AuthService(
 
         if (await db.Users.AnyAsync(u => u.Email == normalized && u.Id != userId, ct))
         {
-            throw AppException.Conflict("That email address is already in use.", "duplicate");
+            throw AppException.Conflict("Another user already has that email address.", "email_in_use");
         }
 
         var previous = user.Email;
@@ -369,15 +396,20 @@ public sealed class AuthService(
             throw AppException.BadRequest("Usernames must be 3–64 characters: letters, digits, '.', '-', '_' or '@'.", "validation_failed");
         }
 
-        if (string.IsNullOrWhiteSpace(email) || email.Length > 256 || !email.Contains('@', StringComparison.Ordinal))
+        var emailNormalized = NormalizeEmail(email ?? string.Empty);
+        if (!IsValidEmail(emailNormalized))
         {
             throw AppException.BadRequest("A valid email address is required.", "validation_failed");
         }
 
-        var emailNormalized = email.Trim().ToLowerInvariant();
-        if (await db.Users.AnyAsync(u => u.Username == normalized || u.Email == emailNormalized, ct))
+        if (await db.Users.AnyAsync(u => u.Email == emailNormalized, ct))
         {
-            throw AppException.Conflict("A user with that username or email already exists.", "duplicate");
+            throw AppException.Conflict("Another user already has that email address.", "email_in_use");
+        }
+
+        if (await db.Users.AnyAsync(u => u.Username == normalized, ct))
+        {
+            throw AppException.Conflict("Another user already has that username.", "username_in_use");
         }
 
         var now = clock.GetUtcNow();
@@ -414,15 +446,15 @@ public sealed class AuthService(
 
         if (email is not null)
         {
-            var normalized = email.Trim().ToLowerInvariant();
-            if (!normalized.Contains('@', StringComparison.Ordinal) || normalized.Length > 256)
+            var normalized = NormalizeEmail(email);
+            if (!IsValidEmail(normalized))
             {
                 throw AppException.BadRequest("A valid email address is required.", "validation_failed");
             }
 
             if (await db.Users.AnyAsync(u => u.Email == normalized && u.Id != userId, ct))
             {
-                throw AppException.Conflict("That email address is already in use.", "duplicate");
+                throw AppException.Conflict("Another user already has that email address.", "email_in_use");
             }
 
             user.Email = normalized;
@@ -447,12 +479,14 @@ public sealed class AuthService(
         return user;
     }
 
+    /// <summary>Removes every second factor (authenticator app, security keys and passkeys, recovery codes) and signs the user out.</summary>
     public async Task ResetMfaAsync(Guid userId, CancellationToken ct = default)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw AppException.NotFound("User");
         ClearMfa(user);
+        var keys = await db.WebAuthnCredentials.Where(c => c.UserId == userId).ExecuteDeleteAsync(ct);
         await RevokeSessionsAsync(user.Id, null, ct);
-        audit.Record("user.mfa_reset", "User", user.Id.ToString());
+        audit.Record("user.mfa_reset", "User", user.Id.ToString(), details: new { securityKeysRemoved = keys });
         await db.SaveChangesAsync(ct);
     }
 
@@ -491,13 +525,57 @@ public sealed class AuthService(
 
     private void RequirePassword(User user, string password)
     {
-        if (hasher.Verify(password ?? string.Empty, user.PasswordHash) == PasswordVerification.Failed)
+        // An empty password never matches (and Argon2 refuses an empty input).
+        if (string.IsNullOrEmpty(password) || hasher.Verify(password, user.PasswordHash) == PasswordVerification.Failed)
         {
             throw AppException.BadRequest("The current password is incorrect.", "invalid_password");
         }
     }
 
-    private void RegisterFailure(User user, DateTimeOffset now)
+    /// <summary>A sign-in this recent confirms a change to the user's sign-in methods without asking for the password again.</summary>
+    public static readonly TimeSpan RecentSignIn = TimeSpan.FromMinutes(10);
+
+    /// <summary>The account has a password it can sign in with (accounts created by single sign-on may not).</summary>
+    public static bool HasUsablePassword(User user) => user.PasswordHash.StartsWith('$');
+
+    /// <summary>Confirms a change to the user's sign-in methods: the current password when one is given, otherwise a sign-in (with
+    /// MFA) within <see cref="RecentSignIn"/>.</summary>
+    internal void RequireReauthentication(User user, UserSession session, string? password)
+    {
+        if (!string.IsNullOrEmpty(password))
+        {
+            RequirePassword(user, password);
+        }
+        else if (clock.GetUtcNow() - session.CreatedAt > RecentSignIn)
+        {
+            throw HasUsablePassword(user)
+                ? AppException.BadRequest("Enter your current password to confirm.", "invalid_password")
+                : new AppException(403, "reauthentication_required", "Sign out and sign in again, then retry within 10 minutes.");
+        }
+    }
+
+    /// <summary>The current password; for an account without one (created by single sign-on), a sign-in within <see cref="RecentSignIn"/>.</summary>
+    private async Task ConfirmAsync(User user, Guid sessionId, string password, CancellationToken ct)
+    {
+        if (HasUsablePassword(user))
+        {
+            RequirePassword(user, password);
+            return;
+        }
+
+        RequireReauthentication(user, await db.UserSessions.AsNoTracking().FirstAsync(s => s.Id == sessionId, ct), null);
+    }
+
+    internal async Task<bool> RequireMfaAsync(CancellationToken ct) => (await settingsService.GetAsync(ct)).RequireMfa;
+
+    internal async Task<(UserSession Session, string Token)> NewSessionAsync(User user, bool mfaCompleted, string? ip, string? userAgent,
+        CancellationToken ct)
+    {
+        var settings = await settingsService.GetAsync(ct);
+        return NewSession(user, mfaCompleted, ip, userAgent, settings, clock.GetUtcNow());
+    }
+
+    internal void RegisterFailure(User user, DateTimeOffset now)
     {
         user.FailedLoginCount++;
         if (user.FailedLoginCount >= MaxFailedAttempts)
@@ -530,7 +608,7 @@ public sealed class AuthService(
         return (session, token);
     }
 
-    private static List<string> GenerateRecoveryCodes(User user)
+    internal static List<string> GenerateRecoveryCodes(User user)
     {
         var codes = Enumerable.Range(0, 10).Select(_ => SecureTokens.CreateCode(string.Empty, 10)).ToList();
         user.RecoveryCodeHashes = codes.Select(c => SecureTokens.Hash(NormalizeRecovery(c))).ToList();
@@ -560,13 +638,18 @@ public sealed class AuthService(
 
     private static void ClearMfa(User user)
     {
+        ClearTotp(user);
+        user.RecoveryCodeHashes = [];
+    }
+
+    private static void ClearTotp(User user)
+    {
         user.MfaEnabled = false;
         user.MfaSecretProtected = null;
         user.MfaPendingSecretProtected = null;
         user.MfaLastUsedStep = null;
-        user.RecoveryCodeHashes = [];
     }
 
     private static AppException InvalidCredentials() =>
-        AppException.Unauthorized("invalid_credentials", "Invalid username or password, or the account is temporarily locked.");
+        AppException.Unauthorized("invalid_credentials", "Email or password is incorrect, or the account is temporarily locked.");
 }

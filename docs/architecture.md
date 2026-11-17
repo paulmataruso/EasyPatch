@@ -97,6 +97,9 @@ erDiagram
     users ||--o{ user_sessions : has
     users ||--o{ user_organization_access : "scoped to"
     users ||--o{ password_reset_tokens : has
+    users ||--o{ webauthn_credentials : has
+    users ||--o{ external_logins : "signs in with"
+    oidc_providers ||--o{ external_logins : links
     users ||--o{ audit_logs : performs
     api_tokens ||--o{ audit_logs : performs
     organizations ||--o{ compliance_snapshots : tracks
@@ -104,8 +107,13 @@ erDiagram
 
 | Table | Key columns / notes |
 |---|---|
-| `users` | username, email, Argon2id `password_hash`, `role` (SuperAdmin, Admin, ReadOnly), MFA secret (protected with ASP.NET Data Protection), recovery code hashes, lockout counters, `security_stamp` |
+| `users` | username (display name), email (the sign-in name; stored in lower case, unique on `lower(email)`), Argon2id `password_hash`, `role` (SuperAdmin, Admin, ReadOnly), MFA secret (protected with ASP.NET Data Protection), recovery code hashes, lockout counters, `security_stamp` |
 | `user_sessions` | SHA-256 of the session token, MFA-completed flag, idle and absolute expiry, `revoked_at` |
+| `webauthn_credentials` | Passkeys and security keys: credential ID (unique), public key, signature counter, AAGUID, transports, name, passkey and backup flags, created and last used |
+| `webauthn_challenges` | Pending WebAuthn ceremonies: the options with their challenge, bound to a session or to the hash of a browser cookie; single use, 5-minute expiry |
+| `oidc_providers` | Single sign-on providers: name, issuer, client ID, client secret (Data Protection), scopes, enabled, email trust, provider MFA, account creation (role, allowed domains) |
+| `external_logins` | Links from users to provider accounts: issuer and subject (unique), provider, email at linking, created and last used |
+| `oidc_login_states` | Pending single sign-on attempts: hash of `state`, nonce, PKCE verifier, browser-binding hash, return path; single use, 10-minute expiry |
 | `user_organization_access` | When a non-SuperAdmin user has rows here, they can only see those organizations. No rows means all organizations. Managed under Settings → Users. |
 | `password_reset_tokens` | Hashed, single-use, expiring tokens issued by an administrator |
 | `api_tokens` | API tokens for scripts and integrations: SHA-256 of the secret, display prefix, `role` (ReadOnly or Admin), `all_organizations` or `organization_ids`, expiry, last use time and address, `revoked_at`. Managed under Settings → API tokens. |
@@ -678,13 +686,14 @@ update policies are present, because those can take precedence over the registry
 * **Networks.** `edge` connects Caddy and the API. `data` is internal (no egress) and connects
   the API, worker, migrate and PostgreSQL. PostgreSQL publishes no ports. `egress` gives the
   worker outbound connections for notifications (SMTP and webhooks), vulnerability data and
-  the winget release; nothing is published on it.
+  the winget release; nothing is published on it. The API reaches single sign-on providers
+  through `edge`.
   The diagram above omits it.
 * **Volumes.**
   * `pgdata`: the database.
   * `caddy_data` and `caddy_config`: certificates.
-  * `dpkeys`: ASP.NET Data Protection keys, which protect MFA secrets and notification secrets
-    (SMTP password, webhook URLs, webhook signing keys). The API creates and rotates the keys;
+  * `dpkeys`: ASP.NET Data Protection keys, which protect MFA secrets, notification secrets
+    (SMTP password, webhook URLs, webhook signing keys) and single sign-on client secrets. The API creates and rotates the keys;
     the worker mounts the volume read-only to decrypt notification secrets.
   * `./data/agent-packages`, mounted read-only: agent MSIs offered for download.
   * `winget`: the server's copy of the pinned winget release (see

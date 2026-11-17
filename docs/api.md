@@ -64,16 +64,57 @@ administrator approval.
 
 | Method | Route | Notes |
 |---|---|---|
-| POST | `/login` | `{username, password}` → `{mfaRequired, mfaSetupRequired, user}`. Sets the session and `XSRF-TOKEN` cookies. |
-| POST | `/mfa/verify` | `{code}` (TOTP or recovery code) completes the sign-in |
+| POST | `/login` | `{email, password}` → `{mfaRequired, mfaSetupRequired, user}`. The email address is the only sign-in name (case does not matter). Sets the session and `XSRF-TOKEN` cookies. A wrong address or password, an inactive or a locked account all answer `401 invalid_credentials`. |
+| POST | `/mfa/verify` | `{code}` (TOTP or recovery code) completes the sign-in; for a security key see `/mfa/webauthn` below |
 | POST | `/logout` | Revokes the current session |
 | GET | `/me` | Current user, role and MFA state. Also refreshes the `XSRF-TOKEN` cookie. |
 | POST | `/mfa/setup` | Returns the secret, the `otpauth` URI and a QR code as a PNG data URI |
 | POST | `/mfa/enable` | `{code}` → 10 recovery codes, shown once |
-| POST | `/mfa/disable` | `{password, code}`. Refused (`409 mfa_required`) while the `RequireMfa` server setting is on. |
+| POST | `/mfa/disable` | `{password, code}` removes the authenticator app. While the `RequireMfa` server setting is on, refused (`409 mfa_required`) unless a security key or passkey remains. |
 | POST | `/mfa/recovery-codes` | `{password}` → a new set of recovery codes |
+| GET | `/webauthn` | Anonymous. `{available, rpId, reason, message}`: whether passkeys and security keys work here. `reason` is `ip_address`, `not_https` or `invalid_public_url` when not. |
+| POST | `/webauthn/register/options` | `{passkey, password?}` → `PublicKeyCredentialCreationOptions` JSON (binary members base64url). `passkey: true` asks for a discoverable credential with user verification. The password is needed when the account already has a second factor and the sign-in is more than 10 minutes old (`400 invalid_password`). |
+| POST | `/webauthn/register` | `{name?, credential}` (the browser's `PublicKeyCredential` as JSON) → `{credential, recoveryCodes}`. Recovery codes are returned once, for the account's first second factor. `400 webauthn_failed` when verification fails. |
+| GET | `/webauthn/credentials` | Your passkeys and security keys: `{id, name, isPasskey, isSynced, transports, createdAt, lastUsedAt}` |
+| PUT | `/webauthn/credentials/{id}` | `{name}` renames one |
+| POST | `/webauthn/credentials/{id}/remove` | `{password?}` (as for registration). The last second factor cannot be removed while MFA is required (`409 mfa_required`). |
+| POST | `/mfa/webauthn/options` | During sign-in, after the password: `PublicKeyCredentialRequestOptions` JSON for the account's keys |
+| POST | `/mfa/webauthn` | `{credential}` completes the sign-in with a security key or passkey (`401 invalid_security_key` otherwise) |
+| POST | `/passkey/options` | Anonymous. Starts a passkey sign-in: request options with an empty allow list and user verification required. Sets a short-lived `__Host-easypatch-webauthn` cookie that binds the sign-in to this browser. |
+| POST | `/passkey` | Anonymous. `{credential}` → `{mfaRequired: false, mfaSetupRequired: false, user}` and the session cookies, like `/login`. `401 invalid_passkey` when the passkey is unknown or does not verify. |
+| POST | `/passkey-prompt/dismiss` | "Not now" to the offer to create a passkey; `user.passkeyPrompt` is false for 30 days |
+
+Every WebAuthn route answers `409 webauthn_unavailable` when the console's public URL is an IP
+address or not HTTPS, and `400 webauthn_challenge_expired` when the challenge is older than 5
+minutes, was already answered, or (passkey sign-in) belongs to another browser. `/me` and the
+sign-in responses include `totpEnabled`, `securityKeyCount`, `passkeyCount`, `passkeyPrompt` and
+`hasPassword` (false for an account created by single sign-on); `mfaEnabled` is true for either
+kind of second factor. For an account without a password, `/mfa/disable`, `/mfa/recovery-codes`
+and the WebAuthn routes that take a password accept a sign-in within the last 10 minutes instead
+(otherwise `403 reauthentication_required`).
+
+### Single sign-on (OpenID Connect)
+
+Browser routes under `/api/v1/auth/sso` (anonymous, sign-in rate limit). See
+[single-sign-on.md](single-sign-on.md).
+
+| Method | Route | Notes |
+|---|---|---|
+| GET | `/providers` | Enabled providers for the sign-in page: `[{id, displayName}]` |
+| GET | `/{id}/start?returnTo=` | Redirects (302) to the provider's authorization endpoint and sets the `__Host-easypatch-sso` binding cookie. `returnTo` must be a console path. On error, redirects to `/login?sso_error=unavailable` |
+| GET | `/callback?code=&state=` | The redirect URI. Signs in and redirects to `returnTo` (the console then asks for MFA if needed), or to `/login?sso_error=` with `expired`, `denied`, `no_account`, `unavailable` or `failed` |
+
+Provider settings (`/api/v1/sso/providers`, SuperAdmin):
+
+| Method | Route | Notes |
+|---|---|---|
+| GET | `/` | `{redirectUri, providers[]}`. A provider has `clientSecretConfigured`, never the secret, and `linkedUsers` |
+| POST | `/` | `{displayName, issuer, clientId, clientSecret, scopes, enabled, trustEmailClaim, providerEnforcesMfa, autoProvision, defaultRole, allowedDomains[]}` → `201`. `defaultRole` cannot be `SuperAdmin`; `autoProvision` needs at least one domain; `scopes` must include `openid` |
+| PUT | `/{id}` | As POST. `clientSecret: null` keeps the stored secret, `""` removes it |
+| DELETE | `/{id}` | Removes the provider and its links to users |
+| POST | `/probe` | `{issuer}` → `{ok, issuer, authorizationEndpoint, tokenEndpoint, signingKeys, message}` after reading the discovery document and key set |
 | POST | `/password/change` | `{currentPassword, newPassword}`. Revokes your other sessions. |
-| POST | `/email/change` | `{currentPassword, newEmail}` → `204`. Changes your own email address (stored lower-case). `400 invalid_password`, `400 validation_failed` for an invalid address, `409 duplicate` when another user has it. Your sessions stay signed in; the change is in the audit log (`auth.email_changed`). |
+| POST | `/email/change` | `{currentPassword, newEmail}` → `204`. Changes your own email address, the one you sign in with (stored lower-case). `400 invalid_password`, `400 validation_failed` for an invalid address, `409 email_in_use` when another user has it. An account without a password (created by single sign-on) sends no password and needs a sign-in within the last 10 minutes (`403 reauthentication_required` otherwise). Your sessions stay signed in, and linked single sign-on accounts stay linked; the change is in the audit log (`auth.email_changed`). |
 | POST | `/password/reset` | `{token, newPassword}`. Anonymous; the token comes from an administrator-issued link. |
 | GET | `/sessions` | Your active sessions |
 | DELETE | `/sessions/{id}` | Revoke one of your sessions |
@@ -83,10 +124,15 @@ Until a user has completed every sign-in step, other routes answer `403` with
 
 ### Users (`/api/v1/users`, SuperAdmin)
 
-`GET /`, `POST /` (without a password the response contains a one-time set-password link),
-`GET /{id}`, `PUT /{id}` (`email`, `role`, `isActive`), `POST /{id}/reset-link`,
-`POST /{id}/mfa/reset`, `POST /{id}/sessions/revoke`, `PUT /{id}/organizations`
-(`{organizationIds[]}`; an empty list means all organizations).
+`GET /`, `POST /` (`{username, email, role, password, organizationIds}`; without a password
+the response contains a one-time set-password link), `GET /{id}`, `PUT /{id}` (`email`, `role`,
+`isActive`), `POST /{id}/reset-link`,
+`POST /{id}/mfa/reset` (removes the authenticator app, passkeys, security keys and recovery
+codes), `POST /{id}/sessions/revoke`, `GET /{id}/external-logins` (linked single sign-on
+accounts), `DELETE /{id}/external-logins/{linkId}`, `PUT /{id}/organizations`
+(`{organizationIds[]}`; an empty list means all organizations). An email address that another
+user has (ignoring case) answers `409 email_in_use`, a taken username `409 username_in_use`,
+and an address that is not a plain `name@domain` `400 validation_failed`.
 
 ### API tokens (`/api/v1/api-tokens`, SuperAdmin)
 
