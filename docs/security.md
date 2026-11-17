@@ -20,6 +20,7 @@ changes Windows Update policy values only for settings an administrator configur
 | Admin credentials | `users.password_hash` | Argon2id (m=19 MiB, t=2, p=1). Login rate limits and account lockout. |
 | MFA secrets | `users.mfa_secret_protected` | ASP.NET Data Protection; the keys are in a separate volume |
 | Passkeys and security keys | `webauthn_credentials` | Public keys only (not secret); the private keys stay on the authenticators |
+| Single sign-on client secrets | `oidc_providers.client_secret_protected` | ASP.NET Data Protection, like the SMTP password. Write-only in the API |
 | Admin sessions | Browser cookie and `user_sessions` | Random 256-bit token, only its SHA-256 is stored. `__Host-` cookie that is `Secure`, `HttpOnly` and `SameSite=Strict`. Idle and absolute expiry. Can be revoked. |
 | Agent private keys | Endpoint `C:\ProgramData\EasyPatch\agent.key` | Generated on the device and never transmitted. DPAPI (LocalMachine). Directory ACL allows only SYSTEM and Administrators. |
 | Agent public keys | `agent_credentials` | Not secret. Expire and can be revoked. |
@@ -86,6 +87,35 @@ changes Windows Update policy values only for settings an administrator configur
     only when passkeys work on this server and in their browser. "Not now" is stored on the
     server (`users.passkey_prompt_dismissed_at`), and the offer returns after 30 days. A
     security key registered only as a second factor does not count as a passkey.
+* **Single sign-on (OpenID Connect).** Optional, configured by super administrators; password
+  sign-in stays available. Details and provider setup: [single-sign-on.md](single-sign-on.md).
+  * *Flow.* Authorization code with PKCE (`S256`), `state` and `nonce`. The pending sign-in is
+    stored on the server (`oidc_login_states`: hash of `state`, nonce, PKCE verifier), used once,
+    expires after 10 minutes and is bound to the browser by the hash of a random value in a
+    `__Host-easypatch-sso` cookie (`SameSite=Lax`, because the provider's redirect back is a
+    cross-site navigation). The callback answers with redirects only, `Cache-Control: no-store`
+    and `Referrer-Policy: no-referrer`.
+  * *ID token.* Signature against the provider's JWKS (RSA and ECDSA algorithms only), issuer,
+    audience (and `azp` with several audiences), expiry and not-before (2 minutes tolerance)
+    and nonce, with the pinned Microsoft IdentityModel libraries. The discovery document must
+    name the configured issuer, and its endpoints must be HTTPS.
+  * *Linking.* Existing active users only, unless account creation is turned on. The first
+    sign-in links by email address only when the token says `email_verified: true` (or the
+    administrator ticked **Trust the provider's email claim**) and the user is not already linked
+    to another account at that provider; afterwards the link (issuer and subject,
+    `external_logins`, unique) decides. Created accounts need an allowed email domain, get the
+    configured role (Read only by default, never SuperAdmin) and have no password.
+  * *MFA.* EasyPatch's MFA still applies unless the provider is marked as enforcing MFA; such a
+    session is flagged (`user_sessions.mfa_by_provider`) and does not require EasyPatch MFA
+    enrollment.
+  * *Re-authentication.* Accounts without a password confirm changes to their sign-in methods
+    and recovery codes with a sign-in within the last 10 minutes instead of the password.
+  * *Logging.* Tokens, codes, client secrets and claims are never logged or audited; failures
+    are audited as `auth.sso_failed` with the provider and a reason code, and the sign-in page
+    shows a general message. Caddy's access log replaces the `code` and `state` query
+    parameters with `REDACTED`. The start and callback routes share the sign-in rate limit.
+  * *Outbound.* The `api` container connects to the configured providers' discovery, key set
+    and token endpoints over HTTPS (no redirects, 15-second timeout, size limits).
 * **Sessions.**
   * Server-side and revocable, either individually or all at once.
   * Changing your password revokes all your other sessions.
@@ -448,8 +478,9 @@ signature covers the signed file.
 
 ## Notifications and webhooks
 
-Alert notifications and the vulnerability data downloads (see [Vulnerability data](#vulnerability-data))
-are the only features that make the server open outbound connections (apart from ACME in Caddy).
+Alert notifications, the vulnerability data downloads (see [Vulnerability data](#vulnerability-data))
+and single sign-on (see [Admin authentication](#admin-authentication)) are the only features that make
+the server open outbound connections (apart from ACME in Caddy).
 Notifications are configured by super administrators only, under
 *Settings → Alert rules* and *Settings → Notifications*, and every change is audited
 (`notifications.*`, `alert_rule.*`, `alert.acknowledge`) without the secrets.
@@ -460,8 +491,10 @@ Notifications are configured by super administrators only, under
   URL is shown only as its host name, and a signing key is shown once, when it is created or
   rotated. The keys on `dpkeys` are not encrypted themselves: protect the volume and its backups
   like the database. If the keys are lost, enter the secrets again.
-* **Only the worker connects out.** The `worker` container is the only one on the `egress`
-  network. It mounts `dpkeys` read-only. The API and PostgreSQL stay without egress.
+* **Outbound connections.** The `worker` container is the only one on the `egress` network,
+  for notifications and downloads. It mounts `dpkeys` read-only. PostgreSQL has no egress. The
+  API connects out only for single sign-on, to the identity providers a super administrator
+  configured, through the `edge` network.
 * **Webhook egress guard (SSRF).**
   * A webhook URL must be `https://`, without user name or password, at most 2048 characters.
   * Requests do not follow redirects (a 3xx counts as a failure), use no proxy and send no cookies.
@@ -599,8 +632,9 @@ whether or not application updates are on (see
 |---|---|---|
 | S1 | Attacker impersonates an agent | Per-device ECDSA keys, signed requests, nonce and timestamp checks, revocation |
 | S2 | Attacker impersonates the server to an agent | The agent uses the operating system's normal TLS validation of the server certificate (the Windows certificate store, or the system CA store on Linux; the public CA from Caddy's ACME). TLS validation cannot be turned off. A Windows agent installed with *Skip certificate check* also accepts certificates from the one CA recorded at installation (`SERVERCACERT`), for its EasyPatch connection only, still with name and validity checks. See [Install scripts and private CAs](#install-scripts-and-private-cas). |
-| S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory TOTP |
+| S3 | Admin credential stuffing or brute force | Argon2id, per-IP rate limits, account lockout, mandatory MFA (authenticator app, security key or passkey) |
 | S4 | An API token leaks (a script, a log, an integration's database) | 256-bit random secrets stored only as hashes and never logged; fixed role, never SuperAdmin; organization restrictions; expiry of at most 365 days; immediate revocation; last use time and address shown; actions audited as `token:<name>`. A leaked Admin token can do what an Admin can in its organizations until it is revoked, so give integrations ReadOnly tokens where they only read. |
+| S5 | A forged, replayed or misdirected single sign-on response | PKCE `S256`; a single-use `state` bound to the browser, expiring after 10 minutes; nonce; ID token signature (provider JWKS), issuer, audience and lifetime checks; first link by verified email only, then by issuer and subject; created accounts limited to allowed domains and never SuperAdmin; EasyPatch MFA still required unless the provider is marked as enforcing it |
 | T1 | A forged job or tampered payload is sent to an agent | TLS, plus the agent only accepts the job types it knows. Install payloads can only select, by GUID or category, Windows updates, Linux package upgrades or upgrades of approved, installed applications (winget) that the agent's own scan found, never arbitrary binaries or packages. Restart payloads are a mode and range-checked durations; message payloads are a preset name. Agent update payloads name a package and its release signature, which the agent verifies itself. Uninstall jobs have no payload and remove only the agent's own package. |
 | T2 | An agent submits false data for another tenant | The endpoint ID comes from the authenticated credential, never from the request body. Every write is scoped to it. |
 | T3 | SQL injection | EF Core parameterized queries. The few raw SQL statements use parameters only. Sort fields come from an allow-list. |

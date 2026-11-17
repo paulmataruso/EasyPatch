@@ -33,6 +33,7 @@ public sealed class User
 
     public List<UserOrganizationAccess> OrganizationAccess { get; set; } = [];
     public List<WebAuthnCredential> WebAuthnCredentials { get; set; } = [];
+    public List<ExternalLogin> ExternalLogins { get; set; } = [];
 }
 
 public sealed class UserSession
@@ -42,6 +43,10 @@ public sealed class UserSession
     public User? User { get; set; }
     public required string TokenHash { get; set; }
     public bool MfaCompleted { get; set; }
+
+    /// <summary>Signed in through an identity provider that enforces MFA: EasyPatch does not require its own second factor.</summary>
+    public bool MfaByProvider { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset LastSeenAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }

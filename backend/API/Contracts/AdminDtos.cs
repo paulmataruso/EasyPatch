@@ -39,7 +39,8 @@ public sealed record CurrentUserDto(
     bool TotpEnabled = false,
     int SecurityKeyCount = 0,
     int PasskeyCount = 0,
-    bool PasskeyPrompt = false);
+    bool PasskeyPrompt = false,
+    bool HasPassword = true);
 
 /// <summary>Whether passkeys and security keys can be used with this server (they need HTTPS and a DNS name).</summary>
 /// <param name="Reason"><c>ip_address</c>, <c>not_https</c> or <c>invalid_public_url</c> when unavailable.</param>
@@ -97,7 +98,8 @@ public sealed record UserDto(
     DateTimeOffset? LockoutUntil,
     IReadOnlyList<Guid> OrganizationIds,
     bool TotpEnabled,
-    int SecurityKeyCount);
+    int SecurityKeyCount,
+    int ExternalLoginCount);
 
 public sealed record CreateUserRequest(string Username, string Email, UserRole Role, string? Password, IReadOnlyList<Guid>? OrganizationIds);
 

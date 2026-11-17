@@ -133,7 +133,8 @@ public sealed class AuthService(
         }
 
         // Only users without an authenticator app need the (cheap) security key lookup.
-        var setupRequired = settings.RequireMfa && !await HasSecondFactorAsync(session.User, ct);
+        // A session from an identity provider that enforces MFA needs no EasyPatch second factor.
+        var setupRequired = settings.RequireMfa && !session.MfaByProvider && !await HasSecondFactorAsync(session.User, ct);
         return new SessionValidation(session, session.User, setupRequired);
     }
 
@@ -259,7 +260,7 @@ public sealed class AuthService(
 
     /// <summary>Removes the authenticator app. While the server requires MFA this is allowed only if a security key or passkey
     /// remains.</summary>
-    public async Task DisableMfaAsync(Guid userId, string password, string code, CancellationToken ct = default)
+    public async Task DisableMfaAsync(Guid userId, Guid sessionId, string password, string code, CancellationToken ct = default)
     {
         var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
         var keys = await db.WebAuthnCredentials.AnyAsync(c => c.UserId == userId, ct);
@@ -268,7 +269,7 @@ public sealed class AuthService(
             throw AppException.Conflict("Multi-factor authentication is required by server policy and cannot be disabled.", "mfa_required");
         }
 
-        RequirePassword(user, password);
+        await ConfirmAsync(user, sessionId, password, ct);
         if (user.MfaSecretProtected is null ||
             (Totp.Verify(Totp.Base32Decode(MfaProtector.Unprotect(user.MfaSecretProtected)), code, clock.GetUtcNow(), user.MfaLastUsedStep) is null
              && !TryConsumeRecoveryCode(user, code)))
@@ -286,10 +287,10 @@ public sealed class AuthService(
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<IReadOnlyList<string>> RegenerateRecoveryCodesAsync(Guid userId, string password, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> RegenerateRecoveryCodesAsync(Guid userId, Guid sessionId, string password, CancellationToken ct = default)
     {
         var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
-        RequirePassword(user, password);
+        await ConfirmAsync(user, sessionId, password, ct);
         if (!await HasSecondFactorAsync(user, ct))
         {
             throw AppException.BadRequest("Multi-factor authentication is not enabled.");
@@ -507,7 +508,7 @@ public sealed class AuthService(
     public static readonly TimeSpan RecentSignIn = TimeSpan.FromMinutes(10);
 
     /// <summary>The account has a password it can sign in with (accounts created by single sign-on may not).</summary>
-    internal static bool HasUsablePassword(User user) => user.PasswordHash.StartsWith('$');
+    public static bool HasUsablePassword(User user) => user.PasswordHash.StartsWith('$');
 
     /// <summary>Confirms a change to the user's sign-in methods: the current password when one is given, otherwise a sign-in (with
     /// MFA) within <see cref="RecentSignIn"/>.</summary>
@@ -523,6 +524,18 @@ public sealed class AuthService(
                 ? AppException.BadRequest("Enter your current password to confirm.", "invalid_password")
                 : new AppException(403, "reauthentication_required", "Sign out and sign in again, then retry within 10 minutes.");
         }
+    }
+
+    /// <summary>The current password; for an account without one (created by single sign-on), a sign-in within <see cref="RecentSignIn"/>.</summary>
+    private async Task ConfirmAsync(User user, Guid sessionId, string password, CancellationToken ct)
+    {
+        if (HasUsablePassword(user))
+        {
+            RequirePassword(user, password);
+            return;
+        }
+
+        RequireReauthentication(user, await db.UserSessions.AsNoTracking().FirstAsync(s => s.Id == sessionId, ct), null);
     }
 
     internal async Task<bool> RequireMfaAsync(CancellationToken ct) => (await settingsService.GetAsync(ct)).RequireMfa;

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { FingerprintPattern, KeyRound, Usb } from 'lucide-react';
-import { api, request } from '../../api/client';
-import type { CurrentUserDto, LoginResponse, MfaSetupResponse, RecoveryCodesResponse } from '../../api/types';
+import { FingerprintPattern, KeyRound, LogIn, Usb } from 'lucide-react';
+import { api, API_BASE, request } from '../../api/client';
+import { useApi } from '../../api/hooks';
+import type { CurrentUserDto, LoginResponse, MfaSetupResponse, RecoveryCodesResponse, SsoProviderSummaryDto } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AuthShell } from '../../components/Layout';
 import { Alert, Button, buttonClasses, cx, InlineError, Spinner, TextField } from '../../components/ui';
@@ -12,6 +13,15 @@ import { getAssertion, type WebAuthnJson } from '../../lib/webauthn';
 import { SecurityKeyEnrollment, useWebAuthnReady } from './SecurityKeys';
 
 export { RecoveryCodesView };
+
+/** Messages for the sign-in page's ?sso_error= (the server records the specific reason in the audit log). */
+const SSO_ERRORS: Record<string, string> = {
+  no_account: 'No EasyPatch account matches this sign-in. Ask a super administrator to add you, or sign in with your email address and password.',
+  expired: 'The single sign-on attempt expired or was already used. Try again.',
+  denied: 'The sign-in was cancelled at the identity provider.',
+  unavailable: 'This identity provider is not available right now. Sign in with your email address and password, or try again later.',
+  failed: 'Single sign-on failed. Try again, or sign in with your email address and password.',
+};
 
 export const PASSWORD_HINT = 'At least 12 characters. Must not contain your username. Passphrases are encouraged.';
 
@@ -32,6 +42,9 @@ export function LoginPage() {
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const passkeysReady = useWebAuthnReady();
+  const sso = useApi<SsoProviderSummaryDto[]>('/auth/sso/providers', undefined, { staleTime: 60_000 });
+  const providers = sso.data ?? [];
+  const ssoError = params.get('sso_error');
 
   async function finish(result: LoginResponse) {
     setUser(result.user);
@@ -76,6 +89,7 @@ export function LoginPage() {
   return (
     <AuthShell title="Sign in" subtitle="EasyPatch administrator console">
       <form onSubmit={submit} className="flex flex-col gap-3.5" noValidate>
+        {ssoError && <Alert tone="danger">{SSO_ERRORS[ssoError] ?? SSO_ERRORS.failed}</Alert>}
         <TextField
           label="Email address"
           name="email"
@@ -99,19 +113,27 @@ export function LoginPage() {
         <Button type="submit" variant="primary" loading={busy} disabled={!email.trim() || !password || passkeyBusy} className="mt-1 w-full">
           Sign in
         </Button>
-        {passkeysReady && (
-          <>
-            <div className="flex items-center gap-3 text-xs text-muted" aria-hidden>
-              <span className="h-px flex-1 bg-line" />
-              or
-              <span className="h-px flex-1 bg-line" />
-            </div>
-            <Button loading={passkeyBusy} disabled={busy} onClick={() => void signInWithPasskey()} className="w-full"
-              icon={<FingerprintPattern className="size-4" aria-hidden />}>
-              Sign in with a passkey
-            </Button>
-          </>
+        {(passkeysReady || providers.length > 0) && (
+          <div className="flex items-center gap-3 text-xs text-muted" aria-hidden>
+            <span className="h-px flex-1 bg-line" />
+            or
+            <span className="h-px flex-1 bg-line" />
+          </div>
         )}
+        {passkeysReady && (
+          <Button loading={passkeyBusy} disabled={busy} onClick={() => void signInWithPasskey()} className="w-full"
+            icon={<FingerprintPattern className="size-4" aria-hidden />}>
+            Sign in with a passkey
+          </Button>
+        )}
+        {providers.map((p) => (
+          // A full page navigation: the server sends the browser on to the provider.
+          <a key={p.id} className={cx(buttonClasses('secondary'), 'w-full')}
+            href={`${API_BASE}/auth/sso/${p.id}/start${returnTo !== '/' ? `?returnTo=${encodeURIComponent(returnTo)}` : ''}`}>
+            <LogIn className="size-4" aria-hidden />
+            Sign in with {p.displayName}
+          </a>
+        ))}
         <p className="text-center text-xs text-muted">Forgot your password? Ask a super administrator for a reset link.</p>
       </form>
     </AuthShell>

@@ -20,6 +20,20 @@ the web console and the agents share one version number.
 - **Passkey offer after sign-in.** Users without a passkey are offered to create one, when
   passkeys work on the server and in their browser. "Not now" is remembered on the server for
   30 days.
+- **Single sign-on with OpenID Connect** (Microsoft Entra ID, Google, Keycloak and other
+  providers), configured under **Settings → Single sign-on** by super administrators. Each
+  enabled provider adds a **Sign in with …** button; password sign-in stays available. The
+  authorization code flow uses PKCE, `state` and `nonce`; the ID token's signature, issuer,
+  audience, lifetime and nonce are checked. Existing users are linked on their first sign-in by
+  a verified email address (optionally trusting the provider's email claim), then by the
+  provider's issuer and subject. Creating accounts on first sign-in is off by default and needs
+  allowed email domains; new accounts get the chosen role (Read only by default, never super
+  administrator). EasyPatch's MFA still applies unless the provider is marked as enforcing MFA.
+  Super administrators see and remove users' links under **Settings → Users**. Client secrets
+  are encrypted with the Data Protection keys and never returned. The `api` container connects
+  to the configured providers over HTTPS, and the proxy's access log replaces the callback's
+  `code` and `state` parameters with `REDACTED`. Uses Microsoft IdentityModel 8.23.0 (MIT). See
+  [docs/single-sign-on.md](docs/single-sign-on.md).
 
 ### Changed
 

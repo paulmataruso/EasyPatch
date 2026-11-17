@@ -36,18 +36,27 @@ export function AccountPage() {
         </Card>
         <MfaCard />
         <SecurityKeysCard />
-        <Card title="Change password">
-          <p className="mb-3 text-sm text-muted">Changing your password signs out your other sessions.</p>
-          <div className="max-w-md">
-            <PasswordChangeForm
-              user={user}
-              onDone={() => {
-                toast.success('Password changed. Your other sessions were signed out.');
-                void refresh();
-              }}
-            />
-          </div>
-        </Card>
+        {user.hasPassword ? (
+          <Card title="Change password">
+            <p className="mb-3 text-sm text-muted">Changing your password signs out your other sessions.</p>
+            <div className="max-w-md">
+              <PasswordChangeForm
+                user={user}
+                onDone={() => {
+                  toast.success('Password changed. Your other sessions were signed out.');
+                  void refresh();
+                }}
+              />
+            </div>
+          </Card>
+        ) : (
+          <Card title="Password">
+            <p className="text-sm text-muted">
+              You sign in with single sign-on and have no EasyPatch password. A super administrator can send you a link to set one. To change
+              passkeys or two-factor settings, sign in again first if your sign-in is more than 10 minutes old.
+            </p>
+          </Card>
+        )}
         <SessionsCard />
       </div>
     </>
@@ -130,10 +139,11 @@ function MfaCard() {
           />
         )}
       </Dialog>
-      <RegenerateCodesDialog open={regenerating} onClose={() => setRegenerating(false)} />
+      <RegenerateCodesDialog open={regenerating} hasPassword={user.hasPassword} onClose={() => setRegenerating(false)} />
       <DisableMfaDialog
         open={disabling}
         keysRemain={keys > 0}
+        hasPassword={user.hasPassword}
         onClose={() => setDisabling(false)}
         onDisabled={() => {
           setDisabling(false);
@@ -145,7 +155,8 @@ function MfaCard() {
   );
 }
 
-function RegenerateCodesDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Accounts without a password (single sign-on) confirm with a recent sign-in instead (the server checks it). */
+function RegenerateCodesDialog({ open, hasPassword, onClose }: { open: boolean; hasPassword: boolean; onClose: () => void }) {
   const [password, setPassword] = useState('');
   const [codes, setCodes] = useState<string[] | null>(null);
   const regenerate = useApiMutation((pw: string) => api.post<RecoveryCodesResponse>('/auth/mfa/recovery-codes', { password: pw }), {
@@ -165,7 +176,7 @@ function RegenerateCodesDialog({ open, onClose }: { open: boolean; onClose: () =
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (password) regenerate.mutate(password);
+    if (password || !hasPassword) regenerate.mutate(password);
   }
 
   return (
@@ -175,11 +186,13 @@ function RegenerateCodesDialog({ open, onClose }: { open: boolean; onClose: () =
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-3.5">
           <Alert tone="warn">Your current recovery codes stop working as soon as new ones are generated.</Alert>
-          <TextField label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+          {hasPassword && (
+            <TextField label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+          )}
           <InlineError error={regenerate.error} />
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="primary" loading={regenerate.isPending} disabled={!password}>
+            <Button type="submit" variant="primary" loading={regenerate.isPending} disabled={hasPassword && !password}>
               Generate codes
             </Button>
           </div>
@@ -189,7 +202,13 @@ function RegenerateCodesDialog({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function DisableMfaDialog({ open, keysRemain, onClose, onDisabled }: { open: boolean; keysRemain: boolean; onClose: () => void; onDisabled: () => void }) {
+function DisableMfaDialog({ open, keysRemain, hasPassword, onClose, onDisabled }: {
+  open: boolean;
+  keysRemain: boolean;
+  hasPassword: boolean;
+  onClose: () => void;
+  onDisabled: () => void;
+}) {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -224,12 +243,14 @@ function DisableMfaDialog({ open, keysRemain, onClose, onDisabled }: { open: boo
             ? 'You will sign in with your passkey or security key. Your recovery codes keep working.'
             : 'Your account will be protected by your password alone. Your recovery codes stop working.'}
         </Alert>
-        <TextField label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+        {hasPassword && (
+          <TextField label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+        )}
         <TextField label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} required />
         <InlineError error={error} />
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="danger" loading={busy} disabled={!password || code.trim().length < 6}>
+          <Button type="submit" variant="danger" loading={busy} disabled={(hasPassword && !password) || code.trim().length < 6}>
             Turn off
           </Button>
         </div>

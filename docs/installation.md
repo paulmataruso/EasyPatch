@@ -12,7 +12,7 @@ installation, first sign-in, agent packages, upgrades, backup and restore.
 | Host | 64-bit Linux with Docker Engine and the Docker Compose plugin. The development override (`docker-compose.dev.yml`) uses the `!override` tag, which needs Compose 2.24.4 or later |
 | DNS | A public DNS name (A or AAAA record) pointing at the host, for example `patch.example.com` |
 | Inbound | TCP 443 from administrators and from every managed endpoint. TCP 80 from the internet, for ACME certificate validation and the HTTP to HTTPS redirect |
-| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. winget, from the `worker` only and only after a Windows agent could not download it from GitHub itself: `github.com` and `release-assets.githubusercontent.com` (see [winget for agents](#winget-for-agents)). Pulling the images needs `ghcr.io` and Docker Hub (PostgreSQL). Building them yourself needs `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` instead of `ghcr.io` |
+| Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. winget, from the `worker` only and only after a Windows agent could not download it from GitHub itself: `github.com` and `release-assets.githubusercontent.com` (see [winget for agents](#winget-for-agents)). If you use single sign-on: the identity providers' HTTPS endpoints (TCP 443), from the `api` container. Pulling the images needs `ghcr.io` and Docker Hub (PostgreSQL). Building them yourself needs `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` instead of `ghcr.io` |
 
 Nothing else is published. PostgreSQL is attached only to an internal Docker network and has no
 host port.
@@ -102,7 +102,9 @@ authenticator app, a security key or a passkey each satisfies it. Passkeys and s
 work only when `EASYPATCH_DOMAIN` is a DNS name with a certificate the browsers trust (the
 public ACME certificate does this); with an IP address the console offers the authenticator app
 only. Users manage them under **My account → Passkeys and security keys**; see
-[security.md](security.md#admin-authentication).
+[security.md](security.md#admin-authentication). To let administrators sign in with Microsoft
+Entra ID, Google, Keycloak or another OpenID Connect provider, see
+[single-sign-on.md](single-sign-on.md).
 
 Then:
 
@@ -238,13 +240,13 @@ This writes `backups/<UTC timestamp>/`, created with umask 077, containing:
 | File | Contents |
 |---|---|
 | `easypatch.dump` | `pg_dump` custom-format database dump |
-| `dpkeys.tar` | ASP.NET Data Protection keys. **Without these, MFA secrets and notification secrets (SMTP password, webhook URLs and signing keys) in the dump cannot be decrypted: every user must enroll MFA again and the secrets must be entered again** |
+| `dpkeys.tar` | ASP.NET Data Protection keys. **Without these, MFA secrets, notification secrets (SMTP password, webhook URLs and signing keys) and single sign-on client secrets in the dump cannot be decrypted: every user must enroll MFA again and the secrets must be entered again** |
 | `agent-packages.tar` | The agent MSIs |
 | `SHA256SUMS` | Checksums of the three files |
 
 The stack must be running (the script uses the `postgres` and `api` containers). Copy backups off
 the host and protect them. The dump contains hashed credentials and agent public keys, and
-`dpkeys.tar` decrypts MFA secrets and notification secrets. Keep them in separate locations if you can.
+`dpkeys.tar` decrypts MFA secrets, notification secrets and single sign-on client secrets. Keep them in separate locations if you can.
 
 To restore:
 

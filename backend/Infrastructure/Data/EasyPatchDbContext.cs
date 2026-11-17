@@ -19,6 +19,9 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
     public DbSet<WebAuthnCredential> WebAuthnCredentials => Set<WebAuthnCredential>();
     public DbSet<WebAuthnChallenge> WebAuthnChallenges => Set<WebAuthnChallenge>();
+    public DbSet<OidcProvider> OidcProviders => Set<OidcProvider>();
+    public DbSet<ExternalLogin> ExternalLogins => Set<ExternalLogin>();
+    public DbSet<OidcLoginState> OidcLoginStates => Set<OidcLoginState>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<Site> Sites => Set<Site>();
@@ -155,6 +158,38 @@ public sealed class EasyPatchDbContext(DbContextOptions<EasyPatchDbContext> opti
             e.HasIndex(x => x.ExpiresAt);
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<UserSession>().WithMany().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<OidcProvider>(e =>
+        {
+            e.ToTable("oidc_providers");
+            e.Property(x => x.DisplayName).HasMaxLength(64);
+            e.Property(x => x.Issuer).HasMaxLength(512);
+            e.Property(x => x.ClientId).HasMaxLength(256);
+            e.Property(x => x.Scopes).HasMaxLength(512);
+        });
+        b.Entity<ExternalLogin>(e =>
+        {
+            e.ToTable("external_logins");
+            e.Property(x => x.Issuer).HasMaxLength(512);
+            e.Property(x => x.Subject).HasMaxLength(255);
+            e.Property(x => x.Email).HasMaxLength(256);
+            e.HasIndex(x => new { x.Issuer, x.Subject }).IsUnique();
+            e.HasIndex(x => new { x.ProviderId, x.UserId }).IsUnique(); // one account per provider and user
+            e.HasIndex(x => x.UserId);
+            e.HasOne(x => x.User).WithMany(u => u.ExternalLogins).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Provider).WithMany().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<OidcLoginState>(e =>
+        {
+            e.ToTable("oidc_login_states");
+            e.Property(x => x.StateHash).HasMaxLength(64);
+            e.Property(x => x.BindingHash).HasMaxLength(64);
+            e.Property(x => x.Nonce).HasMaxLength(64);
+            e.Property(x => x.CodeVerifier).HasMaxLength(128);
+            e.Property(x => x.ReturnTo).HasMaxLength(2048);
+            e.HasIndex(x => x.StateHash).IsUnique();
+            e.HasIndex(x => x.ExpiresAt);
+            e.HasOne<OidcProvider>().WithMany().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<PasswordResetToken>(e =>
         {

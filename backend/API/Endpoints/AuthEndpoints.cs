@@ -66,12 +66,12 @@ public static class AuthEndpoints
 
         g.MapPost("/mfa/disable", async (MfaDisableRequest request, ClaimsPrincipal user, AuthService auth, CancellationToken ct) =>
         {
-            await auth.DisableMfaAsync(user.GetUserId(), request.Password ?? string.Empty, request.Code ?? string.Empty, ct);
+            await auth.DisableMfaAsync(user.GetUserId(), user.GetSessionId(), request.Password ?? string.Empty, request.Code ?? string.Empty, ct);
             return TypedResults.NoContent();
         }).RequireAuthorization(Policies.Account).RequireRateLimiting(RateLimits.Login);
 
         g.MapPost("/mfa/recovery-codes", async (PasswordConfirmRequest request, ClaimsPrincipal user, AuthService auth, CancellationToken ct) =>
-            TypedResults.Ok(new RecoveryCodesResponse(await auth.RegenerateRecoveryCodesAsync(user.GetUserId(), request.Password ?? string.Empty, ct))))
+            TypedResults.Ok(new RecoveryCodesResponse(await auth.RegenerateRecoveryCodesAsync(user.GetUserId(), user.GetSessionId(), request.Password ?? string.Empty, ct))))
             .RequireAuthorization(Policies.Account).RequireRateLimiting(RateLimits.Login);
 
         g.MapPost("/password/change", async (ChangePasswordRequest request, ClaimsPrincipal user, AuthService auth, CancellationToken ct) =>
@@ -121,7 +121,8 @@ public static class AuthEndpoints
         var prompt = mfaCompleted && !mfaSetupRequired && !user.MustChangePassword && webauthn.ShouldPromptForPasskey(user, passkeys);
         return new CurrentUserDto(user.Id, user.Username, user.Email, user.Role, user.MfaEnabled || kinds.Count > 0, mfaCompleted, mfaSetupRequired,
             user.MustChangePassword, user.OrganizationAccess.Select(a => a.OrganizationId).ToList(), user.LastLoginAt,
-            TotpEnabled: user.MfaEnabled, SecurityKeyCount: kinds.Count, PasskeyCount: passkeys, PasskeyPrompt: prompt);
+            TotpEnabled: user.MfaEnabled, SecurityKeyCount: kinds.Count, PasskeyCount: passkeys, PasskeyPrompt: prompt,
+            HasPassword: AuthService.HasUsablePassword(user));
     }
 }
 
@@ -190,11 +191,28 @@ public static class UserEndpoints
             await auth.SetOrganizationAccessAsync(id, request.OrganizationIds ?? [], ct); // takes effect on the user's next request
             return TypedResults.Ok(await db.Users.AsNoTracking().Where(u => u.Id == id).Select(ToDto).FirstAsync(ct));
         });
+
+        // Single sign-on links (accounts at OpenID Connect providers).
+        g.MapGet("/{id:guid}/external-logins", async (Guid id, EasyPatchDbContext db, CancellationToken ct) =>
+            TypedResults.Ok(await db.ExternalLogins.AsNoTracking().Where(l => l.UserId == id).OrderBy(l => l.CreatedAt)
+                .Select(l => new ExternalLoginDto(l.Id, l.ProviderId, l.Provider!.DisplayName, l.Issuer, l.Subject, l.Email, l.CreatedAt, l.LastUsedAt))
+                .ToListAsync(ct)));
+
+        g.MapDelete("/{id:guid}/external-logins/{linkId:guid}", async (Guid id, Guid linkId, EasyPatchDbContext db, AuditService audit,
+            CancellationToken ct) =>
+        {
+            var link = await db.ExternalLogins.Include(l => l.Provider).FirstOrDefaultAsync(l => l.Id == linkId && l.UserId == id, ct)
+                       ?? throw AppException.NotFound("Linked sign-in");
+            db.ExternalLogins.Remove(link);
+            audit.Record("user.sso_unlinked", "User", id.ToString(), details: new { provider = link.Provider?.DisplayName });
+            await db.SaveChangesAsync(ct);
+            return TypedResults.NoContent();
+        });
     }
 
     private static string ResetUrl(EasyPatchOptions options, string token) => $"{options.PublicUrl.TrimEnd('/')}/reset-password#token={token}";
 
     private static readonly System.Linq.Expressions.Expression<Func<User, UserDto>> ToDto = u => new UserDto(
         u.Id, u.Username, u.Email, u.Role, u.IsActive, u.MfaEnabled || u.WebAuthnCredentials.Any(), u.CreatedAt, u.LastLoginAt, u.LockoutUntil,
-        u.OrganizationAccess.Select(a => a.OrganizationId).ToList(), u.MfaEnabled, u.WebAuthnCredentials.Count());
+        u.OrganizationAccess.Select(a => a.OrganizationId).ToList(), u.MfaEnabled, u.WebAuthnCredentials.Count(), u.ExternalLogins.Count());
 }

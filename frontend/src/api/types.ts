@@ -315,6 +315,8 @@ export interface CurrentUserDto {
   passkeyCount: number;
   /** Offer to set up a passkey now (none yet, passkeys work on this server, no "Not now" in the last 30 days). */
   passkeyPrompt: boolean;
+  /** False for an account created by single sign-on that has no password. */
+  hasPassword: boolean;
 }
 
 /** Whether passkeys and security keys work with this server (HTTPS and a DNS name are required). */
@@ -401,6 +403,8 @@ export interface UserDto {
   organizationIds: Guid[];
   totpEnabled: boolean;
   securityKeyCount: number;
+  /** Accounts at single sign-on providers linked to this user. */
+  externalLoginCount: number;
 }
 
 export interface CreateUserRequest {
@@ -1823,4 +1827,74 @@ export interface GenerateReportRequest {
 
 export interface SendReportRequest {
   recipients?: string[] | null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Single sign-on (OpenID Connect)
+// ---------------------------------------------------------------------------------------------
+
+/** An enabled provider: a "Sign in with …" button on the sign-in page. */
+export interface SsoProviderSummaryDto {
+  id: Guid;
+  displayName: string;
+}
+
+export interface SsoProviderDto {
+  id: Guid;
+  displayName: string;
+  issuer: string;
+  clientId: string;
+  /** The secret itself is never returned. */
+  clientSecretConfigured: boolean;
+  scopes: string;
+  enabled: boolean;
+  trustEmailClaim: boolean;
+  providerEnforcesMfa: boolean;
+  autoProvision: boolean;
+  defaultRole: UserRole;
+  allowedDomains: string[];
+  linkedUsers: number;
+  createdAt: Instant;
+  updatedAt: Instant;
+}
+
+export interface SsoSettingsDto {
+  /** Register this redirect URI at every provider. */
+  redirectUri: string;
+  providers: SsoProviderDto[];
+}
+
+export interface SsoProviderRequest {
+  displayName: string;
+  issuer: string;
+  clientId: string;
+  /** null keeps the stored secret; an empty string removes it (public client). */
+  clientSecret: string | null;
+  scopes: string | null;
+  enabled: boolean;
+  trustEmailClaim: boolean;
+  providerEnforcesMfa: boolean;
+  autoProvision: boolean;
+  defaultRole: UserRole;
+  allowedDomains: string[];
+}
+
+export interface SsoProbeDto {
+  ok: boolean;
+  issuer: string | null;
+  authorizationEndpoint: string | null;
+  tokenEndpoint: string | null;
+  signingKeys: number;
+  message: string;
+}
+
+export interface ExternalLoginDto {
+  id: Guid;
+  providerId: Guid;
+  providerName: string;
+  issuer: string;
+  subject: string;
+  email: string | null;
+  createdAt: Instant;
+  lastUsedAt: Instant | null;
 }

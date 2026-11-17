@@ -87,8 +87,32 @@ administrator approval.
 Every WebAuthn route answers `409 webauthn_unavailable` when the console's public URL is an IP
 address or not HTTPS, and `400 webauthn_challenge_expired` when the challenge is older than 5
 minutes, was already answered, or (passkey sign-in) belongs to another browser. `/me` and the
-sign-in responses include `totpEnabled`, `securityKeyCount`, `passkeyCount` and `passkeyPrompt`;
-`mfaEnabled` is true for either kind of second factor.
+sign-in responses include `totpEnabled`, `securityKeyCount`, `passkeyCount`, `passkeyPrompt` and
+`hasPassword` (false for an account created by single sign-on); `mfaEnabled` is true for either
+kind of second factor. For an account without a password, `/mfa/disable`, `/mfa/recovery-codes`
+and the WebAuthn routes that take a password accept a sign-in within the last 10 minutes instead
+(otherwise `403 reauthentication_required`).
+
+### Single sign-on (OpenID Connect)
+
+Browser routes under `/api/v1/auth/sso` (anonymous, sign-in rate limit). See
+[single-sign-on.md](single-sign-on.md).
+
+| Method | Route | Notes |
+|---|---|---|
+| GET | `/providers` | Enabled providers for the sign-in page: `[{id, displayName}]` |
+| GET | `/{id}/start?returnTo=` | Redirects (302) to the provider's authorization endpoint and sets the `__Host-easypatch-sso` binding cookie. `returnTo` must be a console path. On error, redirects to `/login?sso_error=unavailable` |
+| GET | `/callback?code=&state=` | The redirect URI. Signs in and redirects to `returnTo` (the console then asks for MFA if needed), or to `/login?sso_error=` with `expired`, `denied`, `no_account`, `unavailable` or `failed` |
+
+Provider settings (`/api/v1/sso/providers`, SuperAdmin):
+
+| Method | Route | Notes |
+|---|---|---|
+| GET | `/` | `{redirectUri, providers[]}`. A provider has `clientSecretConfigured`, never the secret, and `linkedUsers` |
+| POST | `/` | `{displayName, issuer, clientId, clientSecret, scopes, enabled, trustEmailClaim, providerEnforcesMfa, autoProvision, defaultRole, allowedDomains[]}` → `201`. `defaultRole` cannot be `SuperAdmin`; `autoProvision` needs at least one domain; `scopes` must include `openid` |
+| PUT | `/{id}` | As POST. `clientSecret: null` keeps the stored secret, `""` removes it |
+| DELETE | `/{id}` | Removes the provider and its links to users |
+| POST | `/probe` | `{issuer}` → `{ok, issuer, authorizationEndpoint, tokenEndpoint, signingKeys, message}` after reading the discovery document and key set |
 | POST | `/password/change` | `{currentPassword, newPassword}`. Revokes your other sessions. |
 | POST | `/password/reset` | `{token, newPassword}`. Anonymous; the token comes from an administrator-issued link. |
 | GET | `/sessions` | Your active sessions |
@@ -103,7 +127,8 @@ Until a user has completed every sign-in step, other routes answer `403` with
 the response contains a one-time set-password link), `GET /{id}`, `PUT /{id}` (`email`, `role`,
 `isActive`), `POST /{id}/reset-link`,
 `POST /{id}/mfa/reset` (removes the authenticator app, passkeys, security keys and recovery
-codes), `POST /{id}/sessions/revoke`, `PUT /{id}/organizations`
+codes), `POST /{id}/sessions/revoke`, `GET /{id}/external-logins` (linked single sign-on
+accounts), `DELETE /{id}/external-logins/{linkId}`, `PUT /{id}/organizations`
 (`{organizationIds[]}`; an empty list means all organizations). An email address that another
 user has (ignoring case) answers `409 email_in_use`, a taken username `409 username_in_use`,
 and an address that is not a plain `name@domain` `400 validation_failed`.

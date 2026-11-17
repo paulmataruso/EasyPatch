@@ -166,6 +166,9 @@ All screenshots show fictional demo data.
     codes, by authenticator app (TOTP) or security key;
   * passkeys (WebAuthn) for passwordless sign-in, offered after sign-in to users without one
     (needs a DNS name with a trusted certificate);
+  * single sign-on with OpenID Connect providers (Microsoft Entra ID, Google, Keycloak and
+    others), linking existing users by verified email address. See
+    [docs/single-sign-on.md](docs/single-sign-on.md);
   * server-side sessions, CSRF protection, lockout and rate limits;
   * three roles: SuperAdmin, Admin, ReadOnly;
   * API tokens for scripts and integrations: read-only or operator, optionally limited to
@@ -251,6 +254,7 @@ The full guides are [docs/installation.md](docs/installation.md),
 | [application-updates.md](docs/application-updates.md) | Third-party application updates with winget: requirements, approval, what the agent runs, restarts, limitations and trust model |
 | [compliance.md](docs/compliance.md) | Compliance statuses and rules, required updates, CVE and known-exploited data, OS support status, reports and monthly PDF reports |
 | [alerts.md](docs/alerts.md) | Alert rules, notification channels (email, Slack, Teams, signed webhooks), delivery and troubleshooting |
+| [single-sign-on.md](docs/single-sign-on.md) | Single sign-on with OpenID Connect: how accounts are linked, MFA, settings, Entra ID, Google and Keycloak setup |
 | [security.md](docs/security.md) | Security model, threat model, hardening checklist, known limitations |
 | [api.md](docs/api.md) | REST API (admin and agent protocol). The live OpenAPI document is served at `/api/docs` to signed-in administrators |
 | [troubleshooting.md](docs/troubleshooting.md) | Diagnosing server, sign-in, agent and job problems |

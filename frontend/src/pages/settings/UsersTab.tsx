@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { KeyRound, LogOut, Pencil, Plus, ShieldOff, Users } from 'lucide-react';
+import { KeyRound, LogOut, Pencil, Plus, ShieldOff, Unlink, Users } from 'lucide-react';
 import { api } from '../../api/client';
-import { useApiMutation, useList, useOrganizations } from '../../api/hooks';
-import { USER_ROLES, type CreateUserRequest, type CreateUserResponse, type ResetLinkResponse, type UserDto, type UserRole } from '../../api/types';
+import { useApi, useApiMutation, useList, useOrganizations } from '../../api/hooks';
+import { USER_ROLES, type CreateUserRequest, type CreateUserResponse, type ExternalLoginDto, type ResetLinkResponse, type UserDto, type UserRole } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { CodeBlock, OneTimeNotice } from '../../components/Copy';
 import { ConfirmDialog, Dialog } from '../../components/Dialog';
@@ -81,6 +81,7 @@ export function UsersTab() {
                       {u.username}
                       {u.id === me?.id && <Badge tone="accent">you</Badge>}
                       {!u.isActive && <Badge tone="danger">disabled</Badge>}
+                      {u.externalLoginCount > 0 && <Badge tone="info" title="Linked to a single sign-on provider">SSO</Badge>}
                       {u.lockoutUntil && new Date(u.lockoutUntil) > new Date() && <Badge tone="warn" title={`Until ${formatDateTime(u.lockoutUntil)}`}>locked out</Badge>}
                     </div>
                     <div className="text-xs text-muted">{u.email}</div>
@@ -324,6 +325,7 @@ function EditUserDialog({ user, isSelf, onClose }: { user: UserDto | null; isSel
           {role !== 'SuperAdmin' && <OrgAccessPicker value={orgIds} onChange={setOrgIds} />}
           <Checkbox label="Account enabled" hint="Disabled users cannot sign in; their sessions end." checked={active} onChange={(e) => setActive(e.target.checked)} disabled={isSelf} />
           {!active && user.isActive && <Alert tone="warn">Disabling the account signs the user out everywhere.</Alert>}
+          {user.externalLoginCount > 0 && <LinkedSignIns userId={user.id} />}
           <InlineError error={save.error} />
           <div className="flex justify-end gap-2 pt-1">
             <Button onClick={onClose}>Cancel</Button>
@@ -334,5 +336,36 @@ function EditUserDialog({ user, isSelf, onClose }: { user: UserDto | null; isSel
         </form>
       )}
     </Dialog>
+  );
+}
+
+/** The user's accounts at single sign-on providers. Removing a link stops that account from signing in as this user. */
+function LinkedSignIns({ userId }: { userId: string }) {
+  const toast = useToast();
+  const links = useApi<ExternalLoginDto[]>(`/users/${userId}/external-logins`);
+  const unlink = useApiMutation((l: ExternalLoginDto) => api.del<void>(`/users/${userId}/external-logins/${l.id}`), {
+    invalidate: ['/users'],
+    onSuccess: (_, l) => toast.success(`Unlinked from ${l.providerName}.`),
+  });
+  return (
+    <fieldset className="flex flex-col gap-1">
+      <legend className="mb-1 text-xs font-medium text-muted">Single sign-on</legend>
+      {links.isPending && <Spinner />}
+      <InlineError error={links.error ?? unlink.error} />
+      {links.data?.map((l) => (
+        <div key={l.id} className="flex items-center justify-between gap-2 rounded-md border border-line px-3 py-2 text-sm">
+          <div className="min-w-0">
+            <div className="font-medium">{l.providerName}</div>
+            <div className="truncate text-xs text-muted" title={`${l.issuer} · subject ${l.subject}`}>
+              {l.email ?? l.subject} · last used {formatRelative(l.lastUsedAt)}
+            </div>
+          </div>
+          <Button size="sm" variant="danger-ghost" icon={<Unlink className="size-3.5" aria-hidden />} loading={unlink.isPending && unlink.variables?.id === l.id}
+            onClick={() => unlink.mutate(l)}>
+            Unlink
+          </Button>
+        </div>
+      ))}
+    </fieldset>
   );
 }
