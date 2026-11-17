@@ -3,7 +3,14 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and the agents share one version number.
 
-## [Unreleased]
+## [1.10.0] - 2026-11-17
+
+> **Users now sign in with their email address, not their username.** Before upgrading, make
+> sure every user has an email address of their own (the upgrade stops, changing nothing, if two
+> users share one, ignoring case) and that you know the address of your own account. Passkeys
+> and security keys need the console to be reached by a DNS name with a certificate browsers
+> trust. Pull both the server and the proxy image. The agents are unchanged in this release:
+> there is no need to copy the 1.10.0 agent packages to `data/agent-packages/`.
 
 ### Added
 

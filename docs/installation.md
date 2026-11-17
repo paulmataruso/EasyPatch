@@ -44,7 +44,7 @@ ARM64). You need the repository for `docker-compose.yml`, the Caddy configuratio
 scripts. Check out the release tag you want to run:
 
 ```bash
-git clone --branch v1.9.0 https://github.com/paulmataruso/EasyPatch.git easypatch
+git clone --branch v1.10.0 https://github.com/paulmataruso/EasyPatch.git easypatch
 cd easypatch
 ```
 
@@ -70,7 +70,7 @@ Edit `.env`:
 |---|---|---|
 | `EASYPATCH_DOMAIN` | yes | The public DNS name. Browsers and agents connect to `https://<EASYPATCH_DOMAIN>` |
 | `ACME_EMAIL` | yes | Contact address given to the certificate authority |
-| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.9.0`). Images you build yourself get this tag too |
+| `EASYPATCH_VERSION` | no | The release to run: the image tag pulled from `ghcr.io` (default `1.10.0`). Images you build yourself get this tag too |
 | `EASYPATCH_PUBLIC_URL` | no | Overrides the URL used in install commands, reset links and scripts. Defaults to `https://<EASYPATCH_DOMAIN>` |
 | `EASYPATCH_EDGE_SUBNET` | no | Subnet of the network between Caddy and the API (default `172.30.0.0/24`). Change it only if it collides with an existing network. The API trusts `X-Forwarded-For` only from this subnet |
 
@@ -142,13 +142,13 @@ Download the agent packages of the same release from
 each with its `.sig` release signature, to `data/agent-packages/`:
 
 ```bash
-mkdir -p /tmp/easypatch-v1.9.0
-gh release download v1.9.0 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.9.0 \
+mkdir -p /tmp/easypatch-v1.10.0
+gh release download v1.10.0 --repo paulmataruso/EasyPatch --dir /tmp/easypatch-v1.10.0 \
   --pattern 'EasyPatchAgent-*' --pattern SHA256SUMS
 # or download the same files from the release page in a browser
-(cd /tmp/easypatch-v1.9.0 && sha256sum --check --ignore-missing SHA256SUMS)
+(cd /tmp/easypatch-v1.10.0 && sha256sum --check --ignore-missing SHA256SUMS)
 # Windows and Linux; the macOS .pkg files are experimental (see below)
-cp /tmp/easypatch-v1.9.0/EasyPatchAgent-1.9.0-*.{msi,deb,rpm}* data/agent-packages/
+cp /tmp/easypatch-v1.10.0/EasyPatchAgent-1.10.0-*.{msi,deb,rpm}* data/agent-packages/
 chmod 644 data/agent-packages/*
 ```
 
@@ -247,6 +247,13 @@ It also adds the `api_tokens` table; no API tokens exist until a super administr
 Release 1.9.0 adds the experimental macOS agent and no database changes. For Windows and Linux
 agents, 1.9.0 only fixes when the agent log is rotated (see the [changelog](../CHANGELOG.md)). The
 console's macOS install script needs the macOS packages in `data/agent-packages/`.
+Release 1.10.0 changes how users sign in: **with their email address, no longer their
+username**. Before upgrading, make sure each user has an email address of their own and that you
+know the one of your own account; the upgrade stops, changing nothing, if two users share an
+address (ignoring case). The administration commands take `--email` instead of `--username`. The
+upgrade adds the tables for passkeys, security keys and single sign-on; none is set up until a
+user or super administrator does it. Pull both images: the proxy image now keeps single sign-on
+codes out of its access log. The agents do not change in 1.10.0.
 
 ## Backup and restore
 
@@ -361,7 +368,7 @@ docker compose build        # tags the images with EASYPATCH_VERSION from .env
 docker compose up -d
 ```
 
-Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.9.0-local`) so that
+Use a version of your own in `.env` (for example `EASYPATCH_VERSION=1.10.0-local`) so that
 `docker compose pull` never replaces your images with the release images.
 
 ## Building and testing from source
