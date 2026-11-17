@@ -462,6 +462,8 @@ export interface SiteDto {
   timeZone: string;
   isActive: boolean;
   endpointCount: number;
+  /** Active endpoints of the site whose operating system reports a pending restart. */
+  rebootPendingCount: number;
   createdAt: Instant;
   archivedAt: Instant | null;
   /** The site's own tags; every endpoint of the site has them. */
@@ -988,6 +990,36 @@ export interface BulkResultDto {
   succeeded: number;
   failed: number;
   results: BulkItemResult[];
+}
+
+// "Restart all that need it" (backend/API/Endpoints/RestartPendingEndpoints.cs)
+
+export interface RestartPendingEndpointDto {
+  id: Guid;
+  hostname: string;
+  siteId: Guid | null;
+  siteName: string | null;
+  platform: string;
+  operatingSystem: string | null;
+  /** Windows Server or a domain controller. */
+  isServer: boolean;
+  isOnline: boolean;
+  rebootPendingSince: Instant | null;
+  /** The agent supports restart jobs. */
+  canRestart: boolean;
+}
+
+export interface RestartPendingDto {
+  total: number;
+  /** At most 1000 of `total`. */
+  endpoints: RestartPendingEndpointDto[];
+}
+
+/** The endpoints the administrator confirmed; the server always uses the OnlyIfPending condition. */
+export interface RestartPendingRequest {
+  siteId: Guid | null;
+  endpointIds: Guid[];
+  restart: RestartRequest;
 }
 
 // Install preview (backend/Infrastructure/Services/InstallPreviewService.cs)

@@ -6,13 +6,13 @@ import type { AgentUpdateRequest, BulkAgentUpdateRequest, BulkResultDto } from '
 import { describeAgentPackage, isLinux, isMacOS } from '../lib/format';
 import { Dialog } from './Dialog';
 import { jobIdOf } from './InstallDialog';
-import type { RestartTarget } from './RestartDialogs';
+import type { EndpointTarget } from './RestartDialogs';
 import { useToast } from './Toast';
 import { Alert, Button, InlineError } from './ui';
 
 /** Updates the EasyPatch agent on one endpoint or a bulk selection to the newest signed package on the server. */
 export function AgentUpdateDialog({ target, onClose, onBulkResult }: {
-  target: RestartTarget | null;
+  target: EndpointTarget | null;
   onClose: () => void;
   onBulkResult?: (title: string, data: BulkResultDto) => void;
 }) {

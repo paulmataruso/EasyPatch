@@ -205,6 +205,12 @@ shape and to an explicit administrator decision.
   recorded in the audit log with their parameters; schedule changes are recorded as policy
   changes. A restart job that is not picked up within its expiry period (at most 24 hours) is
   abandoned rather than run late.
+* **Restart all that need it.** On an organization or site, the console first lists the
+  endpoints that report a pending restart (servers and domain controllers are marked), and
+  the administrator confirms that list. The server restarts only the confirmed endpoints that
+  are still active in that organization or site and still report a pending restart, always with
+  the *only if pending* condition, so an endpoint that restarted in the meantime is left alone.
+  Endpoints of other organizations are skipped without revealing their names.
 * **What a pending restart is for.** Reading it is read-only (registry). While a restart is
   pending, Windows agents 1.5.3 and later send the update IDs, servicing package names and file
   paths Windows has queued for it. File paths can name programs a user installed; the agent

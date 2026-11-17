@@ -309,7 +309,8 @@ public static class OrganizationEndpoints
     internal static IQueryable<SiteDto> SiteQuery(EasyPatchDbContext db, System.Linq.Expressions.Expression<Func<Site, bool>> filter) =>
         db.Sites.AsNoTracking().Where(filter).OrderBy(s => s.Name).Select(s => new SiteDto(
             s.Id, s.OrganizationId, s.Organization!.Name, s.Name, s.Description, s.Address, s.TimeZone, s.IsActive,
-            db.Endpoints.Count(e => e.SiteId == s.Id && e.Status == EndpointStatus.Active), s.CreatedAt, s.ArchivedAt));
+            db.Endpoints.Count(e => e.SiteId == s.Id && e.Status == EndpointStatus.Active),
+            db.Endpoints.Count(e => e.SiteId == s.Id && e.Status == EndpointStatus.Active && e.RebootPending), s.CreatedAt, s.ArchivedAt));
 
     private static async Task<OrganizationDto> LoadOrganizationAsync(EasyPatchDbContext db, Guid id, CancellationToken ct)
     {

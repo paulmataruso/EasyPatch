@@ -150,6 +150,7 @@ public sealed record SiteDto(
     string TimeZone,
     bool IsActive,
     int EndpointCount,
+    int RebootPendingCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset? ArchivedAt,
     IReadOnlyList<TagRefDto>? Tags = null);
@@ -499,6 +500,19 @@ public sealed record RestartRequest(
 public sealed record NotifyRequest(UserMessagePreset Preset, DateTimeOffset? RestartAt);
 
 public sealed record BulkRestartRequest(IReadOnlyList<Guid> EndpointIds, RestartRequest Restart);
+
+/// <summary>An endpoint whose operating system reports a pending restart. <c>IsServer</c>: Windows Server or a domain controller;
+/// <c>CanRestart</c>: the agent supports restart jobs (Windows agent 1.1.0 and later, Linux and macOS agents).</summary>
+public sealed record RestartPendingEndpointDto(Guid Id, string Hostname, Guid? SiteId, string? SiteName, string Platform, string? OperatingSystem,
+    bool IsServer, bool IsOnline, DateTimeOffset? RebootPendingSince, bool CanRestart);
+
+/// <summary>The endpoints of an organization (or site) that need a restart. <c>Endpoints</c> holds at most 1000 of <c>Total</c>.</summary>
+public sealed record RestartPendingDto(int Total, IReadOnlyList<RestartPendingEndpointDto> Endpoints);
+
+/// <summary>Restart the listed endpoints, which the administrator confirmed, of an organization or one of its sites. Endpoints that
+/// are not in the scope or no longer report a pending restart are skipped. The restart condition is always
+/// <see cref="RestartCondition.OnlyIfPending"/>.</summary>
+public sealed record RestartPendingRequest(Guid? SiteId, IReadOnlyList<Guid> EndpointIds, RestartRequest Restart);
 
 public sealed record BulkNotifyRequest(IReadOnlyList<Guid> EndpointIds, NotifyRequest Message);
 

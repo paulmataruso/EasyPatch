@@ -386,7 +386,7 @@ public static class EndpointEndpoints
             .WithTags("Endpoints").RequireAuthorization(Policies.Viewer);
     }
 
-    private static CreateJobRequest RestartJob(Guid id, RestartRequest request, DateTimeOffset now)
+    internal static CreateJobRequest RestartJob(Guid id, RestartRequest request, DateTimeOffset now)
     {
         var expiresAfter = request.ExpiresAfterMinutes ?? 120;
         if (expiresAfter is < 15 or > 1440)

@@ -118,11 +118,13 @@ restricted to specific organizations.
 | GET/POST | `/organizations` (`?search=&includeArchived=`; each item includes endpoint, online, offline and missing counts and compliance) |
 | GET/PUT/DELETE | `/organizations/{id}` (DELETE returns `409 has_endpoints` while the organization has endpoints) |
 | POST | `/organizations/{id}/archive`, `/organizations/{id}/restore` |
-| GET/POST | `/organizations/{id}/sites` |
+| GET/POST | `/organizations/{id}/sites` (each site includes `endpointCount` and `rebootPendingCount`, its active endpoints that report a pending restart) |
 | GET | `/organizations/{id}/endpoints` (same filters as `/endpoints`) |
 | GET/PUT/DELETE | `/organizations/{id}/policy` |
 | GET/PUT/DELETE | `/sites/{id}` |
 | POST | `/sites/{id}/archive`, `/sites/{id}/restore` |
+| GET | `/organizations/{id}/restart-pending?siteId=` | Viewer. The active endpoints of the organization (or of one of its sites) whose operating system reports a pending restart: `{total, endpoints[]}`, each `{id, hostname, siteId, siteName, platform, operatingSystem, isServer, isOnline, rebootPendingSince, canRestart}`, sorted by hostname, at most 1000. `isServer`: Windows Server or a domain controller; `canRestart`: the agent supports restart jobs. `404` for a site of another organization |
+| POST | `/organizations/{id}/restart-pending` | Operator. "Restart all that need it": `{siteId?, endpointIds[], restart: {…as for /endpoints/{id}/restart}}` with the endpoints the administrator confirmed (1 to 1000). Each endpoint that is still an active endpoint of the organization (and of `siteId`, when given) and still reports a pending restart gets a restart job; the condition is always `OnlyIfPending`. Per-endpoint outcome as for bulk jobs; skipped endpoints have `errorCode` `out_of_scope` (no host name is returned) or `no_restart_pending` |
 | GET/PUT/DELETE | `/sites/{id}/policy` |
 | GET/PUT/DELETE | `/endpoints/{id}/policy` (an endpoint override; GET returns an empty policy when there is none; `maxConcurrentInstallsPerSite` cannot be set here) |
 | GET/PUT | `/policies/global` (PUT is SuperAdmin) |
@@ -200,7 +202,7 @@ Invalid values return `400 validation_failed`.
 | POST | `/endpoints/{id}/agent-update` | `{version?}` (send `{}` for the newest) → `202` with an `AgentUpdate` job for the newest signed package for the agent's architecture and package format, or the given version. `409` with `agent_upgrade_required` (agent older than 1.2.0 or built without a release key), `no_agent_package`, `agent_up_to_date` (also for older versions: agents are never downgraded), `package_not_signed`, `release_key_not_trusted` or `duplicate_job`. |
 | POST | `/endpoints/{id}/uninstall-agent` | → `202` with an `UninstallAgent` job. The agent removes its own package, which unenrolls it; the job completes when the unenrollment arrives and the endpoint becomes `Decommissioned`. `409 agent_upgrade_required` for agents older than 1.6.0 (or not installed from their package), `409 duplicate_job`, `409 endpoint_not_active`. |
 | POST | `/endpoints/bulk/scan`, `/endpoints/bulk/install-updates` | `{endpointIds[], force}`. Returns a per-endpoint outcome. |
-| POST | `/endpoints/bulk/restart` | `{endpointIds[], restart: {…as above}}`. Per-endpoint outcome. |
+| POST | `/endpoints/bulk/restart` | `{endpointIds[], restart: {…as above}}`. Per-endpoint outcome. To restart every endpoint of an organization or site that needs it, see `/organizations/{id}/restart-pending`. |
 | POST | `/endpoints/bulk/notify` | `{endpointIds[], message: {preset, restartAt?}}`. Per-endpoint outcome. |
 | POST | `/endpoints/bulk/agent-update` | `{endpointIds[], version?}`. Per-endpoint outcome with the codes above. |
 | GET | `/user-messages` | Viewer. The preset messages with their title and text (`{time}` marks where the restart time goes) |

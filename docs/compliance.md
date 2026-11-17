@@ -161,7 +161,8 @@ compliance:
   never become `Reoffered`.
 * After an install job, the agent scans again. If a restart is needed, it scans again after the
   computer restarts. Installing updates never restarts a computer: a user, an administrator
-  (with **Restart…** in the console) or a restart schedule in policy restarts it.
+  (with **Restart…** on an endpoint, or **Restart all that need it** on an organization or
+  site) or a restart schedule in policy restarts it.
 * `Superseded`, `NotApplicable`, `Excluded` and `Reoffered` updates never count.
 
 ## Operating system support status

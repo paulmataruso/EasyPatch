@@ -418,6 +418,13 @@ function BulkInstallDialog({ open, count, loading, error, onClose, onConfirm }: 
   );
 }
 
+/** How a bulk item that did not queue a job is shown: skipped on purpose, already active, or failed. */
+export function bulkOutcome(errorCode: string | null): { label: string; tone: 'neutral' | 'danger' } {
+  if (errorCode === 'duplicate_job') return { label: 'Already active', tone: 'neutral' };
+  if (errorCode === 'no_restart_pending' || errorCode === 'out_of_scope') return { label: 'Skipped', tone: 'neutral' };
+  return { label: 'Failed', tone: 'danger' };
+}
+
 export function BulkResultDialog({ result, onClose }: { result: { title: string; data: BulkResultDto } | null; onClose: () => void }) {
   return (
     <Dialog
@@ -446,7 +453,7 @@ export function BulkResultDialog({ result, onClose }: { result: { title: string;
                       {r.hostname ?? r.endpointId}
                     </Link>
                   </td>
-                  <td>{r.success ? <Badge tone="ok">Queued</Badge> : <Badge tone={r.errorCode === 'duplicate_job' ? 'neutral' : 'danger'}>{r.errorCode === 'duplicate_job' ? 'Already active' : 'Failed'}</Badge>}</td>
+                  <td>{r.success ? <Badge tone="ok">Queued</Badge> : <Badge tone={bulkOutcome(r.errorCode).tone}>{bulkOutcome(r.errorCode).label}</Badge>}</td>
                   <td className="text-sm">
                     {r.jobId && (
                       <Link to={`/jobs/${r.jobId}`} className="text-accent hover:underline">

@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import { Link } from 'react-router';
+import type { UseQueryResult } from '@tanstack/react-query';
 import { MessageSquare, Power } from 'lucide-react';
 import { ApiError, api } from '../api/client';
 import { useApi, useApiMutation } from '../api/hooks';
@@ -9,19 +10,24 @@ import {
   type EndpointDetailDto,
   type NotifyRequest,
   type RestartMode,
+  type RestartPendingDto,
+  type RestartPendingRequest,
   type RestartRequest,
   type UserMessagePreset,
   type UserMessagePresetDto,
 } from '../api/types';
-import { formatDuration, isLinux, isMacOS } from '../lib/format';
+import { formatDuration, formatRelative, isLinux, isMacOS } from '../lib/format';
 import { Dialog } from './Dialog';
 import { jobIdOf } from './InstallDialog';
 import { EXPIRY_OPTIONS, RestartModeFields } from './PolicySections';
 import { useToast } from './Toast';
-import { Alert, Button, Checkbox, cx, InlineError, Input, Select, Spinner } from './ui';
+import { Alert, Badge, Button, Checkbox, cx, InlineError, Input, Select, Spinner } from './ui';
 
 /** One endpoint (with its live state) or a bulk selection. */
-export type RestartTarget = { kind: 'endpoint'; endpoint: EndpointDetailDto } | { kind: 'bulk'; ids: string[] };
+export type EndpointTarget = { kind: 'endpoint'; endpoint: EndpointDetailDto } | { kind: 'bulk'; ids: string[] };
+
+/** An endpoint target, or every endpoint of an organization or site that reports a pending restart. */
+export type RestartTarget = EndpointTarget | { kind: 'pending'; organizationId: string; siteId: string | null; scopeName: string };
 
 /** "2026-11-14T03:00" (local) for a datetime-local input. */
 function toLocalInput(date: Date): string {
@@ -37,6 +43,7 @@ function parseLocalInput(value: string): Date | null {
 
 function targetTitle(target: RestartTarget | null): string {
   if (!target) return '';
+  if (target.kind === 'pending') return `all that need it in ${target.scopeName}`;
   return target.kind === 'endpoint' ? target.endpoint.summary.hostname : `${target.ids.length} endpoint${target.ids.length === 1 ? '' : 's'}`;
 }
 
@@ -90,15 +97,27 @@ export function RestartDialog({ target, onClose, onBulkResult }: {
     setExpiry(120);
   }, [target]);
 
+  const pending = target?.kind === 'pending' ? target : null;
+  const preview = useApi<RestartPendingDto>(
+    pending ? `/organizations/${pending.organizationId}/restart-pending` : null,
+    pending?.siteId ? { siteId: pending.siteId } : undefined,
+  );
+  const pendingIds = preview.data?.endpoints.filter((e) => e.canRestart).map((e) => e.id) ?? [];
+
   const restart = useApiMutation(
-    (req: RestartRequest) =>
-      target?.kind === 'endpoint'
-        ? api.post<unknown>(`/endpoints/${target.endpoint.summary.id}/restart`, req)
-        : api.post<BulkResultDto>('/endpoints/bulk/restart', { endpointIds: target?.kind === 'bulk' ? target.ids : [], restart: req }),
+    (req: RestartRequest) => {
+      if (target?.kind === 'endpoint') return api.post<unknown>(`/endpoints/${target.endpoint.summary.id}/restart`, req);
+      if (target?.kind === 'pending') {
+        const body: RestartPendingRequest = { siteId: target.siteId, endpointIds: pendingIds, restart: req };
+        return api.post<BulkResultDto>(`/organizations/${target.organizationId}/restart-pending`, body);
+      }
+      return api.post<BulkResultDto>('/endpoints/bulk/restart', { endpointIds: target?.kind === 'bulk' ? target.ids : [], restart: req });
+    },
     {
-      invalidate: ['/endpoints', '/jobs'],
+      invalidate: ['/endpoints', '/jobs', '/organizations'],
       onSuccess: (result) => {
         if (target?.kind === 'bulk') onBulkResult?.('Restart', result as BulkResultDto);
+        else if (target?.kind === 'pending') onBulkResult?.(`Restart all that need it in ${target.scopeName}`, result as BulkResultDto);
         else jobToast(when === 'now' ? 'Restart requested.' : 'Restart scheduled.', result);
         onClose();
       },
@@ -113,12 +132,16 @@ export function RestartDialog({ target, onClose, onBulkResult }: {
         ? 'A restart can be scheduled up to 31 days ahead.'
         : null;
   const endpoint = target?.kind === 'endpoint' ? target.endpoint : null;
-  const unsupported = endpoint !== null && !endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.restart);
+  const unsupported =
+    (endpoint !== null && !endpoint.agentCapabilities.includes(AGENT_CAPABILITIES.restart)) ||
+    (pending !== null && (preview.isFetching || pendingIds.length === 0));
+  const plural = pendingIds.length === 1 ? '' : 's';
 
   function submit() {
     restart.mutate({
       mode,
-      condition: onlyIfPending ? 'OnlyIfPending' : 'Always',
+      // "All that need it" is always conditional: an endpoint that no longer needs a restart when the job arrives is left alone.
+      condition: pending || onlyIfPending ? 'OnlyIfPending' : 'Always',
       countdownMinutes: mode === 'Countdown' ? countdownMinutes : null,
       deadlineMinutes: mode === 'PromptWithDeadline' ? deadlineMinutes : null,
       scheduledAt: scheduled ? scheduled.toISOString() : null,
@@ -144,13 +167,20 @@ export function RestartDialog({ target, onClose, onBulkResult }: {
             onClick={submit}
             icon={<Power className="size-4" aria-hidden />}
           >
-            {when === 'now' ? 'Restart' : 'Schedule restart'}
+            {pending
+              ? when === 'now'
+                ? `Restart ${pendingIds.length} endpoint${plural}`
+                : `Schedule ${pendingIds.length} restart${plural}`
+              : when === 'now'
+                ? 'Restart'
+                : 'Schedule restart'}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-4 text-sm">
         {endpoint && <EndpointRestartContext endpoint={endpoint} />}
+        {pending && <PendingRestartList scopeName={pending.scopeName} showSite={pending.siteId === null} preview={preview} />}
         {target?.kind === 'bulk' && (
           <p className="text-muted">
             Each endpoint gets its own restart job. Endpoints whose agent is older than 1.1.0 are skipped and listed in the results. macOS endpoints
@@ -203,14 +233,71 @@ export function RestartDialog({ target, onClose, onBulkResult }: {
         />
         <Checkbox
           label="Only if the operating system reports a pending restart"
-          hint="The agent checks when the job arrives and completes without restarting if nothing is pending."
-          checked={onlyIfPending}
+          hint={
+            pending
+              ? 'Always on here: the agent checks when the job arrives and completes without restarting if nothing is pending any more.'
+              : 'The agent checks when the job arrives and completes without restarting if nothing is pending.'
+          }
+          checked={pending !== null || onlyIfPending}
+          disabled={pending !== null}
           onChange={(e) => setOnlyIfPending(e.target.checked)}
         />
         <p className="text-xs text-muted">If nobody is signed in when the restart is due, the computer restarts at once in every mode.</p>
         {duplicateMessage(restart.error) ? <Alert tone="warn">{duplicateMessage(restart.error)}</Alert> : <InlineError error={restart.error} />}
       </div>
     </Dialog>
+  );
+}
+
+/** The endpoints "Restart all that need it" would restart, as the server lists them now. */
+function PendingRestartList({ scopeName, showSite, preview }: { scopeName: string; showSite: boolean; preview: UseQueryResult<RestartPendingDto> }) {
+  if (preview.isPending) return <Spinner label="Finding endpoints that need a restart…" className="py-4" />;
+  if (preview.isError) return <InlineError error={preview.error} />;
+  const { total, endpoints } = preview.data;
+  if (total === 0) return <Alert tone="ok">No endpoint in {scopeName} reports a pending restart.</Alert>;
+
+  const restartable = endpoints.filter((e) => e.canRestart);
+  const servers = restartable.filter((e) => e.isServer).length;
+  const offline = restartable.filter((e) => !e.isOnline).length;
+  const macs = restartable.filter((e) => isMacOS(e.platform)).length;
+  const tooOld = endpoints.length - restartable.length;
+  return (
+    <div className="flex flex-col gap-3">
+      <p>
+        {total} endpoint{total === 1 ? '' : 's'} in {scopeName} report{total === 1 ? 's' : ''} a pending restart. Each one that can be restarted gets
+        its own restart job; endpoints that report a pending restart later are not included.
+      </p>
+      {servers > 0 && (
+        <Alert tone="warn" title={`Includes ${servers} server${servers === 1 ? '' : 's'}`}>
+          Windows Server and domain controllers stop their services while they restart. Consider scheduling the restart for a maintenance window.
+        </Alert>
+      )}
+      {macs > 0 && (
+        <Alert tone="warn">
+          {macs} macOS endpoint{macs === 1 ? '' : 's'} (experimental agent) restart{macs === 1 ? 's' : ''} without warning signed-in users on screen.
+        </Alert>
+      )}
+      <div className="max-h-56 overflow-y-auto rounded-md border border-line">
+        <ul className="divide-y divide-line">
+          {endpoints.map((e) => (
+            <li key={e.id} className={cx('flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5', !e.canRestart && 'text-muted')}>
+              <span className="font-medium">{e.hostname}</span>
+              {showSite && e.siteName && <span className="text-xs text-muted">{e.siteName}</span>}
+              {e.isServer && <Badge tone="warn">Server</Badge>}
+              {isMacOS(e.platform) && <Badge>macOS (experimental)</Badge>}
+              {!e.isOnline && <Badge>Offline</Badge>}
+              {!e.canRestart && <Badge tone="danger">Agent too old, skipped</Badge>}
+              <span className="ml-auto text-xs text-muted">{e.rebootPendingSince ? `pending ${formatRelative(e.rebootPendingSince)}` : ''}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <p className="text-xs text-muted">
+        {offline > 0 && `${offline} offline endpoint${offline === 1 ? '' : 's'} restart${offline === 1 ? 's' : ''} when they check in, within the time limit below. `}
+        {tooOld > 0 && `${tooOld} endpoint${tooOld === 1 ? '' : 's'} with an agent older than 1.1.0 cannot restart and ${tooOld === 1 ? 'is' : 'are'} skipped. `}
+        {total > endpoints.length && `Only the first ${endpoints.length} of ${total} are restarted by this action.`}
+      </p>
+    </div>
   );
 }
 
@@ -271,7 +358,7 @@ export function SessionSummary({ endpoint }: { endpoint: EndpointDetailDto }) {
 }
 
 export function MessageDialog({ target, onClose, onBulkResult }: {
-  target: RestartTarget | null;
+  target: EndpointTarget | null;
   onClose: () => void;
   onBulkResult?: (title: string, data: BulkResultDto) => void;
 }) {

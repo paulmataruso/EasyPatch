@@ -349,6 +349,11 @@ Failed (timed out) ──► any final status (a late genuine report from the ag
 
 * **Only if pending.** With this condition the agent checks Windows' pending-restart state
   when the job starts. If no restart is pending, the job completes without restarting.
+* **Restart all that need it.** The organization page (and each row of its *Sites* tab) lists
+  the active endpoints whose last check-in reported a pending restart
+  (`GET /organizations/{id}/restart-pending`). Confirming creates one restart job per listed
+  endpoint that can restart, with the *only if pending* condition. Endpoints that left the
+  scope or stopped reporting a pending restart since the list was shown are skipped.
 * **Nobody signed in.** The computer restarts at once, whatever the mode.
 * **Signed-in users but no tray.** For a countdown or the final countdown, Windows' own
   shutdown warning is shown for the remaining time instead. A prompt without a deadline keeps

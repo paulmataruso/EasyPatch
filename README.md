@@ -115,6 +115,8 @@ All screenshots show fictional demo data.
   window is spent installing.
 * **Restarts** of one endpoint or many selected endpoints, now or at a chosen time, or on a
   recurring restart schedule set in policy (optionally only when Windows needs a restart).
+  **Restart all that need it** on an organization or site lists every endpoint there that
+  reports a pending restart and, once you confirm, restarts those.
   Signed-in users see a countdown, or can postpone up to a deadline. A restart job completes
   only when the computer's boot time shows that it actually restarted.
 * **Tray icon, status window and user messages.** The agent shows an EasyPatch icon in the

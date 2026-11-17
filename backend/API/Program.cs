@@ -127,6 +127,7 @@ app.MapUserEndpoints();
 app.MapApiTokenEndpoints();
 app.MapOrganizationEndpoints();
 app.MapEndpointEndpoints();
+app.MapRestartPendingEndpoints();
 app.MapTagEndpoints();
 app.MapNotificationEndpoints();
 app.MapJobEndpoints();

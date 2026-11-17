@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { Archive, ArchiveRestore, KeyRound, MapPin, Pencil, Plus, ScrollText, Settings2, Tag as TagIcon, Terminal, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, KeyRound, MapPin, Pencil, Plus, Power, ScrollText, Settings2, Tag as TagIcon, Terminal, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useApi, useApiMutation, usePolicy } from '../../api/hooks';
-import type { OrganizationDto, PolicyRequest, SiteDto, SiteRequest } from '../../api/types';
+import type { BulkResultDto, OrganizationDto, PolicyRequest, SiteDto, SiteRequest } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { ConfirmDialog, Dialog } from '../../components/Dialog';
 import { PolicyEditor, resolveInherited } from '../../components/PolicyEditor';
+import { RestartDialog, type RestartTarget } from '../../components/RestartDialogs';
 import { GroupTagsDialog, TagList } from '../../components/Tags';
 import { useToast } from '../../components/Toast';
 import {
@@ -28,7 +29,7 @@ import {
 } from '../../components/ui';
 import { formatDateTime, formatNumber, formatPercent, formatRelative } from '../../lib/format';
 import { useUrlState } from '../../lib/urlState';
-import { EndpointList } from '../endpoints/EndpointsPage';
+import { BulkResultDialog, EndpointList } from '../endpoints/EndpointsPage';
 import { OrganizationFormDialog, TimeZoneField } from './OrganizationsPage';
 
 export function OrganizationDetailPage() {
@@ -38,6 +39,8 @@ export function OrganizationDetailPage() {
   const org = useApi<OrganizationDto>(`/organizations/${id}`, undefined, { refetchInterval: 60_000 });
   const { canOperate, isUnrestricted } = useAuth();
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [restart, setRestart] = useState<RestartTarget | null>(null);
+  const [result, setResult] = useState<{ title: string; data: BulkResultDto } | null>(null);
 
   if (org.isPending) return <Spinner />;
   if (org.isError) return <ErrorState error={org.error} onRetry={() => void org.refetch()} />;
@@ -47,6 +50,18 @@ export function OrganizationDetailPage() {
     <>
       <PageHeader
         breadcrumb={<Link to="/organizations" className="hover:text-fg">Organizations</Link>}
+        actions={
+          canOperate && (
+            <Button
+              icon={<Power className="size-4" aria-hidden />}
+              disabled={o.summary.rebootRequiredCount === 0}
+              title={o.summary.rebootRequiredCount === 0 ? 'No endpoint in this organization reports a pending restart.' : undefined}
+              onClick={() => setRestart({ kind: 'pending', organizationId: o.id, siteId: null, scopeName: o.name })}
+            >
+              Restart all that need it{o.summary.rebootRequiredCount > 0 ? ` (${formatNumber(o.summary.rebootRequiredCount)})` : ''}…
+            </Button>
+          )
+        }
         title={
           <span className="flex items-center gap-2">
             {o.name}
@@ -81,10 +96,14 @@ export function OrganizationDetailPage() {
         ]}
       />
       {tab === 'overview' && <OverviewTab org={o} />}
-      {tab === 'sites' && <SitesTab org={o} />}
+      {tab === 'sites' && (
+        <SitesTab org={o} onRestart={(site) => setRestart({ kind: 'pending', organizationId: o.id, siteId: site.id, scopeName: site.name })} />
+      )}
       {tab === 'endpoints' && <EndpointList organizationId={o.id} />}
       {tab === 'policy' && <OrganizationPolicyTab org={o} />}
       {tab === 'deploy' && <DeployTab org={o} />}
+      <RestartDialog target={restart} onClose={() => setRestart(null)} onBulkResult={(title, data) => setResult({ title, data })} />
+      <BulkResultDialog result={result} onClose={() => setResult(null)} />
     </>
   );
 }
@@ -193,7 +212,7 @@ function OverviewTab({ org }: { org: OrganizationDto }) {
   );
 }
 
-function SitesTab({ org }: { org: OrganizationDto }) {
+function SitesTab({ org, onRestart }: { org: OrganizationDto; onRestart: (site: SiteDto) => void }) {
   const { canOperate, isUnrestricted } = useAuth();
   const toast = useToast();
   const [editing, setEditing] = useState<SiteDto | 'new' | null>(null);
@@ -236,6 +255,7 @@ function SitesTab({ org }: { org: OrganizationDto }) {
                 <th>Address</th>
                 <th>Time zone</th>
                 <th className="text-right">Endpoints</th>
+                <th className="text-right">Restart pending</th>
                 <th>Created</th>
                 <th className="text-right">Actions</th>
               </tr>
@@ -267,9 +287,24 @@ function SitesTab({ org }: { org: OrganizationDto }) {
                       {site.endpointCount}
                     </Link>
                   </td>
+                  <td className="text-right tabular-nums">
+                    {site.rebootPendingCount > 0 ? (
+                      <Link to={`/endpoints?organizationId=${org.id}&siteId=${site.id}&rebootPending=true`} className="text-info hover:text-accent">
+                        {site.rebootPendingCount}
+                      </Link>
+                    ) : (
+                      <span className="text-subtle">0</span>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap text-muted">{formatDateTime(site.createdAt)}</td>
                   <td>
                     <div className="flex justify-end gap-1">
+                      {canOperate && site.rebootPendingCount > 0 && (
+                        <Button size="sm" variant="ghost" icon={<Power className="size-3.5" aria-hidden />} onClick={() => onRestart(site)}
+                          title={`Restart the endpoints of ${site.name} that report a pending restart`}>
+                          Restart {site.rebootPendingCount}…
+                        </Button>
+                      )}
                       <Button size="sm" variant="ghost" icon={<Settings2 className="size-3.5" aria-hidden />} onClick={() => setPolicySite(site)}>
                         Policy
                       </Button>

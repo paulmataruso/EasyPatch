@@ -312,6 +312,9 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
       <Button icon={<ScanSearch className="size-4" aria-hidden />} loading={queueJob.isPending && queueJob.variables === 'scan'} onClick={() => queueJob.mutate('scan')}>
         Scan now
       </Button>
+      <Button icon={<Power className="size-4" aria-hidden />} onClick={onRestart}>
+        Restart…
+      </Button>
       <div className="relative">
         <Button aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} icon={<MoreHorizontal className="size-4" aria-hidden />}>
           More
@@ -321,9 +324,6 @@ function EndpointActions({ endpoint, onInstallAll, onRestart }: { endpoint: Endp
             <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} aria-hidden />
             <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-line bg-surface py-1 shadow-lg"
               onKeyDown={(e) => e.key === 'Escape' && setMenu(false)}>
-              <MenuItem icon={<Power className="size-4" aria-hidden />} onClick={() => { setMenu(false); onRestart(); }}>
-                Restart…
-              </MenuItem>
               <MenuItem icon={<MessageSquare className="size-4" aria-hidden />} disabled={!canNotify} hint={notifyHint} onClick={() => { setMenu(false); setDialog('message'); }}>
                 Send message to users…
               </MenuItem>

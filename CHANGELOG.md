@@ -3,6 +3,23 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and the agents share one version number.
 
+## [Unreleased]
+
+### Added
+
+- **Restart all that need it** on an organization (page header) and on each site (*Sites* tab):
+  lists the endpoints that report a pending restart, marking servers, domain controllers,
+  offline endpoints and agents too old to restart, and restarts the ones you confirm. The
+  restart options are the usual ones (now or at a time, countdown or prompt); the condition is
+  always *only if pending*. API: `GET`/`POST /api/v1/organizations/{id}/restart-pending`.
+- The *Sites* tab shows how many endpoints of each site have a restart pending (also
+  `rebootPendingCount` on sites in the API).
+
+### Changed
+
+- The endpoint page has a **Restart…** button next to **Scan now** (it was in the **More** menu).
+- Bulk results show endpoints that were skipped on purpose as *Skipped* instead of *Failed*.
+
 ## [1.9.0] - 2026-11-16
 
 > **The macOS agent added in this release is experimental: it is in development and not for
