@@ -41,6 +41,9 @@ public sealed record PasswordConfirmRequest(string Password);
 
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
+/// <summary>Change the signed-in user's own email address, confirmed with the current password.</summary>
+public sealed record ChangeEmailRequest(string CurrentPassword, string NewEmail);
+
 public sealed record ResetPasswordRequest(string Token, string NewPassword);
 
 public sealed record SessionDto(Guid Id, DateTimeOffset CreatedAt, DateTimeOffset LastSeenAt, DateTimeOffset ExpiresAt, string? IpAddress, string? UserAgent,

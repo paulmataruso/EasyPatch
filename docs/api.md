@@ -73,6 +73,7 @@ administrator approval.
 | POST | `/mfa/disable` | `{password, code}`. Refused (`409 mfa_required`) while the `RequireMfa` server setting is on. |
 | POST | `/mfa/recovery-codes` | `{password}` → a new set of recovery codes |
 | POST | `/password/change` | `{currentPassword, newPassword}`. Revokes your other sessions. |
+| POST | `/email/change` | `{currentPassword, newEmail}` → `204`. Changes your own email address (stored lower-case). `400 invalid_password`, `400 validation_failed` for an invalid address, `409 duplicate` when another user has it. Your sessions stay signed in; the change is in the audit log (`auth.email_changed`). |
 | POST | `/password/reset` | `{token, newPassword}`. Anonymous; the token comes from an administrator-issued link. |
 | GET | `/sessions` | Your active sessions |
 | DELETE | `/sessions/{id}` | Revoke one of your sessions |

@@ -15,6 +15,10 @@ the web console and the agents share one version number.
 - The *Sites* tab shows how many endpoints of each site have a restart pending (also
   `rebootPendingCount` on sites in the API).
 
+- **My account → Change email**: users change their own email address, confirmed with their
+  current password (`POST /api/v1/auth/email/change`). Super administrators can still change
+  any user's email under **Settings → Users**.
+
 ### Changed
 
 - The endpoint page has a **Restart…** button next to **Scan now** (it was in the **More** menu).

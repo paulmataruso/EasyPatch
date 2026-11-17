@@ -31,7 +31,18 @@ export function AccountPage() {
               ['Last sign-in', user.lastLoginAt ? `${formatDateTime(user.lastLoginAt)} (${formatRelative(user.lastLoginAt)})` : '—'],
             ]}
           />
-          <p className="mt-4 text-xs text-muted">A super administrator can change your email, role or organization access.</p>
+          <p className="mt-4 text-xs text-muted">A super administrator can change your role or organization access.</p>
+        </Card>
+        <Card title="Change email">
+          <div className="max-w-md">
+            <EmailChangeForm
+              currentEmail={user.email}
+              onDone={(email) => {
+                toast.success(`Your email is now ${email}.`);
+                void refresh();
+              }}
+            />
+          </div>
         </Card>
         <MfaCard />
         <Card title="Change password">
@@ -49,6 +60,52 @@ export function AccountPage() {
         <SessionsCard />
       </div>
     </>
+  );
+}
+
+function EmailChangeForm({ currentEmail, onDone }: { currentEmail: string; onDone: (email: string) => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const trimmed = email.trim();
+  const same = trimmed.toLowerCase() === currentEmail.toLowerCase();
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post('/auth/email/change', { currentPassword: password, newEmail: trimmed });
+      setEmail('');
+      setPassword('');
+      onDone(trimmed.toLowerCase());
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3.5">
+      <TextField
+        label="New email"
+        type="email"
+        autoComplete="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        error={trimmed && same ? 'That is already your email.' : null}
+        hint={`Currently ${currentEmail}.`}
+        maxLength={256}
+        required
+      />
+      <TextField label="Current password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+      <InlineError error={error} />
+      <Button type="submit" variant="primary" loading={busy} disabled={!trimmed || same || !password} className="self-start">
+        Change email
+      </Button>
+    </form>
   );
 }
 

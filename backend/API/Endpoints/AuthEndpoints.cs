@@ -79,6 +79,12 @@ public static class AuthEndpoints
             return TypedResults.NoContent();
         }).RequireAuthorization(Policies.SessionMfaPassed).RequireRateLimiting(RateLimits.Login);
 
+        g.MapPost("/email/change", async (ChangeEmailRequest request, ClaimsPrincipal user, AuthService auth, CancellationToken ct) =>
+        {
+            await auth.ChangeEmailAsync(user.GetUserId(), request.CurrentPassword ?? string.Empty, request.NewEmail ?? string.Empty, ct);
+            return TypedResults.NoContent();
+        }).RequireAuthorization(Policies.SessionMfaPassed).RequireRateLimiting(RateLimits.Login);
+
         g.MapPost("/password/reset", async (ResetPasswordRequest request, AuthService auth, CancellationToken ct) =>
         {
             await auth.ResetPasswordAsync(request.Token ?? string.Empty, request.NewPassword ?? string.Empty, ct);

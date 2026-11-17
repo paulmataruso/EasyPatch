@@ -289,6 +289,34 @@ public sealed class AuthService(
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>Changes the user's own email address after checking the current password. Sessions stay signed in.</summary>
+    public async Task ChangeEmailAsync(Guid userId, string currentPassword, string newEmail, CancellationToken ct = default)
+    {
+        var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
+        RequirePassword(user, currentPassword);
+        var normalized = (newEmail ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Length > 256 || !System.Net.Mail.MailAddress.TryCreate(normalized, out var parsed) ||
+            !string.Equals(parsed.Address, normalized, StringComparison.Ordinal))
+        {
+            throw AppException.BadRequest("Enter a valid email address.", "validation_failed");
+        }
+
+        if (normalized == user.Email)
+        {
+            return;
+        }
+
+        if (await db.Users.AnyAsync(u => u.Email == normalized && u.Id != userId, ct))
+        {
+            throw AppException.Conflict("That email address is already in use.", "duplicate");
+        }
+
+        var previous = user.Email;
+        user.Email = normalized;
+        audit.Record("auth.email_changed", "User", user.Id.ToString(), details: new { from = previous, to = normalized });
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task<string> CreateResetTokenAsync(Guid userId, Guid? createdBy, CancellationToken ct = default)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw AppException.NotFound("User");
