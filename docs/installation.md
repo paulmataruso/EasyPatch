@@ -10,12 +10,31 @@ installation, first sign-in, agent packages, upgrades, backup and restore.
 | | |
 |---|---|
 | Host | 64-bit Linux with Docker Engine and the Docker Compose plugin. The development override (`docker-compose.dev.yml`) uses the `!override` tag, which needs Compose 2.24.4 or later |
-| DNS | A public DNS name (A or AAAA record) pointing at the host, for example `patch.example.com` |
+| DNS | One public DNS name pointing at the host, for example `patch.example.com`; see [DNS records](#dns-records) |
 | Inbound | TCP 443 from administrators and from every managed endpoint. TCP 80 from the internet, for ACME certificate validation and the HTTP to HTTPS redirect |
 | Outbound | The ACME certificate authority (Caddy's defaults). If you use alert notifications: your SMTP server (usually TCP 587 or 465) and the webhook hosts (TCP 443, for example `hooks.slack.com` or your Teams workflow host), from the `worker` container only. Vulnerability data, also from the `worker` only (TCP 443): `www.cisa.gov`, `raw.githubusercontent.com` (fallback), `api.msrc.microsoft.com`, and `security-tracker.debian.org` while Debian endpoints are managed; it can be turned off under *Settings → Server*. winget, from the `worker` only and only after a Windows agent could not download it from GitHub itself: `github.com` and `release-assets.githubusercontent.com` (see [winget for agents](#winget-for-agents)). Pulling the images needs `ghcr.io` and Docker Hub (PostgreSQL). Building them yourself needs `mcr.microsoft.com`, Docker Hub, `api.nuget.org` and `registry.npmjs.org` instead of `ghcr.io` |
 
 Nothing else is published. PostgreSQL is attached only to an internal Docker network and has no
 host port.
+
+### DNS records
+
+The console, the API, agent check-ins, agent downloads and install scripts all use the one name in
+`EASYPATCH_DOMAIN`, so EasyPatch needs a single DNS name:
+
+| Type | Name | Value | Needed |
+|---|---|---|---|
+| A | `patch.example.com` | The host's public IPv4 address | Yes |
+| AAAA | `patch.example.com` | The host's public IPv6 address | Only if the host answers on IPv6 (TCP 80 and 443). Certificate authorities try IPv6 first, so an AAAA record for an address that does not answer makes certificate issuance fail |
+| CAA | `example.com` | `0 issue "letsencrypt.org"` and `0 issue "zerossl.com"` (Caddy's two default certificate authorities) | Only if the domain already has CAA records |
+
+* The bundled Caddy obtains certificates with the HTTP and TLS-ALPN challenges only (it has no
+  DNS-challenge plugin), so the name must resolve to an address that the certificate authority
+  can reach on TCP 80 or 443.
+* If the zone is on Cloudflare, set the record to *DNS only*: the proxy would present its own
+  certificate to agents and browsers instead of the server's.
+* Choose a name you will keep. Every enrolled agent stores the server's address, and SSO
+  providers need the redirect address under that name registered.
 
 ## 1. Get the deployment files
 
