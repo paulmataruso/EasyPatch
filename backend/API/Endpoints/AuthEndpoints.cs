@@ -17,8 +17,8 @@ public static class AuthEndpoints
 
         g.MapPost("/login", async (LoginRequest request, AuthService auth, CsrfProtection csrf, HttpContext http, CancellationToken ct) =>
         {
-            new Validator().Required("username", request.Username, 256).Required("password", request.Password, 1024).ThrowIfInvalid();
-            var result = await auth.LoginAsync(request.Username, request.Password, http.Connection.RemoteIpAddress?.ToString(),
+            new Validator().Required("email", request.Email, 256).Required("password", request.Password, 1024).ThrowIfInvalid();
+            var result = await auth.LoginAsync(request.Email, request.Password, http.Connection.RemoteIpAddress?.ToString(),
                 http.Request.Headers.UserAgent.ToString() is { Length: > 0 } ua ? ua[..Math.Min(ua.Length, 512)] : null, ct);
             SessionCookies.Issue(http, result.SessionToken, result.Session.ExpiresAt);
             csrf.IssueCookie(http, result.Session.Id);

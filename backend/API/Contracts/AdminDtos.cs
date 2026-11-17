@@ -13,7 +13,8 @@ public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSi
 // Authentication and account
 // ---------------------------------------------------------------------------------------------
 
-public sealed record LoginRequest(string Username, string Password);
+/// <summary>Sign in with the account's email address (case does not matter) and password.</summary>
+public sealed record LoginRequest(string Email, string Password);
 
 public sealed record LoginResponse(bool MfaRequired, bool MfaSetupRequired, CurrentUserDto User);
 

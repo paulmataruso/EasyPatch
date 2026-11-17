@@ -48,10 +48,11 @@ problem.
 
 | Symptom | Fix |
 |---|---|
-| "Invalid username or password" for a correct password | The account may be locked after five failed attempts. The lockout starts at 15 minutes and doubles with each lockout, up to 24 hours. Wait, or run `docker compose run --rm api unlock --username <name>` |
+| "Email or password is incorrect" for a correct password | Users sign in with their email address, not their username. The account may also be locked after five failed attempts. The lockout starts at 15 minutes and doubles with each lockout, up to 24 hours. Wait, or run `docker compose run --rm api unlock --email <address>` |
 | Authenticator codes are rejected | The authenticator device's clock is wrong (codes are valid for ±30 seconds), or the code was already used (each code works once). Use a recovery code, or have a SuperAdmin reset MFA under **Settings → Users** |
-| Lost MFA device and no recovery codes | Another SuperAdmin resets MFA under **Settings → Users**. If none can sign in: `docker compose run --rm api reset-mfa --username <name>` |
-| Forgotten password | A SuperAdmin creates a reset link under **Settings → Users**, or on the host: `docker compose run --rm api reset-password --username <name>` |
+| Lost MFA device and no recovery codes | Another SuperAdmin resets MFA under **Settings → Users**. If none can sign in: `docker compose run --rm api reset-mfa --email <address>` |
+| Forgotten password | A SuperAdmin creates a reset link under **Settings → Users**, or on the host: `docker compose run --rm api reset-password --email <address>` |
+| The upgrade stops with "these addresses belong to more than one user" | Users sign in with their email address, so no two users may have the same address (ignoring case). Start the previous version again, give each of the listed users a different address under **Settings → Users**, then upgrade again |
 | Signed out unexpectedly | Sessions end after the idle timeout (default 30 minutes) or the maximum session length (default 12 hours). Both are under **Settings → Server settings** |
 | `403` with code `csrf_failed` | The page was open across a sign-out or session change. Reload it |
 | A script with an API token gets `401` | The token is wrong, expired or revoked (see **Settings → API tokens**), or the header is not exactly `Authorization: Bearer ept_…`. A request that also sends the console's session cookie is authenticated by the session instead |

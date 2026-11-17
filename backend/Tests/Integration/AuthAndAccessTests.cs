@@ -22,12 +22,70 @@ public sealed class AuthTests(PostgresFixture postgres) : IntegrationTest(postgr
         }
 
         await SuperAdminAsync();
-        foreach (var (user, password) in new[] { ("root", "wrong-password-123"), ("nobody", DefaultPassword) })
+        // The username is not a sign-in name: only the email address is.
+        foreach (var (user, password) in new[] { (EmailOf("root"), "wrong-password-123"), (EmailOf("nobody"), DefaultPassword), ("root", DefaultPassword) })
         {
             using var response = await http.PostAsJsonAsync(new Uri("/api/v1/auth/login", UriKind.Relative), new LoginRequest(user, password), TestJson.Options);
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
             Assert.Equal("invalid_credentials", await AdminSession.ProblemCodeAsync(response)); // same answer for unknown users
         }
+
+        var audited = await WithDbAsync(db => db.AuditLogs.Where(a => a.Action == "auth.login_failed").Select(a => a.Details).ToListAsync());
+        Assert.Contains(audited, d => d != null && d.Contains("nobody@example.test", StringComparison.Ordinal));
+        Assert.DoesNotContain(audited, d => d != null && d.Contains(DefaultPassword, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Users_sign_in_with_their_email_address_in_any_case()
+    {
+        var root = await SuperAdminAsync();
+        await root.SendAsync<CreateUserResponse>(HttpMethod.Post, "/api/v1/users",
+            new CreateUserRequest("jane", "  Jane.Doe@Example.TEST ", UserRole.Admin, DefaultPassword, null), HttpStatusCode.Created);
+        Assert.Equal("jane.doe@example.test", await WithDbAsync(db => db.Users.Where(u => u.Username == "jane").Select(u => u.Email).FirstAsync()));
+
+        var http = NewHttpClient(new BrowserHandler());
+        using (var ok = await http.PostAsJsonAsync(new Uri("/api/v1/auth/login", UriKind.Relative),
+                   new LoginRequest("JANE.DOE@example.test ", DefaultPassword), TestJson.Options))
+        {
+            Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        }
+
+        using var byName = await NewHttpClient(new BrowserHandler()).PostAsJsonAsync(new Uri("/api/v1/auth/login", UriKind.Relative),
+            new LoginRequest("jane", DefaultPassword), TestJson.Options);
+        Assert.Equal(HttpStatusCode.Unauthorized, byName.StatusCode);
+    }
+
+    [Fact]
+    public async Task Email_addresses_are_unique_ignoring_case_and_must_be_valid()
+    {
+        var root = await SuperAdminAsync();
+        await root.SendAsync<CreateUserResponse>(HttpMethod.Post, "/api/v1/users",
+            new CreateUserRequest("alice", "alice@example.test", UserRole.Admin, DefaultPassword, null), HttpStatusCode.Created);
+        await root.ExpectAsync(HttpMethod.Post, "/api/v1/users", new CreateUserRequest("alice2", "ALICE@example.test", UserRole.Admin, null, null),
+            HttpStatusCode.Conflict, "email_in_use");
+        await root.ExpectAsync(HttpMethod.Post, "/api/v1/users", new CreateUserRequest("alice", "alice.other@example.test", UserRole.Admin, null, null),
+            HttpStatusCode.Conflict, "username_in_use");
+        foreach (var bad in new[] { "alice", "Alice <alice3@example.test>", "a b@example.test", "@example.test", "alice3@" })
+        {
+            await root.ExpectAsync(HttpMethod.Post, "/api/v1/users", new CreateUserRequest("alice3", bad, UserRole.Admin, null, null),
+                HttpStatusCode.BadRequest, "validation_failed");
+        }
+
+        var bob = await root.SendAsync<CreateUserResponse>(HttpMethod.Post, "/api/v1/users",
+            new CreateUserRequest("bob", "bob@example.test", UserRole.Admin, DefaultPassword, null), HttpStatusCode.Created);
+        await root.ExpectAsync(HttpMethod.Put, $"/api/v1/users/{bob.User.Id}", new UpdateUserRequest("Alice@Example.test", null, null),
+            HttpStatusCode.Conflict, "email_in_use");
+        await root.ExpectAsync(HttpMethod.Put, $"/api/v1/users/{bob.User.Id}", new UpdateUserRequest("not-an-address", null, null),
+            HttpStatusCode.BadRequest, "validation_failed");
+
+        // The database refuses two addresses that differ only in case even if a row bypasses the application.
+        var duplicate = await Assert.ThrowsAnyAsync<DbUpdateException>(() => WithDbAsync(async db =>
+        {
+            var row = await db.Users.FirstAsync(u => u.Username == "bob");
+            row.Email = "ALICE@EXAMPLE.TEST";
+            await db.SaveChangesAsync();
+        }));
+        Assert.Contains("IX_users_email_lower", duplicate.InnerException?.Message ?? string.Empty, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -37,12 +95,14 @@ public sealed class AuthTests(PostgresFixture postgres) : IntegrationTest(postgr
         var http = NewHttpClient(new BrowserHandler());
         for (var i = 0; i < 5; i++)
         {
-            using var bad = await http.PostAsJsonAsync(new Uri("/api/v1/auth/login", UriKind.Relative), new LoginRequest("root", "wrong-password-123"), TestJson.Options);
+            using var bad = await http.PostAsJsonAsync(new Uri("/api/v1/auth/login", UriKind.Relative), new LoginRequest(EmailOf("root"), "wrong-password-123"),
+                TestJson.Options);
             Assert.Equal(HttpStatusCode.Unauthorized, bad.StatusCode);
         }
 
         // Correct password while locked: still rejected, with the same generic error.
-        using (var locked = await http.PostAsJsonAsync(new Uri("/api/v1/auth/login", UriKind.Relative), new LoginRequest("root", DefaultPassword), TestJson.Options))
+        using (var locked = await http.PostAsJsonAsync(new Uri("/api/v1/auth/login", UriKind.Relative), new LoginRequest(EmailOf("root"), DefaultPassword),
+                   TestJson.Options))
         {
             Assert.Equal(HttpStatusCode.Unauthorized, locked.StatusCode);
             Assert.Equal("invalid_credentials", await AdminSession.ProblemCodeAsync(locked));
@@ -52,7 +112,8 @@ public sealed class AuthTests(PostgresFixture postgres) : IntegrationTest(postgr
         Assert.Contains("auth.locked_out", await WithDbAsync(db => db.AuditLogs.Select(a => a.Action).ToListAsync()));
 
         Clock.Advance(TimeSpan.FromMinutes(16));
-        using var ok = await http.PostAsJsonAsync(new Uri("/api/v1/auth/login", UriKind.Relative), new LoginRequest("root", DefaultPassword), TestJson.Options);
+        using var ok = await http.PostAsJsonAsync(new Uri("/api/v1/auth/login", UriKind.Relative), new LoginRequest(EmailOf("root"), DefaultPassword),
+            TestJson.Options);
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
     }
 
@@ -66,7 +127,8 @@ public sealed class AuthTests(PostgresFixture postgres) : IntegrationTest(postgr
         // A second sign-in requires the second factor before any data is available.
         var browser = new BrowserHandler();
         var second = new AdminSession(NewHttpClient(browser), browser, "root", DefaultPassword) { MfaSecret = first.MfaSecret };
-        var login = await second.SendAsync<LoginResponse>(HttpMethod.Post, "/api/v1/auth/login", new LoginRequest("root", DefaultPassword), HttpStatusCode.OK);
+        var login = await second.SendAsync<LoginResponse>(HttpMethod.Post, "/api/v1/auth/login", new LoginRequest(EmailOf("root"), DefaultPassword),
+            HttpStatusCode.OK);
         Assert.True(login.MfaRequired);
         using (var blocked = await second.Http.GetAsync(new Uri("/api/v1/organizations", UriKind.Relative)))
         {
@@ -84,7 +146,7 @@ public sealed class AuthTests(PostgresFixture postgres) : IntegrationTest(postgr
         // The same code cannot be used again (third session, same TOTP step).
         var thirdBrowser = new BrowserHandler();
         var third = new AdminSession(NewHttpClient(thirdBrowser), thirdBrowser, "root", DefaultPassword);
-        await third.SendAsync<LoginResponse>(HttpMethod.Post, "/api/v1/auth/login", new LoginRequest("root", DefaultPassword), HttpStatusCode.OK);
+        await third.SendAsync<LoginResponse>(HttpMethod.Post, "/api/v1/auth/login", new LoginRequest(EmailOf("root"), DefaultPassword), HttpStatusCode.OK);
         await third.ExpectAsync(HttpMethod.Post, "/api/v1/auth/mfa/verify", new MfaCodeRequest(code), HttpStatusCode.Unauthorized, "invalid_mfa_code");
     }
 

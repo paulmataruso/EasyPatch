@@ -104,7 +104,7 @@ erDiagram
 
 | Table | Key columns / notes |
 |---|---|
-| `users` | username, email, Argon2id `password_hash`, `role` (SuperAdmin, Admin, ReadOnly), MFA secret (protected with ASP.NET Data Protection), recovery code hashes, lockout counters, `security_stamp` |
+| `users` | username (display name), email (the sign-in name; stored in lower case, unique on `lower(email)`), Argon2id `password_hash`, `role` (SuperAdmin, Admin, ReadOnly), MFA secret (protected with ASP.NET Data Protection), recovery code hashes, lockout counters, `security_stamp` |
 | `user_sessions` | SHA-256 of the session token, MFA-completed flag, idle and absolute expiry, `revoked_at` |
 | `user_organization_access` | When a non-SuperAdmin user has rows here, they can only see those organizations. No rows means all organizations. Managed under Settings → Users. |
 | `password_reset_tokens` | Hashed, single-use, expiring tokens issued by an administrator |

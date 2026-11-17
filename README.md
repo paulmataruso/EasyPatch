@@ -219,12 +219,12 @@ git clone --branch v1.9.0 https://github.com/paulmataruso/EasyPatch.git easypatc
 $EDITOR .env                              # set EASYPATCH_DOMAIN and ACME_EMAIL
 docker compose pull                       # ghcr.io/paulmataruso/easypatch-server and -proxy
 docker compose up -d
-docker compose run --rm api create-admin --username admin --email admin@example.com
+docker compose run --rm api create-admin --email admin@example.com
 ```
 
 Then:
 
-1. Open `https://<EASYPATCH_DOMAIN>`, sign in with the printed temporary password, set up MFA
+1. Open `https://<EASYPATCH_DOMAIN>`, sign in with that email address and the printed temporary password, set up MFA
    and choose a new password.
 2. Download the agent packages (MSI, `.deb`, `.rpm` and their `.sig` files) from the
    [release](https://github.com/paulmataruso/EasyPatch/releases/latest) into

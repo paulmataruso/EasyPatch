@@ -73,20 +73,23 @@ ready. Caddy requests the certificate on first start; follow it with
 ## 4. Create the first administrator
 
 ```bash
-docker compose run --rm api create-admin --username admin --email admin@example.com
+docker compose run --rm api create-admin --email admin@example.com
 ```
 
-This creates a SuperAdmin and prints a temporary password once. The password is not logged.
+This creates a SuperAdmin who signs in with that email address and prints a temporary password
+once. The password is not logged. Users always sign in with their email address (case does not
+matter); `--name` sets the account name shown in the console and the audit log (by default the
+part of the address before `@`).
 To set the password yourself instead, pass `--password-stdin` and supply it on standard input
 (use `-T` so Compose passes stdin through):
 
 ```bash
-docker compose run --rm -T api create-admin --username admin --email admin@example.com --password-stdin
+docker compose run --rm -T api create-admin --email admin@example.com --password-stdin
 ```
 
 ## 5. First sign-in
 
-Open `https://<EASYPATCH_DOMAIN>` and sign in with the temporary password. Before anything else
+Open `https://<EASYPATCH_DOMAIN>` and sign in with the email address and the temporary password. Before anything else
 the console requires you to:
 
 1. **Set up multi-factor authentication**: scan the QR code with an authenticator app, enter a
@@ -266,10 +269,10 @@ The API image includes administration commands. Run them with
 | Command | Purpose |
 |---|---|
 | `migrate` | Apply database migrations (the `migrate` service runs this automatically) |
-| `create-admin --username <name> --email <email> [--password-stdin]` | Create a SuperAdmin |
-| `reset-password --username <name> [--password-stdin]` | Reset a password and revoke the user's sessions. A generated password must be changed at next sign-in |
-| `reset-mfa --username <name>` | Remove a user's MFA and revoke their sessions. They enroll again at next sign-in |
-| `unlock --username <name>` | Clear a login lockout |
+| `create-admin --email <email> [--name <name>] [--password-stdin]` | Create a SuperAdmin who signs in with `<email>`. `<name>` is the account name shown in the console (default: the part of the address before `@`) |
+| `reset-password --email <email> [--password-stdin]` | Reset a password and revoke the user's sessions. A generated password must be changed at next sign-in |
+| `reset-mfa --email <email>` | Remove a user's MFA and revoke their sessions. They enroll again at next sign-in |
+| `unlock --email <email>` | Clear a login lockout |
 | `help` | List the commands |
 
 These are for recovery when no SuperAdmin can sign in. Day-to-day, a SuperAdmin uses
@@ -303,7 +306,7 @@ credential lifetime, retention and session timeouts, is under **Settings → Ser
 ```bash
 # in .env: EASYPATCH_DOMAIN=localhost (ACME_EMAIL must be set but is not used)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm api create-admin --username admin --email admin@example.com
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm api create-admin --email admin@example.com
 ```
 
 Open `https://localhost:8443` and accept the certificate warning, or trust Caddy's root

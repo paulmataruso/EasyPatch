@@ -10,7 +10,8 @@ namespace EasyPatch.Api.Cli;
 
 /// <summary>
 /// Operational commands run with the API image, for example <c>docker compose run --rm migrate</c> or
-/// <c>docker compose run --rm api create-admin --username admin --email admin@example.com</c>.
+/// <c>docker compose run --rm api create-admin --email admin@example.com</c>. Users are found by their email address, the
+/// only name they sign in with.
 /// Generated passwords are printed to the console once and are never logged.
 /// </summary>
 public static class AdminCli
@@ -56,12 +57,13 @@ public static class AdminCli
 
                 case "create-admin":
                 {
-                    var username = Require(options, "username");
                     var email = Require(options, "email");
+                    // --username is the older name of --name (the account name shown in the console and the audit log).
+                    var name = Optional(options, "name") ?? Optional(options, "username") ?? NameFromEmail(email);
                     var auth = sp.GetRequiredService<AuthService>();
                     var db = sp.GetRequiredService<EasyPatchDbContext>();
                     var (password, generated) = await ReadOrGeneratePasswordAsync(options);
-                    var user = await auth.CreateUserAsync(username, email, UserRole.SuperAdmin, password);
+                    var user = await auth.CreateUserAsync(name, email, UserRole.SuperAdmin, password);
                     if (generated)
                     {
                         var tracked = await db.Users.FirstAsync(u => u.Id == user.Id);
@@ -69,7 +71,7 @@ public static class AdminCli
                         await db.SaveChangesAsync();
                     }
 
-                    Console.WriteLine($"Created SuperAdmin '{user.Username}'.");
+                    Console.WriteLine($"Created SuperAdmin '{user.Username}'. Sign in with {user.Email}.");
                     PrintPassword(password, generated);
                     return 0;
                 }
@@ -79,7 +81,7 @@ public static class AdminCli
                     var db = sp.GetRequiredService<EasyPatchDbContext>();
                     var hasher = sp.GetRequiredService<IPasswordHasher>();
                     var auth = sp.GetRequiredService<AuthService>();
-                    var user = await FindUserAsync(db, Require(options, "username"));
+                    var user = await FindUserAsync(db, options);
                     var (password, generated) = await ReadOrGeneratePasswordAsync(options);
                     var problem = PasswordPolicy.Validate(password, user.Username);
                     if (problem is not null)
@@ -96,7 +98,7 @@ public static class AdminCli
                     sp.GetRequiredService<AuditService>().Record("cli.reset_password", "User", user.Id.ToString());
                     await db.SaveChangesAsync();
                     await auth.RevokeSessionsAsync(user.Id, null);
-                    Console.WriteLine($"Password for '{user.Username}' was reset and all sessions were revoked.");
+                    Console.WriteLine($"Password for {user.Email} was reset and all sessions were revoked.");
                     PrintPassword(password, generated);
                     return 0;
                 }
@@ -105,23 +107,23 @@ public static class AdminCli
                 {
                     var db = sp.GetRequiredService<EasyPatchDbContext>();
                     var auth = sp.GetRequiredService<AuthService>();
-                    var user = await FindUserAsync(db, Require(options, "username"));
+                    var user = await FindUserAsync(db, options);
                     await auth.ResetMfaAsync(user.Id);
                     await auth.RevokeSessionsAsync(user.Id, null);
-                    Console.WriteLine($"Multi-factor authentication for '{user.Username}' was reset. They must enroll again at next sign-in.");
+                    Console.WriteLine($"Multi-factor authentication for {user.Email} was reset. They must enroll again at next sign-in.");
                     return 0;
                 }
 
                 case "unlock":
                 {
                     var db = sp.GetRequiredService<EasyPatchDbContext>();
-                    var user = await FindUserAsync(db, Require(options, "username"));
+                    var user = await FindUserAsync(db, options);
                     user.LockoutUntil = null;
                     user.FailedLoginCount = 0;
                     user.LockoutCount = 0;
                     sp.GetRequiredService<AuditService>().Record("cli.unlock", "User", user.Id.ToString());
                     await db.SaveChangesAsync();
-                    Console.WriteLine($"'{user.Username}' was unlocked.");
+                    Console.WriteLine($"{user.Email} was unlocked.");
                     return 0;
                 }
             }
@@ -145,12 +147,15 @@ public static class AdminCli
     private static void PrintHelp() => Console.WriteLine("""
         EasyPatch administration commands:
           migrate                                         Apply database migrations.
-          create-admin --username <name> --email <email> [--password-stdin]
-                                                          Create a SuperAdmin. Without --password-stdin a strong temporary
+          create-admin --email <email> [--name <name>] [--password-stdin]
+                                                          Create a SuperAdmin who signs in with <email>. <name> is the account
+                                                          name shown in the console and the audit log (default: the part of the
+                                                          address before '@'). Without --password-stdin a strong temporary
                                                           password is generated, printed once, and must be changed at first sign-in.
-          reset-password --username <name> [--password-stdin]
-          reset-mfa --username <name>                     Remove MFA so the user enrolls again at next sign-in.
-          unlock --username <name>                        Clear a login lockout.
+          reset-password --email <email> [--password-stdin]
+          reset-mfa --email <email>                       Remove MFA (authenticator app, security keys and passkeys) so the
+                                                          user enrolls again at next sign-in.
+          unlock --email <email>                          Clear a login lockout.
         """);
 
     private static Dictionary<string, string?> ParseOptions(string[] args)
@@ -201,10 +206,28 @@ public static class AdminCli
         }
     }
 
-    private static async Task<User> FindUserAsync(EasyPatchDbContext db, string username)
+    private static string? Optional(Dictionary<string, string?> options, string key) =>
+        options.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) && value != "true" ? value : null;
+
+    /// <summary>The default account name: the part of the address before '@', with characters a username cannot have
+    /// replaced by '-'.</summary>
+    internal static string NameFromEmail(string email)
     {
-        var normalized = AuthService.NormalizeUsername(username);
-        return await db.Users.FirstOrDefaultAsync(u => u.Username == normalized) ?? throw AppException.NotFound($"User '{normalized}'");
+        var local = AuthService.NormalizeEmail(email).Split('@')[0];
+        var name = new string(local.Select(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' ? c : '-').ToArray());
+        return name.Length > 64 ? name[..64] : name;
+    }
+
+    /// <summary>Users are found by email address. <c>--username</c> is refused with a hint instead of being ignored.</summary>
+    private static async Task<User> FindUserAsync(EasyPatchDbContext db, Dictionary<string, string?> options)
+    {
+        if (!options.ContainsKey("email") && options.ContainsKey("username"))
+        {
+            throw new ArgumentException("Users are now identified by email address: use --email <address> instead of --username.");
+        }
+
+        var normalized = AuthService.NormalizeEmail(Require(options, "email"));
+        return await db.Users.FirstOrDefaultAsync(u => u.Email == normalized) ?? throw AppException.NotFound($"User with email '{normalized}'");
     }
 
     private sealed class CliActorContext : IActorContext

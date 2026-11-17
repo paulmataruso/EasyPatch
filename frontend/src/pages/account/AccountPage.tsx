@@ -24,8 +24,8 @@ export function AccountPage() {
         <Card title="Profile">
           <KeyValueList
             items={[
+              ['Email (sign-in)', user.email],
               ['Username', user.username],
-              ['Email', user.email],
               ['Role', humanize(user.role)],
               ['Organization access', user.role === 'SuperAdmin' || orgNames.length === 0 ? 'All organizations' : orgNames.join(', ')],
               ['Last sign-in', user.lastLoginAt ? `${formatDateTime(user.lastLoginAt)} (${formatRelative(user.lastLoginAt)})` : '—'],

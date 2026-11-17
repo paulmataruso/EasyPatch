@@ -279,8 +279,9 @@ export interface PagedResult<T> {
 // Authentication and account
 // ---------------------------------------------------------------------------------------------
 
+/** Users sign in with their email address (case does not matter); the username is only the account's display name. */
 export interface LoginRequest {
-  username: string;
+  email: string;
   password: string;
 }
 

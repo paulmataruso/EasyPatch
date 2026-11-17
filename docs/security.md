@@ -27,13 +27,17 @@ changes Windows Update policy values only for settings an administrator configur
 
 ## Admin authentication
 
+* **Sign-in name.** Users sign in with their email address, compared without regard to case.
+  It is the only sign-in name: the username is the account's display name in the console and
+  the audit log. Addresses are stored trimmed and in lower case, and a unique index on
+  `lower(email)` keeps two accounts from sharing an address.
 * **Passwords.** 12 to 256 characters, at least 4 distinct characters, and the username must
   not appear in the password. There are no composition rules, following NIST SP 800-63B.
 * **Rate limits and lockout.** Login, MFA verification and the password routes share a
   limit of 20 requests per minute per IP. Five consecutive failures lock the account,
   starting at 15 minutes and doubling with each lockout, capped at 24 hours. A locked account
-  gets the same "invalid username or password" answer as a wrong password, and unknown
-  usernames get it too. `unlock` (CLI) clears a lockout.
+  gets the same "email or password is incorrect" answer as a wrong password, and unknown
+  addresses get it too. `unlock` (CLI) clears a lockout.
 * **Multi-factor authentication (MFA).** TOTP (RFC 6238, SHA-1, 6 digits, 30 s step, ±1 step
   tolerance). A time step can only be used once.
   * MFA is **required by default** (`RequireMfa` in server settings). Users without MFA can

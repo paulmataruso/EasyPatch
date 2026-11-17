@@ -223,8 +223,10 @@ function CreateUserDialog({ open, onClose, onCreated }: { open: boolean; onClose
     <Dialog open={open} onClose={onClose} title="New user">
       <form onSubmit={submit} className="flex flex-col gap-3.5">
         <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-          <TextField label="Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required maxLength={100} autoComplete="off" autoFocus />
-          <TextField label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required maxLength={320} autoComplete="off" />
+          <TextField label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required maxLength={256} autoComplete="off" autoFocus
+            hint="The user signs in with this address." />
+          <TextField label="Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required maxLength={64} autoComplete="off"
+            hint="Shown in the console and the audit log." />
         </div>
         <SelectField label="Role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })} hint={ROLE_HELP[form.role]}>
           {USER_ROLES.map((r) => (
@@ -300,7 +302,8 @@ function EditUserDialog({ user, isSelf, onClose }: { user: UserDto | null; isSel
           }}
           className="flex flex-col gap-3.5"
         >
-          <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required maxLength={320} />
+          <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required maxLength={256}
+            hint="The user signs in with this address. A change takes effect at their next sign-in." />
           <SelectField label="Role" value={role} onChange={(e) => setRole(e.target.value as UserRole)} hint={ROLE_HELP[role]} disabled={isSelf}>
             {USER_ROLES.map((r) => (
               <option key={r} value={r}>

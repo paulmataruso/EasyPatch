@@ -2,7 +2,7 @@
 #   ./scripts/init-secrets.sh        # once: database password, data directories, .env
 #   docker compose build
 #   docker compose up -d
-#   docker compose run --rm api create-admin --username admin --email you@example.com
+#   docker compose run --rm api create-admin --email you@example.com
 name: easypatch
 
 x-server-env: &server-env

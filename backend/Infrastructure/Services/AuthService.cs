@@ -36,19 +36,29 @@ public sealed class AuthService(
 
     public static string NormalizeUsername(string username) => username.Trim().ToLowerInvariant();
 
+    /// <summary>The form in which email addresses are stored and looked up: sign-in uses the email address, ignoring case.</summary>
+    public static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
+
+    /// <summary>A plain address (<c>name@domain</c>, no display name or angle brackets) of at most 256 characters.</summary>
+    public static bool IsValidEmail(string normalized) =>
+        normalized.Length is >= 3 and <= 256 && !normalized.Any(char.IsWhiteSpace) &&
+        System.Net.Mail.MailAddress.TryCreate(normalized, out var address) && address.Address == normalized &&
+        address.User.Length > 0 && address.Host.Length > 0;
+
     // -------------------------------------------------------------------------------------------
     // Login / sessions
     // -------------------------------------------------------------------------------------------
 
-    public async Task<LoginResult> LoginAsync(string username, string password, string? ip, string? userAgent, CancellationToken ct = default)
+    /// <summary>Signs in with the account's email address (the only sign-in name) and password.</summary>
+    public async Task<LoginResult> LoginAsync(string email, string password, string? ip, string? userAgent, CancellationToken ct = default)
     {
         var now = clock.GetUtcNow();
-        var normalized = NormalizeUsername(username ?? string.Empty);
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Username == normalized, ct);
+        var normalized = NormalizeEmail(email ?? string.Empty);
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == normalized, ct);
         if (user is null || !user.IsActive)
         {
             hasher.Verify(password ?? string.Empty, DummyHash); // equalize timing
-            audit.Record("auth.login_failed", "User", null, details: new { username = normalized, reason = "unknown_or_inactive" });
+            audit.Record("auth.login_failed", "User", null, details: new { email = normalized, reason = "unknown_or_inactive" });
             await db.SaveChangesAsync(ct);
             throw InvalidCredentials();
         }
@@ -341,15 +351,20 @@ public sealed class AuthService(
             throw AppException.BadRequest("Usernames must be 3–64 characters: letters, digits, '.', '-', '_' or '@'.", "validation_failed");
         }
 
-        if (string.IsNullOrWhiteSpace(email) || email.Length > 256 || !email.Contains('@', StringComparison.Ordinal))
+        var emailNormalized = NormalizeEmail(email ?? string.Empty);
+        if (!IsValidEmail(emailNormalized))
         {
             throw AppException.BadRequest("A valid email address is required.", "validation_failed");
         }
 
-        var emailNormalized = email.Trim().ToLowerInvariant();
-        if (await db.Users.AnyAsync(u => u.Username == normalized || u.Email == emailNormalized, ct))
+        if (await db.Users.AnyAsync(u => u.Email == emailNormalized, ct))
         {
-            throw AppException.Conflict("A user with that username or email already exists.", "duplicate");
+            throw AppException.Conflict("Another user already has that email address.", "email_in_use");
+        }
+
+        if (await db.Users.AnyAsync(u => u.Username == normalized, ct))
+        {
+            throw AppException.Conflict("Another user already has that username.", "username_in_use");
         }
 
         var now = clock.GetUtcNow();
@@ -386,15 +401,15 @@ public sealed class AuthService(
 
         if (email is not null)
         {
-            var normalized = email.Trim().ToLowerInvariant();
-            if (!normalized.Contains('@', StringComparison.Ordinal) || normalized.Length > 256)
+            var normalized = NormalizeEmail(email);
+            if (!IsValidEmail(normalized))
             {
                 throw AppException.BadRequest("A valid email address is required.", "validation_failed");
             }
 
             if (await db.Users.AnyAsync(u => u.Email == normalized && u.Id != userId, ct))
             {
-                throw AppException.Conflict("That email address is already in use.", "duplicate");
+                throw AppException.Conflict("Another user already has that email address.", "email_in_use");
             }
 
             user.Email = normalized;
@@ -540,5 +555,5 @@ public sealed class AuthService(
     }
 
     private static AppException InvalidCredentials() =>
-        AppException.Unauthorized("invalid_credentials", "Invalid username or password, or the account is temporarily locked.");
+        AppException.Unauthorized("invalid_credentials", "Email or password is incorrect, or the account is temporarily locked.");
 }

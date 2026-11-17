@@ -3,6 +3,19 @@
 All notable changes to EasyPatch are listed here. Versions follow `MAJOR.MINOR.BUILD`; the server,
 the web console and the agents share one version number.
 
+## [Unreleased]
+
+### Changed
+
+- **Users sign in with their email address**, not their username; case does not matter. The
+  username stays as the account's name in the console and the audit log. The upgrade adds a
+  unique index on `lower(email)` and stops, changing nothing, if two users share an address
+  in different case (give one of them another address first). The administration commands
+  `create-admin`, `reset-password`, `reset-mfa` and `unlock` take `--email` instead of
+  `--username`; `create-admin --name` sets the account name. Creating or changing a user with
+  an address another user has answers `409 email_in_use`, a taken username
+  `409 username_in_use`.
+
 ## [1.9.0] - 2026-11-16
 
 > **The macOS agent added in this release is experimental: it is in development and not for

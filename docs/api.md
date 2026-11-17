@@ -64,7 +64,7 @@ administrator approval.
 
 | Method | Route | Notes |
 |---|---|---|
-| POST | `/login` | `{username, password}` → `{mfaRequired, mfaSetupRequired, user}`. Sets the session and `XSRF-TOKEN` cookies. |
+| POST | `/login` | `{email, password}` → `{mfaRequired, mfaSetupRequired, user}`. The email address is the only sign-in name (case does not matter). Sets the session and `XSRF-TOKEN` cookies. A wrong address or password, an inactive or a locked account all answer `401 invalid_credentials`. |
 | POST | `/mfa/verify` | `{code}` (TOTP or recovery code) completes the sign-in |
 | POST | `/logout` | Revokes the current session |
 | GET | `/me` | Current user, role and MFA state. Also refreshes the `XSRF-TOKEN` cookie. |
@@ -82,10 +82,13 @@ Until a user has completed every sign-in step, other routes answer `403` with
 
 ### Users (`/api/v1/users`, SuperAdmin)
 
-`GET /`, `POST /` (without a password the response contains a one-time set-password link),
-`GET /{id}`, `PUT /{id}` (`email`, `role`, `isActive`), `POST /{id}/reset-link`,
+`GET /`, `POST /` (`{username, email, role, password, organizationIds}`; without a password
+the response contains a one-time set-password link), `GET /{id}`, `PUT /{id}` (`email`, `role`,
+`isActive`), `POST /{id}/reset-link`,
 `POST /{id}/mfa/reset`, `POST /{id}/sessions/revoke`, `PUT /{id}/organizations`
-(`{organizationIds[]}`; an empty list means all organizations).
+(`{organizationIds[]}`; an empty list means all organizations). An email address that another
+user has (ignoring case) answers `409 email_in_use`, a taken username `409 username_in_use`,
+and an address that is not a plain `name@domain` `400 validation_failed`.
 
 ### API tokens (`/api/v1/api-tokens`, SuperAdmin)
 

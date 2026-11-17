@@ -21,7 +21,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const returnTo = safeReturnTo(params.get('returnTo'));
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -31,7 +31,7 @@ export function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      const result = await request<LoginResponse>('POST', '/auth/login', { body: { username, password }, silentAuth: true });
+      const result = await request<LoginResponse>('POST', '/auth/login', { body: { email: email.trim(), password }, silentAuth: true });
       setPassword('');
       setUser(result.user);
       await refresh();
@@ -50,7 +50,16 @@ export function LoginPage() {
   return (
     <AuthShell title="Sign in" subtitle="EasyPatch administrator console">
       <form onSubmit={submit} className="flex flex-col gap-3.5" noValidate>
-        <TextField label="Username" name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus />
+        <TextField
+          label="Email address"
+          name="email"
+          type="email"
+          autoComplete="username"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          autoFocus
+        />
         <TextField
           label="Password"
           name="password"
@@ -61,7 +70,7 @@ export function LoginPage() {
           required
         />
         <InlineError error={error} />
-        <Button type="submit" variant="primary" loading={busy} disabled={!username || !password} className="mt-1 w-full">
+        <Button type="submit" variant="primary" loading={busy} disabled={!email.trim() || !password} className="mt-1 w-full">
           Sign in
         </Button>
         <p className="text-center text-xs text-muted">Forgot your password? Ask a super administrator for a reset link.</p>
